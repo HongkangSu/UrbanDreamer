@@ -47,7 +47,6 @@ from dreamer4.urban_routing.urb_fair_protocol import (
 )
 from scripts.eval_sumo import (
     _load_hdv_learning_state,
-    _parse_fixed_av_route_probs,
     _merge_hdv_learning_state,
     _resolve_optional_path,
     _reuse_route_artifacts,
@@ -415,7 +414,6 @@ def parse_args() -> argparse.Namespace:
                    help="Stop completion drain after this many consecutive ticks without new arrivals. <=0 disables.")
     p.add_argument("--sumo_time_to_teleport", type=str, default="",
                    help="Override RouteRL's SUMO --time-to-teleport. Empty preserves the route artifact default.")
-    p.set_defaults(fixed_av_route_index=-1, fixed_av_route_probs="")
     p.add_argument("--dagger_beta", type=float, default=0.5)
     p.add_argument("--dagger_noise", type=float, default=0.3)
     p.add_argument("--checkpoint_every", type=int, default=10,
@@ -479,11 +477,6 @@ def main() -> int:
     args = parse_args()
     settings_path = str(Path(args.settings).resolve())
     cfg = load_settings_file(settings_path)
-    fixed_av_route_probs = _parse_fixed_av_route_probs(
-        args.fixed_av_route_probs,
-        int(cfg.get("N_ROUTES", "4") or 4),
-    )
-
     output_dir = Path(args.output_dir or _default_output_dir(cfg)).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     task_name = args.task_name or _default_task_name(cfg)
@@ -583,8 +576,6 @@ def main() -> int:
         av_fraction=float(cfg.get("RATIO_MACHINES", "0") or 0.0),
         random_av_fraction=float(args.random_av_fraction),
         epsilon=float(args.epsilon),
-        fixed_av_route_index=int(args.fixed_av_route_index),
-        fixed_av_route_probs=fixed_av_route_probs,
         decision_steps=int(cfg.get("EPISODE_STEPS", "60") or 60),
         av_candidate_source=str(cfg.get("AV_CANDIDATE_SOURCE", "current_to_dest") or "current_to_dest"),
         safe_reroute_min_remaining_m=float(args.safe_reroute_min_remaining_m),

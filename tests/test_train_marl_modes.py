@@ -9,7 +9,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "dreamer4", "ur
 from departure_schedule import compute_avg_route_steps  # noqa: E402
 from train_marl import (  # noqa: E402
     ActionHorizonProxyReward,
-    MeanFieldRoutePolicy,
     OfflineInitDataset,
     TrainConfig,
     CentralizedLatentValueCritic,
@@ -45,11 +44,9 @@ from train_marl import (  # noqa: E402
     load_dreamer_checkpoint,
     normalize_stats_history_defaults,
     maybe_resume_dreamer_checkpoint,
-    ppo_update,
     resolve_wm_candidate_edge_cost_source,
     restore_rng_state,
     save_dreamer_checkpoint,
-    select_imagination_mode,
     uses_explicit_dynamic_candidate_edge_cost_source,
     vehicle_mode_action_supported,
     vehicle_mode_obs_dim,
@@ -81,18 +78,11 @@ def test_offline_init_dataset_can_sample_step_aligned_frames(tmp_path):
     assert clamped == {2.0, 5.0}
 
 
-def test_select_imagination_mode_vehicle_uses_dynamic_rollout():
-    assert select_imagination_mode(mean_field=True, agent_level="vehicle") == "vehicle_dynamic"
-    assert select_imagination_mode(mean_field=False, agent_level="vehicle") == "single_agent"
-
-
-def test_vehicle_mode_action_supported_accepts_raw_edge_action_with_extra_depart_context():
+def test_vehicle_mode_action_supported_accepts_raw_edge_action():
     assert vehicle_mode_action_supported(
         n_edges=853,
         action_dim=67,
         raw_action_dim=853,
-        action_compressor_input_dim=853,
-        action_compressor_output_dim=32,
     ) is True
 
 
@@ -1355,33 +1345,9 @@ def test_dreamer_step_reward_can_use_action_horizon_proxy():
     assert torch.isclose(reward, torch.tensor(-(1.0 + 0.5 * 120.0)))
 
 
-def test_ppo_update_handles_single_sample_batch_without_nan():
-    cfg = TrainConfig(
-        minibatch_size=1,
-        n_ppo_epochs=1,
-        clip_eps=0.2,
-        value_coef=0.25,
-        entropy_coef=0.0,
-    )
-    policy = MeanFieldRoutePolicy(obs_dim=5, n_routes=2, hidden_dim=8, n_hidden_layers=1)
-    optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
-    batch = {
-        "obs": torch.zeros(1, 5),
-        "critic_obs": torch.zeros(1, 5),
-        "actions": torch.zeros(1, 2),
-        "logprobs": torch.zeros(1),
-        "advantages": torch.zeros(1),
-        "returns": torch.zeros(1),
-        "value_targets": torch.zeros(1),
-    }
-    stats = ppo_update(cfg, policy, optimizer, batch, torch.device("cpu"))
-    assert np.isfinite(stats["pg_loss"])
-    assert np.isfinite(stats["value_loss"])
-
-
 def test_dreamer_checkpoint_roundtrips_extra_state(tmp_path):
     cfg = TrainConfig(checkpoint_dir=str(tmp_path))
-    actor = MeanFieldRoutePolicy(obs_dim=5, n_routes=2, hidden_dim=8, n_hidden_layers=1)
+    actor = VehicleRouteActor(obs_dim=5, n_routes=2, hidden_dim=8, n_hidden_layers=1)
     critic = CentralizedLatentValueCritic(d_spatial=5, hidden_dim=8)
     actor_optimizer = torch.optim.Adam(actor.parameters(), lr=1e-3)
     critic_optimizer = torch.optim.Adam(critic.parameters(), lr=1e-3)
@@ -1449,7 +1415,7 @@ def test_count_fresh_pending_trajs_ignores_restored_entries():
 
 
 def test_maybe_resume_dreamer_checkpoint_falls_back_on_value_error(monkeypatch):
-    actor = MeanFieldRoutePolicy(obs_dim=5, n_routes=2, hidden_dim=8, n_hidden_layers=1)
+    actor = VehicleRouteActor(obs_dim=5, n_routes=2, hidden_dim=8, n_hidden_layers=1)
     critic = CentralizedLatentValueCritic(d_spatial=5, hidden_dim=8)
     actor_optimizer = torch.optim.Adam(actor.parameters(), lr=1e-3)
     critic_optimizer = torch.optim.Adam(critic.parameters(), lr=1e-3)
@@ -1478,7 +1444,7 @@ def test_maybe_resume_dreamer_checkpoint_falls_back_on_value_error(monkeypatch):
 
 
 def test_maybe_resume_dreamer_checkpoint_returns_none_for_non_dreamer_family(monkeypatch):
-    actor = MeanFieldRoutePolicy(obs_dim=5, n_routes=2, hidden_dim=8, n_hidden_layers=1)
+    actor = VehicleRouteActor(obs_dim=5, n_routes=2, hidden_dim=8, n_hidden_layers=1)
     critic = CentralizedLatentValueCritic(d_spatial=5, hidden_dim=8)
     actor_optimizer = torch.optim.Adam(actor.parameters(), lr=1e-3)
     critic_optimizer = torch.optim.Adam(critic.parameters(), lr=1e-3)
@@ -1551,7 +1517,7 @@ def test_maybe_resume_dreamer_checkpoint_restores_rng_and_pending_trajs(tmp_path
     original_torch_state = torch.random.get_rng_state()
     try:
         cfg = TrainConfig(checkpoint_dir=str(tmp_path))
-        actor = MeanFieldRoutePolicy(obs_dim=5, n_routes=2, hidden_dim=8, n_hidden_layers=1)
+        actor = VehicleRouteActor(obs_dim=5, n_routes=2, hidden_dim=8, n_hidden_layers=1)
         critic = CentralizedLatentValueCritic(d_spatial=5, hidden_dim=8)
         actor_optimizer = torch.optim.Adam(actor.parameters(), lr=1e-3)
         critic_optimizer = torch.optim.Adam(critic.parameters(), lr=1e-3)
@@ -1626,7 +1592,7 @@ def test_dreamer_update_reports_restored_traj_no_grad_graph():
         gamma=0.99,
         gae_lambda=0.95,
     )
-    actor = MeanFieldRoutePolicy(obs_dim=5, n_routes=2, hidden_dim=8, n_hidden_layers=1)
+    actor = VehicleRouteActor(obs_dim=5, n_routes=2, hidden_dim=8, n_hidden_layers=1)
     critic = CentralizedLatentValueCritic(d_spatial=2, hidden_dim=8)
     actor_optimizer = torch.optim.Adam(actor.parameters(), lr=1e-3)
     critic_optimizer = torch.optim.Adam(critic.parameters(), lr=1e-3)

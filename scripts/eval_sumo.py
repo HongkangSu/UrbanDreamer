@@ -21,7 +21,6 @@ Usage:
 import os
 import sys
 import copy
-import math
 import json
 import argparse
 import socket
@@ -35,7 +34,6 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from torch.distributions import Normal
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 _SCRIPT_DIR   = Path(__file__).resolve().parent
@@ -277,14 +275,6 @@ def _reuse_route_artifacts_from_refs(
     return copied
 
 try:
-    from flow_projector import RouteRegistry
-except ImportError:
-    try:
-        from dreamer4.urban_routing.flow_projector import RouteRegistry
-    except ImportError:
-        RouteRegistry = None
-
-try:
     from experiment_settings import add_settings_arg, apply_stage_defaults, parse_settings_arg
 except ImportError:
     from dreamer4.urban_routing.experiment_settings import (
@@ -325,7 +315,6 @@ except ImportError:
 
 try:
     from train_marl import (
-        MultiAgentPPOBuffer,
         LazyVehiclePathCache,
         VehiclePathCache,
         build_diverse_paths_current_to_dest,
@@ -338,7 +327,6 @@ try:
 except Exception:
     try:
         from dreamer4.urban_routing.train_marl import (
-            MultiAgentPPOBuffer,
             LazyVehiclePathCache,
             VehiclePathCache,
             build_diverse_paths_current_to_dest,
@@ -349,7 +337,6 @@ except Exception:
             vehicle_mode_obs_dim,
         )
     except Exception:
-        MultiAgentPPOBuffer = None
         LazyVehiclePathCache = None
         VehiclePathCache = None
         build_diverse_paths_current_to_dest = None
@@ -401,200 +388,6 @@ try:
 except ImportError:
     tqdm = lambda x, **kw: x  # noqa: E731
 
-class SharedPolicy(nn.Module):
-    """
-    Single-agent continuous actor-critic for fleet route allocation.
-    obs = z_t.flatten()  (obs_dim,)
-    action = av_frac ∈ Δ^{K-1}  via Gaussian-in-logit-space → softmax
-    """
-
-    def __init__(
-        self,
-        obs_dim: int,
-        n_routes: int,
-        hidden_dim: int = 256,
-        n_hidden_layers: int = 2,
-    ):
-        super().__init__()
-        self.n_routes = n_routes
-
-        layers = [nn.Linear(obs_dim, hidden_dim), nn.Tanh()]
-        for _ in range(n_hidden_layers - 1):
-            layers += [nn.Linear(hidden_dim, hidden_dim), nn.Tanh()]
-        self.trunk       = nn.Sequential(*layers)
-        self.policy_head = nn.Linear(hidden_dim, n_routes)
-        self.value_head  = nn.Linear(hidden_dim, 1)
-        self.log_std     = nn.Parameter(torch.zeros(n_routes))
-
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.orthogonal_(m.weight, gain=math.sqrt(2))
-                nn.init.zeros_(m.bias)
-        nn.init.orthogonal_(self.policy_head.weight, gain=0.01)
-        nn.init.orthogonal_(self.value_head.weight,  gain=1.0)
-
-    def get_av_frac(
-        self,
-        obs: torch.Tensor,
-        deterministic: bool = True,
-    ) -> torch.Tensor:
-        h         = self.trunk(obs)
-        mu_logits = self.policy_head(h)
-
-        if deterministic:
-            return torch.softmax(mu_logits, dim=-1)
-
-        std = self.log_std.clamp(-3.0, 0.5).exp()
-        raw = Normal(mu_logits, std).sample()
-        return torch.softmax(raw, dim=-1)
-
-    def forward(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        h = self.trunk(obs)
-        return self.policy_head(h), self.value_head(h)
-
-    def get_action_and_value(
-        self,
-        obs: torch.Tensor,
-        raw_action: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        mu_logits, value = self.forward(obs)
-        std = self.log_std.clamp(-3.0, 0.5).exp()
-        dist = Normal(mu_logits, std)
-        raw = dist.rsample() if raw_action is None else raw_action
-        log_prob = dist.log_prob(raw).sum(-1)
-        entropy = dist.entropy().sum(-1).mean()
-        av_frac = torch.softmax(raw, dim=-1)
-        return av_frac, raw, log_prob, entropy, value
-
-
-class MeanFieldRoutePolicy(nn.Module):
-    """
-    Shared-weight actor-critic for mean field multi-agent routing.
-    Input per agent: (K*4 + 4) — K route features + global summary.
-    Output: μ_logits (K,), value (1,).
-    """
-
-    def __init__(
-        self,
-        obs_dim: int,
-        n_routes: int,
-        hidden_dim: int = 128,
-        n_hidden_layers: int = 2,
-    ):
-        super().__init__()
-        self.n_routes = n_routes
-
-        layers = [nn.Linear(obs_dim, hidden_dim), nn.Tanh()]
-        for _ in range(n_hidden_layers - 1):
-            layers += [nn.Linear(hidden_dim, hidden_dim), nn.Tanh()]
-        self.trunk       = nn.Sequential(*layers)
-        self.policy_head = nn.Linear(hidden_dim, n_routes)
-        self.value_head  = nn.Linear(hidden_dim, 1)
-        self.log_std     = nn.Parameter(torch.zeros(n_routes))
-
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.orthogonal_(m.weight, gain=math.sqrt(2))
-                nn.init.zeros_(m.bias)
-        nn.init.orthogonal_(self.policy_head.weight, gain=0.01)
-        nn.init.orthogonal_(self.value_head.weight,  gain=1.0)
-
-    def get_av_frac(
-        self,
-        obs: torch.Tensor,
-        deterministic: bool = True,
-    ) -> torch.Tensor:
-        """obs: (N_od, obs_dim) → av_fracs: (N_od, K)"""
-        h         = self.trunk(obs)
-        mu_logits = self.policy_head(h)
-
-        if deterministic:
-            return torch.softmax(mu_logits, dim=-1)
-
-        std = self.log_std.clamp(-3.0, 0.5).exp()
-        raw = Normal(mu_logits, std).sample()
-        return torch.softmax(raw, dim=-1)
-
-    def forward(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        h = self.trunk(obs)
-        return self.policy_head(h), self.value_head(h)
-
-    def get_action_and_value(
-        self,
-        obs: torch.Tensor,
-        raw_action: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        mu_logits, value = self.forward(obs)
-        std = self.log_std.clamp(-3.0, 0.5).exp()
-        dist = Normal(mu_logits, std)
-        raw = dist.rsample() if raw_action is None else raw_action
-        log_prob = dist.log_prob(raw).sum(-1)
-        entropy = dist.entropy().sum(-1).mean()
-        av_fracs = torch.softmax(raw, dim=-1)
-        return av_fracs, raw, log_prob, entropy, value
-
-
-def ppo_update_mean_field(
-    policy: MeanFieldRoutePolicy,
-    optimizer: torch.optim.Optimizer,
-    batch: Dict[str, torch.Tensor],
-    *,
-    device: torch.device,
-    clip_eps: float = 0.2,
-    entropy_coef: float = 0.001,
-    value_coef: float = 0.25,
-    n_ppo_epochs: int = 4,
-    minibatch_size: int = 64,
-) -> Dict[str, float]:
-    """PPO update for flattened mean-field batches."""
-    n = batch["obs"].shape[0]
-    obs = batch["obs"].to(device)
-    actions = batch["actions"].to(device)
-    old_lp = batch["logprobs"].to(device)
-    advantages = batch["advantages"].to(device)
-    returns = batch["returns"].to(device)
-
-    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-    ret_mean = returns.mean()
-    ret_std = returns.std().clamp_min(1e-8)
-    returns_norm = (returns - ret_mean) / ret_std
-
-    stats = {"pg_loss": 0.0, "value_loss": 0.0, "entropy": 0.0, "approx_kl": 0.0}
-    n_updates = 0
-
-    for _ in range(int(n_ppo_epochs)):
-        perm = torch.randperm(n, device=device)
-        for start in range(0, n, int(minibatch_size)):
-            idx = perm[start : start + int(minibatch_size)]
-            _, _, new_lp, ent, new_val = policy.get_action_and_value(obs[idx], raw_action=actions[idx])
-            ratio = (new_lp - old_lp[idx]).exp()
-            adv = advantages[idx]
-            pg_loss = -torch.min(
-                ratio * adv,
-                ratio.clamp(1 - clip_eps, 1 + clip_eps) * adv,
-            ).mean()
-            v = new_val.squeeze(-1)
-            value_loss = (v - returns_norm[idx]).pow(2).mean()
-            loss = pg_loss + value_coef * value_loss - entropy_coef * ent
-
-            optimizer.zero_grad()
-            loss.backward()
-            nn.utils.clip_grad_norm_(policy.parameters(), 0.5)
-            optimizer.step()
-
-            with torch.no_grad():
-                approx_kl = (old_lp[idx] - new_lp).mean().item()
-            stats["pg_loss"] += float(pg_loss.item())
-            stats["value_loss"] += float(value_loss.item())
-            stats["entropy"] += float(ent.item())
-            stats["approx_kl"] += float(approx_kl)
-            n_updates += 1
-
-    for k in stats:
-        stats[k] /= max(1, n_updates)
-    return stats
-
-
 def load_policy(
     ckpt_path: str,
     obs_dim:   int,
@@ -606,52 +399,37 @@ def load_policy(
     state    = torch.load(ckpt_path, map_location=device, weights_only=False)
     cfg_dict = state.get("cfg", {})
     model_family = str(state.get("model_family", cfg_dict.get("training_family", ""))).strip().lower()
+    if model_family != "dreamer_ctde":
+        raise RuntimeError(f"Unsupported policy checkpoint family {model_family!r}; expected dreamer_ctde.")
 
     hidden_dim      = int(cfg_dict.get("hidden_dim",     256))
     n_hidden_layers = int(cfg_dict.get("n_hidden_layers", 2))
 
-    # Detect mean field mode by checking if network_folder or od_file was set
-    is_mean_field = bool(cfg_dict.get("network_folder") or cfg_dict.get("od_file")
-                         or cfg_dict.get("route_registry_path"))
-
-    if model_family == "dreamer_ctde":
-        if VehicleRouteActor is None:
-            raise RuntimeError("VehicleRouteActor import unavailable for Dreamer checkpoint loading.")
-        route_cost_logit_bias = (
-            float(cfg_dict.get("vehicle_actor_route_cost_logit_bias", 0.0))
-            if bool(cfg_dict.get("vehicle_obs_include_route_costs", False))
-            else 0.0
-        )
-        policy = VehicleRouteActor(
-            obs_dim,
-            n_routes,
-            hidden_dim,
-            n_hidden_layers,
-            route_cost_logit_bias=route_cost_logit_bias,
-            architecture=str(cfg_dict.get("vehicle_actor_architecture", "mlp")),
-            include_global=bool(cfg_dict.get("vehicle_obs_include_global", True)),
-            include_route_costs=bool(cfg_dict.get("vehicle_obs_include_route_costs", False)),
-            include_fleet_pressure=bool(cfg_dict.get("vehicle_obs_include_fleet_pressure", False)),
-        ).to(device)
-        actor_state = state.get("actor", state.get("policy"))
-        if actor_state is None:
-            raise RuntimeError(f"Dreamer checkpoint missing actor state: {ckpt_path}")
-        policy.load_state_dict(actor_state)
-        policy.eval()
-        episode_saved = state.get("episode", "?")
-        print(f"  VehicleRouteActor loaded (saved at episode {episode_saved})")
-        return policy
-
-    if is_mean_field:
-        policy = MeanFieldRoutePolicy(obs_dim, n_routes, hidden_dim, n_hidden_layers).to(device)
-    else:
-        policy = SharedPolicy(obs_dim, n_routes, hidden_dim, n_hidden_layers).to(device)
-
-    policy.load_state_dict(state["policy"])
+    if VehicleRouteActor is None:
+        raise RuntimeError("VehicleRouteActor import unavailable for Dreamer checkpoint loading.")
+    route_cost_logit_bias = (
+        float(cfg_dict.get("vehicle_actor_route_cost_logit_bias", 0.0))
+        if bool(cfg_dict.get("vehicle_obs_include_route_costs", False))
+        else 0.0
+    )
+    policy = VehicleRouteActor(
+        obs_dim,
+        n_routes,
+        hidden_dim,
+        n_hidden_layers,
+        route_cost_logit_bias=route_cost_logit_bias,
+        architecture=str(cfg_dict.get("vehicle_actor_architecture", "mlp")),
+        include_global=bool(cfg_dict.get("vehicle_obs_include_global", True)),
+        include_route_costs=bool(cfg_dict.get("vehicle_obs_include_route_costs", False)),
+        include_fleet_pressure=bool(cfg_dict.get("vehicle_obs_include_fleet_pressure", False)),
+    ).to(device)
+    actor_state = state.get("actor", state.get("policy"))
+    if actor_state is None:
+        raise RuntimeError(f"Dreamer checkpoint missing actor state: {ckpt_path}")
+    policy.load_state_dict(actor_state)
     policy.eval()
     episode_saved = state.get("episode", "?")
-    policy_type = "MeanFieldRoutePolicy" if is_mean_field else "SharedPolicy"
-    print(f"  {policy_type} loaded (saved at episode {episode_saved})")
+    print(f"  VehicleRouteActor loaded (saved at episode {episode_saved})")
     return policy
 
 
@@ -922,17 +700,6 @@ def parse_args():
     p.add_argument("--seed",           type=int,   default=42)
     p.add_argument("--deterministic",  action="store_true", default=True)
     p.add_argument("--stochastic",     dest="deterministic", action="store_false")
-    p.add_argument("--online_ppo", action="store_true",
-                   help="Enable online PPO updates during SUMO rollout (per-vehicle AV agents in mean-field setup).")
-    p.add_argument("--online_lr", type=float, default=3e-4)
-    p.add_argument("--online_n_ppo_epochs", type=int, default=4)
-    p.add_argument("--online_minibatch_size", type=int, default=64)
-    p.add_argument("--online_n_episodes_per_update", type=int, default=8)
-    p.add_argument("--online_clip_eps", type=float, default=0.2)
-    p.add_argument("--online_entropy_coef", type=float, default=0.001)
-    p.add_argument("--online_value_coef", type=float, default=0.25)
-    p.add_argument("--online_gamma", type=float, default=0.99)
-    p.add_argument("--online_gae_lambda", type=float, default=0.95)
     p.add_argument("--explore_eps", type=float, default=0.0,
                    help="Epsilon-mixing with uniform distribution when sampling AV actions.")
     p.add_argument("--dynamic_routing", action="store_true", default=False,
@@ -944,16 +711,6 @@ def parse_args():
                        "precomputed OD-route suffix behavior; 'current_shortest_live' and "
                        "'current_shortest_wm' regenerate K diverse current-edge-to-destination "
                        "routes from live SUMO edge travel times or WM/BPR edge travel times."
-                   ))
-    p.add_argument("--fixed_av_route_index", type=int, default=-1,
-                   help=(
-                       "Counterfactual eval: force every active AV to choose this original "
-                       "candidate route slot. -1 disables the override."
-                   ))
-    p.add_argument("--fixed_av_route_probs", type=str, default="",
-                   help=(
-                       "Counterfactual eval: sample every active AV route from these original "
-                       "candidate-slot probabilities, e.g. '0.25,0.25,0.25,0.25'."
                    ))
     p.add_argument("--av_policy_route_selection", type=str, default="auto",
                    choices=["auto", "argmax", "sample", "quota"],
@@ -1026,11 +783,6 @@ def parse_args():
                    help=(
                        "Comma/space separated planned-AV pressure penalties for WM-MCC diagnostic logging. "
                        "When set, eval writes wm_mcc_diagnostic.csv with WM rollout scores for each penalty."
-                   ))
-    p.add_argument("--wm_mcc_diagnostic_fixed_routes", type=str, default="",
-                   help=(
-                       "Comma/space separated original candidate route slots for WM-MCC diagnostic logging, "
-                       "e.g. '0,1,2,3'. Each active AV is assigned that fixed slot for the diagnostic only."
                    ))
     p.add_argument("--wm_mcc_diagnostic_horizon", type=int, default=1,
                    help="WM rollout horizon for WM-MCC diagnostics.")
@@ -1130,8 +882,6 @@ def parse_args():
                    help="Print per-episode t_all progress every N episodes during human adaptation and rollout.")
     p.add_argument("--save_every", type=int, default=1,
                    help="RouteRL save_every for episode CSVs. Use 1 for per-episode metrics.")
-    p.add_argument("--force_hdv_adaptation", action="store_true",
-                   help="Ignore checkpoint fixed HDV fractions and run human adaptation episodes.")
     p.add_argument("--hdv_adapt_episodes", type=int, default=0,
                    help="Number of HDV adaptation episodes to run before sampling HDV distribution (0=disabled).")
     p.add_argument("--hdv_sample_episodes", type=int, default=3,
@@ -1203,22 +953,6 @@ def _load_av_od_route_overrides(path_value: str) -> Dict[Tuple[int, int], int]:
     raise ValueError(
         f"Unsupported --av_od_route_override_json format in {path}; expected list or object."
     )
-
-
-def _parse_fixed_av_route_probs(value: str, n_routes: int) -> Optional[np.ndarray]:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    parts = [p.strip() for p in text.replace(";", ",").split(",") if p.strip()]
-    vals = np.asarray([float(p) for p in parts], dtype=np.float64)
-    if vals.size != int(n_routes):
-        raise ValueError(f"--fixed_av_route_probs expected {int(n_routes)} values, got {vals.size}")
-    if np.any(~np.isfinite(vals)) or np.any(vals < 0.0):
-        raise ValueError("--fixed_av_route_probs values must be finite and non-negative")
-    total = float(vals.sum())
-    if total <= 0.0:
-        raise ValueError("--fixed_av_route_probs must have positive sum")
-    return (vals / total).astype(np.float64)
 
 
 def _parse_float_list(value: str) -> List[float]:
@@ -1492,44 +1226,6 @@ def _route_batch_uniqueness_summary(route_batch: List[List[List[str]]]) -> Tuple
         return 0.0, 0, 0
     arr = np.asarray(counts, dtype=np.float32)
     return float(arr.mean()), int(arr.min()), int(arr.max())
-
-
-def _normalize_hdv_fracs(hdv_fracs: np.ndarray, n_od: int, n_routes: int) -> Optional[np.ndarray]:
-    arr = np.asarray(hdv_fracs, dtype=np.float32)
-    if arr.shape != (n_od, n_routes):
-        return None
-    arr = np.clip(arr, 1e-6, None)
-    arr = arr / arr.sum(axis=1, keepdims=True)
-    return arr
-
-
-def _apply_fixed_hdv_defaults(
-    env,
-    od_agent_map: Dict[int, int],
-    fixed_hdv_fracs: Optional[np.ndarray],
-    n_routes: int,
-    rng: np.random.Generator,
-) -> None:
-    humans = getattr(env, "human_agents", [])
-    if not humans:
-        return
-    if fixed_hdv_fracs is None:
-        for human in humans:
-            human.default_action = None
-        return
-
-    uniform = np.full(n_routes, 1.0 / n_routes, dtype=np.float32)
-    for human in humans:
-        try:
-            aid_int = int(human.id)
-        except Exception:
-            aid_int = -1
-        od_idx = od_agent_map.get(aid_int, None)
-        if od_idx is None or od_idx < 0 or od_idx >= fixed_hdv_fracs.shape[0]:
-            probs = uniform
-        else:
-            probs = fixed_hdv_fracs[od_idx]
-        human.default_action = int(rng.choice(n_routes, p=probs))
 
 
 def _resolve_optional_path(path_str: str) -> Optional[Path]:
@@ -2644,27 +2340,6 @@ def _save_collected_flow_dataset(
     print(f"    steps: {len(episodes)}")
 
 
-def _fixed_hdv_fracs_to_route_prob_map(route_registry, fixed_hdv_fracs: np.ndarray) -> Dict[Tuple[int, int], np.ndarray]:
-    out: Dict[Tuple[int, int], np.ndarray] = {}
-    if route_registry is None:
-        return out
-    n_origins = len(route_registry.origins)
-    n_dests = len(route_registry.destinations)
-    arr = np.asarray(fixed_hdv_fracs, dtype=np.float32)
-    for oi in range(n_origins):
-        for di in range(n_dests):
-            od_flat = oi * n_dests + di
-            if od_flat >= arr.shape[0]:
-                continue
-            probs = np.asarray(arr[od_flat], dtype=np.float32).reshape(-1)
-            if probs.size == 0:
-                continue
-            probs = np.clip(probs, 1e-8, None)
-            probs = probs / probs.sum()
-            out[(oi, di)] = probs.astype(np.float32)
-    return out
-
-
 class PolicyGuidedCollectorEval(DataCollector):
     """SUMO evaluator that reuses the DataCollector rollout loop."""
 
@@ -2684,8 +2359,6 @@ class PolicyGuidedCollectorEval(DataCollector):
         rerank_cav_tolerance: float = 0.0,
         wm_volume_floor: float = 0.10,
         loaded_hdv_state: Optional[Dict[str, Any]] = None,
-        fixed_av_route_index: int = -1,
-        fixed_av_route_probs: Optional[np.ndarray] = None,
         av_od_route_overrides: Optional[Dict[Tuple[int, int], int]] = None,
         av_policy_route_selection: str = "auto",
         av_policy_sample_temperature: float = 1.0,
@@ -2703,7 +2376,6 @@ class PolicyGuidedCollectorEval(DataCollector):
         av_route_wm_live_blend_weight: float = 0.5,
         av_route_planned_av_pressure_penalty: float = 0.0,
         wm_mcc_diagnostic_penalties: Optional[Sequence[float]] = None,
-        wm_mcc_diagnostic_fixed_routes: Optional[Sequence[int]] = None,
         wm_mcc_diagnostic_horizon: int = 1,
         bpr_alpha: float = 0.15,
         bpr_beta: float = 4.0,
@@ -2735,17 +2407,6 @@ class PolicyGuidedCollectorEval(DataCollector):
         self._rerank_cav_tolerance = float(rerank_cav_tolerance)
         self._wm_volume_floor = max(float(wm_volume_floor), 0.0)
         self._rerank_enabled = self._mpc_horizon > 0 and self._mpc_candidates > 1
-        self._fixed_av_route_index = int(fixed_av_route_index)
-        self._fixed_av_route_probs = None
-        if fixed_av_route_probs is not None:
-            probs = np.asarray(fixed_av_route_probs, dtype=np.float64).reshape(-1)
-            if probs.size != int(self.n_routes):
-                raise ValueError(f"fixed_av_route_probs expected {int(self.n_routes)} values, got {probs.size}")
-            probs = np.clip(probs, 0.0, None)
-            total = float(probs.sum())
-            if total <= 0.0:
-                raise ValueError("fixed_av_route_probs must have positive sum")
-            self._fixed_av_route_probs = (probs / total).astype(np.float64)
         self._av_od_route_overrides = {
             (int(k[0]), int(k[1])): int(v)
             for k, v in dict(av_od_route_overrides or {}).items()
@@ -2801,10 +2462,6 @@ class PolicyGuidedCollectorEval(DataCollector):
         self._wm_mcc_diagnostic_penalties = [
             max(float(v), 0.0)
             for v in list(wm_mcc_diagnostic_penalties or [])
-        ]
-        self._wm_mcc_diagnostic_fixed_routes = [
-            int(np.clip(int(v), 0, int(self.n_routes) - 1))
-            for v in list(wm_mcc_diagnostic_fixed_routes or [])
         ]
         self._wm_mcc_diagnostic_horizon = max(int(wm_mcc_diagnostic_horizon), 1)
         self._bpr_alpha_eval = float(bpr_alpha)
@@ -3052,8 +2709,7 @@ class PolicyGuidedCollectorEval(DataCollector):
         rng: np.random.RandomState,
     ) -> None:
         penalties = list(getattr(self, "_wm_mcc_diagnostic_penalties", []) or [])
-        fixed_routes = list(getattr(self, "_wm_mcc_diagnostic_fixed_routes", []) or [])
-        if (not penalties and not fixed_routes) or not path_batch:
+        if not penalties or not path_batch:
             return
 
         def _append_metrics_row(
@@ -3062,7 +2718,6 @@ class PolicyGuidedCollectorEval(DataCollector):
             route_indices: np.ndarray,
             applied: int,
             penalty: float = float("nan"),
-            fixed_route_index: int = -1,
         ) -> None:
             metrics = rollout_candidate_metrics(
                 wm=self._wm_eval,
@@ -3095,7 +2750,6 @@ class PolicyGuidedCollectorEval(DataCollector):
                 "active_av": int(len(route_indices)),
                 "candidate_kind": str(candidate_kind),
                 "penalty": float(penalty),
-                "fixed_route_index": int(fixed_route_index),
                 "applied": int(applied),
                 "pred_t_all": float(metrics.get("pred_t_all", float("nan"))),
                 "pred_t_all_pressure": float(metrics.get("pred_t_all_pressure", float("nan"))),
@@ -3137,7 +2791,6 @@ class PolicyGuidedCollectorEval(DataCollector):
                         "active_av": int(len(baseline_route_indices)),
                         "candidate_kind": "penalty",
                         "penalty": float(penalty),
-                        "fixed_route_index": -1,
                         "applied": 0,
                         "pred_t_all": float("nan"),
                         "pred_t_all_pressure": float("nan"),
@@ -3148,40 +2801,6 @@ class PolicyGuidedCollectorEval(DataCollector):
                         "error": str(exc),
                     }
                 )
-        for route_idx in fixed_routes:
-            try:
-                route_indices = np.full(
-                    int(len(baseline_route_indices)),
-                    int(route_idx),
-                    dtype=np.int64,
-                )
-                _append_metrics_row(
-                    candidate_kind="fixed_route",
-                    route_indices=route_indices,
-                    applied=int(len(route_indices)),
-                    fixed_route_index=int(route_idx),
-                )
-            except Exception as exc:
-                self._wm_mcc_diagnostic_rows.append(
-                    {
-                        "episode": int(self._current_episode_id_eval),
-                        "decision_idx": int(self._current_decision_idx_eval),
-                        "sim_step": int(getattr(self.connector, "current_step", -1)),
-                        "active_av": int(len(baseline_route_indices)),
-                        "candidate_kind": "fixed_route",
-                        "penalty": float("nan"),
-                        "fixed_route_index": int(route_idx),
-                        "applied": 0,
-                        "pred_t_all": float("nan"),
-                        "pred_t_all_pressure": float("nan"),
-                        "pred_t_all_head": float("nan"),
-                        "pred_t_all_decoded": float("nan"),
-                        "pred_t_cav_proxy": float("nan"),
-                        "horizon": int(self._wm_mcc_diagnostic_horizon),
-                        "error": str(exc),
-                    }
-                )
-
     def _select_av_actions(
         self, state: Dict[str, Any], rng: np.random.RandomState
     ) -> Dict[str, List[str]]:
@@ -3472,29 +3091,7 @@ class PolicyGuidedCollectorEval(DataCollector):
                 trigger_share <= 0.0
                 or confidence_gate_max_nonzero_share >= trigger_share
             )
-        if self._fixed_av_route_index >= 0:
-            selected_route_indices = np.full(
-                (len(active_ids),),
-                int(self._fixed_av_route_index),
-                dtype=np.int64,
-            )
-            counterfactual_mode = f"fixed_route{int(self._fixed_av_route_index)}"
-            counterfactual_applied = int(len(active_ids))
-        elif self._fixed_av_route_probs is not None:
-            probs = np.asarray(self._fixed_av_route_probs, dtype=np.float64)
-            probs = np.clip(probs, 0.0, None)
-            total = float(probs.sum())
-            if total <= 0.0:
-                probs = np.ones((int(self.n_routes),), dtype=np.float64) / float(self.n_routes)
-            else:
-                probs = probs / total
-            selected_route_indices = np.asarray(
-                [int(rng.choice(self.n_routes, p=probs)) for _ in active_ids],
-                dtype=np.int64,
-            )
-            counterfactual_mode = "fixed_route_probs"
-            counterfactual_applied = int(len(active_ids))
-        elif self._av_od_route_overrides:
+        if self._av_od_route_overrides:
             counterfactual_mode = "od_override"
             selected_route_indices = baseline_route_indices.copy()
             for i, veh_id in enumerate(active_ids):
@@ -4238,12 +3835,7 @@ def main():
     post_mutation_state_out_path = _resolve_optional_path(args.post_mutation_state_out)
     loaded_hdv_state = _load_hdv_learning_state(hdv_state_in_path)
     av_od_route_overrides = _load_av_od_route_overrides(args.av_od_route_override_json)
-    fixed_av_route_probs = _parse_fixed_av_route_probs(args.fixed_av_route_probs, int(args.n_routes))
     wm_mcc_diagnostic_penalties = _parse_float_list(args.wm_mcc_diagnostic_penalties)
-    wm_mcc_diagnostic_fixed_routes = [
-        int(v)
-        for v in _parse_float_list(args.wm_mcc_diagnostic_fixed_routes)
-    ]
 
     print("=" * 70)
     print("  Dreamer4 MARL Policy Evaluation in SUMO (Flow Mode)")
@@ -4267,10 +3859,6 @@ def main():
         "  Human learning after mutation: "
         + ("disabled" if args.disable_human_learning_after_mutation else "enabled")
     )
-    if int(args.fixed_av_route_index) >= 0:
-        print(f"  AV counterfactual: fixed route index {int(args.fixed_av_route_index)}")
-    if fixed_av_route_probs is not None:
-        print(f"  AV counterfactual: fixed route probs {fixed_av_route_probs.tolist()}")
     if av_od_route_overrides:
         print(f"  AV counterfactual: {len(av_od_route_overrides)} OD route overrides")
     print(f"  AV candidate source: {args.av_candidate_source}")
@@ -4309,11 +3897,13 @@ def main():
         ckpt_obs_source = str(cfg_dict.get("wm_policy_obs_source", "")).strip().lower()
         if ckpt_obs_source in ("decoder_volume_tt", "decoder_volume_tt_route_head", "decoder_volume", "decoder", "obs_proj"):
             wm.set_policy_obs_source(ckpt_obs_source)
-    is_mean_field = bool(cfg_dict.get("network_folder") or cfg_dict.get("od_file")
-                         or cfg_dict.get("route_registry_path"))
+    model_family = str(ckpt_state.get("model_family", cfg_dict.get("training_family", ""))).strip().lower()
+    if model_family != "dreamer_ctde":
+        raise RuntimeError(f"Unsupported policy checkpoint family {model_family!r}; expected dreamer_ctde.")
     agent_level = str(cfg_dict.get("agent_level", "")).strip().lower()
-    vehicle_mode = agent_level == "vehicle"
-    include_intention_obs = bool(cfg_dict.get("include_intention_obs", False))
+    if agent_level != "vehicle":
+        raise RuntimeError(f"Unsupported policy agent_level {agent_level!r}; expected vehicle.")
+    vehicle_mode = True
     vehicle_obs_include_global = bool(cfg_dict.get("vehicle_obs_include_global", True))
     vehicle_path_penalty_factor = float(cfg_dict.get("vehicle_path_penalty_factor", 3.0))
     ckpt_route_stats = str(cfg_dict.get("vehicle_obs_route_stats", "mean")).strip().lower()
@@ -4328,91 +3918,32 @@ def main():
     )
     vehicle_obs_include_fleet_pressure = bool(cfg_dict.get("vehicle_obs_include_fleet_pressure", False))
 
-    route_registry = None
-    rr_cache = os.path.join(network_folder, "route_registry.json")
-    if is_mean_field:
-        if vehicle_mode:
-            if vehicle_mode_obs_dim is not None:
-                obs_dim = vehicle_mode_obs_dim(
-                    n_routes=args.n_routes,
-                    d_obs=wm.d_obs,
-                    include_global=vehicle_obs_include_global,
-                    route_stats=vehicle_obs_route_stats,
-                    include_route_costs=vehicle_obs_include_route_costs,
-                    include_fleet_pressure=vehicle_obs_include_fleet_pressure,
-                )
-            else:
-                obs_dim = args.n_routes * wm.d_obs + (wm.d_obs if vehicle_obs_include_global else 0) + 3
-                if vehicle_obs_include_route_costs:
-                    obs_dim += 3 * int(args.n_routes)
-                if vehicle_obs_include_fleet_pressure:
-                    obs_dim += 2 * int(args.n_routes)
-            print(
-                f"  Vehicle mode: obs_dim={obs_dim}, global_obs={vehicle_obs_include_global}, "
-                f"route_stats={vehicle_obs_route_stats}, route_cost_obs={vehicle_obs_include_route_costs}, "
-                f"fleet_pressure_obs={vehicle_obs_include_fleet_pressure}"
-            )
-        else:
-            obs_dim = args.n_routes * wm.d_obs + wm.d_obs  # K*4 + 4
-            if include_intention_obs:
-                obs_dim += 2 * args.n_routes
-            print(f"  Mean field mode: obs_dim={obs_dim}")
-
-            # Build or load RouteRegistry only for route-level eval paths.
-            if RouteRegistry is not None:
-                if os.path.exists(rr_cache):
-                    route_registry = RouteRegistry.load(rr_cache)
-                else:
-                    net_xml = os.path.join(network_folder, f"{args.network}.net.xml")
-                    od_data_rr = load_od_data(network_folder, args.network)
-                    agents_csv_for_rr = os.path.join(network_folder, "agents.csv")
-                    route_registry = RouteRegistry.build(
-                        net_xml,
-                        wm._registry,
-                        od_data_rr["origins"],
-                        od_data_rr["destinations"],
-                        args.n_routes,
-                        agents_csv=agents_csv_for_rr,
-                        ratio_machines=args.ratio_machines,
-                    )
-                    route_registry.save(rr_cache)
-                print(f"  RouteRegistry: {route_registry.n_od} OD pairs, K={route_registry.K}")
-    else:
-        obs_dim = wm.n_edges * wm.d_obs
-        print(f"  Single-agent mode: obs_dim={obs_dim}")
-
-    fixed_hdv_fracs = None
-    has_valid_fixed_hdv = False
-    if (not vehicle_mode) and is_mean_field and route_registry is not None and "hdv_fracs_state" in ckpt_state:
-        fixed_hdv_fracs = _normalize_hdv_fracs(
-            ckpt_state.get("hdv_fracs_state"),
-            route_registry.n_od,
-            args.n_routes,
+    if vehicle_mode_obs_dim is not None:
+        obs_dim = vehicle_mode_obs_dim(
+            n_routes=args.n_routes,
+            d_obs=wm.d_obs,
+            include_global=vehicle_obs_include_global,
+            route_stats=vehicle_obs_route_stats,
+            include_route_costs=vehicle_obs_include_route_costs,
+            include_fleet_pressure=vehicle_obs_include_fleet_pressure,
         )
-        if fixed_hdv_fracs is None:
-            print("  WARNING: hdv_fracs_state exists in checkpoint but shape mismatch; will use adaptive HDV learning instead of a fixed fallback.")
-        else:
-            has_valid_fixed_hdv = True
-            print("  Fixed HDV strategy loaded from checkpoint; SUMO test will reuse this policy without re-learning.")
-    if (not vehicle_mode) and is_mean_field and route_registry is not None and not has_valid_fixed_hdv:
-        fixed_hdv_fracs = None
-        print("  No valid fixed HDV strategy in checkpoint; SUMO eval will run HDV adaptation before testing.")
-    if args.force_hdv_adaptation:
-        fixed_hdv_fracs = None
-        print("  force_hdv_adaptation=True: ignore fixed HDV fractions from checkpoint.")
-    if fixed_hdv_fracs is not None:
-        print(f"  Human eps (effective): 0 (requested {args.human_learning_episodes})")
     else:
-        print(f"  Human eps (effective): {args.human_learning_episodes} (requested {args.human_learning_episodes})")
+        obs_dim = args.n_routes * wm.d_obs + (wm.d_obs if vehicle_obs_include_global else 0) + 3
+        if vehicle_obs_include_route_costs:
+            obs_dim += 3 * int(args.n_routes)
+        if vehicle_obs_include_fleet_pressure:
+            obs_dim += 2 * int(args.n_routes)
+    print(
+        f"  Vehicle mode: obs_dim={obs_dim}, global_obs={vehicle_obs_include_global}, "
+        f"route_stats={vehicle_obs_route_stats}, route_cost_obs={vehicle_obs_include_route_costs}, "
+        f"fleet_pressure_obs={vehicle_obs_include_fleet_pressure}"
+    )
+    print(f"  Human eps (effective): {args.human_learning_episodes} (requested {args.human_learning_episodes})")
 
     print(f"  obs_dim = {obs_dim}  (n_edges={wm.n_edges}, n_dynamic={wm.d_obs})\n")
 
     policy = load_policy(args.policy_ckpt, obs_dim, args.n_routes, str(device))
     print()
-
-    # Collector-style rollout replaces the legacy RouteRL env.agent_iter() path.
-    if not vehicle_mode:
-        sys.exit("Collector-style SUMO eval currently supports only vehicle-mode policies.")
 
     gawron_mode = str(args.hdv_gawron_mode).strip().lower()
     gawron_mode_ckpt = str(cfg_dict.get("gawron_mode", gawron_mode)).strip().lower()
@@ -4421,8 +3952,6 @@ def main():
             f"  NOTE: collector-style eval overrides checkpoint gawron_mode={gawron_mode_ckpt} "
             f"-> {gawron_mode}."
         )
-    if args.online_ppo:
-        print("  WARNING: online_ppo is not supported on the collector-style SUMO eval path and will be ignored.")
     if not args.dynamic_routing:
         print("  NOTE: collector-style SUMO eval still uses dynamic AV rerouting to match data collection.")
 
@@ -4502,7 +4031,7 @@ def main():
         ) + float(args.sim_buffer_after_last_depart)
     )
 
-    effective_human_eps = 0 if (fixed_hdv_fracs is not None or post_mutation_state is not None) else int(args.human_learning_episodes)
+    effective_human_eps = 0 if post_mutation_state is not None else int(args.human_learning_episodes)
     protocol_human_eps, mutation_episode_index = _resolve_protocol_episode_indices(
         post_mutation_state=post_mutation_state,
         effective_human_eps=int(effective_human_eps),
@@ -4545,8 +4074,6 @@ def main():
         rerank_cav_tolerance=args.wm_rerank_cav_tolerance,
         wm_volume_floor=args.wm_volume_floor,
         loaded_hdv_state=loaded_hdv_state,
-        fixed_av_route_index=args.fixed_av_route_index,
-        fixed_av_route_probs=fixed_av_route_probs,
         av_od_route_overrides=av_od_route_overrides,
         av_policy_route_selection=args.av_policy_route_selection,
         av_policy_sample_temperature=args.av_policy_sample_temperature,
@@ -4564,7 +4091,6 @@ def main():
         av_route_wm_live_blend_weight=args.av_route_wm_live_blend_weight,
         av_route_planned_av_pressure_penalty=args.av_route_planned_av_pressure_penalty,
         wm_mcc_diagnostic_penalties=wm_mcc_diagnostic_penalties,
-        wm_mcc_diagnostic_fixed_routes=wm_mcc_diagnostic_fixed_routes,
         wm_mcc_diagnostic_horizon=args.wm_mcc_diagnostic_horizon,
         bpr_alpha=args.bpr_alpha,
         bpr_beta=args.bpr_beta,
@@ -4614,12 +4140,8 @@ def main():
         od_file=os.path.join(network_folder, f"od_{args.network}.txt"),
         route_registry_path=os.path.join(network_folder, "route_registry.json"),
         skip_hdv_route_registry=False,
-        use_light_hdv_route_registry=bool(vehicle_mode),
+        use_light_hdv_route_registry=True,
     )
-
-    if fixed_hdv_fracs is not None and route_registry is not None:
-        collector._hdv_route_probs = _fixed_hdv_fracs_to_route_prob_map(route_registry, fixed_hdv_fracs)
-        print("  Fixed HDV route probabilities injected into collector rollout.")
 
     episode_rows: List[Dict[str, Any]] = []
     if effective_human_eps > 0:
@@ -4803,8 +4325,6 @@ def main():
         "live_route_best_counts": live_route_best_counts,
         "wm_mean_route_costs": wm_mean_route_costs,
         "live_mean_route_costs": live_mean_route_costs,
-        "fixed_av_route_index": int(args.fixed_av_route_index),
-        "fixed_av_route_probs": fixed_av_route_probs.tolist() if fixed_av_route_probs is not None else [],
         "av_policy_route_selection": str(args.av_policy_route_selection),
         "av_policy_sample_temperature": float(args.av_policy_sample_temperature),
         "av_policy_confidence_gate_source": str(args.av_policy_confidence_gate_source),
@@ -4831,7 +4351,6 @@ def main():
         "vehicle_obs_include_fleet_pressure": bool(vehicle_obs_include_fleet_pressure),
         "collect_dataset_saved_episodes": int(test_result.get("dataset_saved_episodes", 0)),
         "collect_dataset_skipped_incomplete_episodes": int(test_result.get("dataset_skipped_incomplete_episodes", 0)),
-        "online_ppo": False,
         **test_metric_summary,
     }
     summary_path = results_dir / "collector_eval_summary.json"

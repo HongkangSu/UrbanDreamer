@@ -174,47 +174,6 @@ def load_ckpt(
     return int(ckpt.get("step", 0)), int(ckpt.get("epoch", 0))
 
 
-def _fit_linear_pca(actions: torch.Tensor, n_components: int) -> Dict[str, Any]:
-    """
-    Fit a linear PCA projector x -> (x - mean) @ proj.
-
-    Args:
-        actions: (N, A) float tensor on CPU.
-        n_components: requested output dimension.
-    Returns:
-        dict with mean/proj and summary stats.
-    """
-    if actions.dim() != 2:
-        raise ValueError(f"actions must be (N,A), got {tuple(actions.shape)}")
-    X = actions.to(torch.float32).clone()
-    N, A = int(X.shape[0]), int(X.shape[1])
-    if N < 2:
-        raise ValueError(f"Need at least 2 samples to fit PCA, got N={N}")
-    d = int(max(1, min(int(n_components), A, N)))
-
-    mean = X.mean(dim=0, keepdim=True)   # (1,A)
-    Xc = X - mean
-    # Full SVD is reliable at this scale (N~10^3-10^4, A~10^3).
-    _, S, Vh = torch.linalg.svd(Xc, full_matrices=False)
-    proj = Vh[:d].T.contiguous()         # (A,d)
-
-    denom = max(1, N - 1)
-    eig = (S * S) / float(denom)
-    total_var = float(eig.sum().item()) if eig.numel() > 0 else 0.0
-    explained = float(eig[:d].sum().item()) if eig.numel() > 0 else 0.0
-    explained_ratio = (explained / total_var) if total_var > 0 else 0.0
-
-    return {
-        "type": "pca_linear",
-        "input_dim": A,
-        "output_dim": d,
-        "mean": mean.squeeze(0).contiguous(),
-        "proj": proj,
-        "explained_variance_ratio": explained_ratio,
-        "n_samples": N,
-    }
-
-
 def _apply_linear_action_compressor(actions: torch.Tensor, comp: Dict[str, Any]) -> torch.Tensor:
     if comp is None:
         return actions
@@ -233,6 +192,33 @@ def _apply_linear_action_compressor(actions: torch.Tensor, comp: Dict[str, Any])
     return out.view(*actions.shape[:-1], int(proj.shape[1]))
 
 
+def _compose_model_action_parts(
+    *,
+    act_raw: torch.Tensor,
+    depart_b: Optional[torch.Tensor] = None,
+    context_b: Optional[torch.Tensor] = None,
+    action_compressor: Optional[Dict[str, Any]] = None,
+    depart_compressor: Optional[Dict[str, Any]] = None,
+) -> torch.Tensor:
+    act = _apply_linear_action_compressor(act_raw, action_compressor) if action_compressor else act_raw
+    parts = [act]
+    if depart_b is not None:
+        depart = _apply_linear_action_compressor(depart_b, depart_compressor) if depart_compressor else depart_b
+        parts.append(depart)
+    if context_b is not None:
+        parts.append(context_b)
+    return parts[0] if len(parts) == 1 else torch.cat(parts, dim=-1)
+
+
+def _shift_sequence_right(x: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+    if x is None:
+        return None
+    shifted = torch.zeros_like(x)
+    if x.shape[1] > 1:
+        shifted[:, 1:] = x[:, :-1]
+    return shifted
+
+
 def _build_model_actions(
     *,
     act_raw: torch.Tensor,
@@ -241,22 +227,16 @@ def _build_model_actions(
     action_compressor: Optional[Dict[str, Any]] = None,
     depart_compressor: Optional[Dict[str, Any]] = None,
 ) -> torch.Tensor:
-    parts = []
-    if action_compressor is not None:
-        parts.append(_apply_linear_action_compressor(act_raw, action_compressor))
-    else:
-        parts.append(act_raw)
-    if depart_b is not None:
-        if depart_compressor is not None:
-            parts.append(_apply_linear_action_compressor(depart_b, depart_compressor))
-        else:
-            parts.append(depart_b)
-    if context_b is not None:
-        parts.append(context_b)
-    model_act = parts[0] if len(parts) == 1 else torch.cat(parts, dim=-1)
-    actions = torch.zeros_like(model_act)
-    actions[:, 1:] = model_act[:, :-1]
-    return actions
+    model_act = _compose_model_action_parts(
+        act_raw=act_raw,
+        depart_b=depart_b,
+        context_b=context_b,
+        action_compressor=action_compressor,
+        depart_compressor=depart_compressor,
+    )
+    shifted = _shift_sequence_right(model_act)
+    assert shifted is not None
+    return shifted
 
 
 def _build_unshifted_model_actions(
@@ -267,19 +247,13 @@ def _build_unshifted_model_actions(
     action_compressor: Optional[Dict[str, Any]] = None,
     depart_compressor: Optional[Dict[str, Any]] = None,
 ) -> torch.Tensor:
-    parts = []
-    if action_compressor is not None:
-        parts.append(_apply_linear_action_compressor(act_raw, action_compressor))
-    else:
-        parts.append(act_raw)
-    if depart_b is not None:
-        if depart_compressor is not None:
-            parts.append(_apply_linear_action_compressor(depart_b, depart_compressor))
-        else:
-            parts.append(depart_b)
-    if context_b is not None:
-        parts.append(context_b)
-    return parts[0] if len(parts) == 1 else torch.cat(parts, dim=-1)
+    return _compose_model_action_parts(
+        act_raw=act_raw,
+        depart_b=depart_b,
+        context_b=context_b,
+        action_compressor=action_compressor,
+        depart_compressor=depart_compressor,
+    )
 
 
 def _build_graph_cond_model_actions(
@@ -298,18 +272,10 @@ def _build_graph_cond_model_actions(
     the same shift before entering CFM training.
     """
 
-    def _shift(x: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
-        if x is None:
-            return None
-        shifted = torch.zeros_like(x)
-        if x.shape[1] > 1:
-            shifted[:, 1:] = x[:, :-1]
-        return shifted
-
-    action_shifted = _shift(act_raw)
-    depart_shifted = _shift(depart_b)
-    context_shifted = _shift(context_b)
-    hdv_shifted = _shift(hdv_context_b)
+    action_shifted = _shift_sequence_right(act_raw)
+    depart_shifted = _shift_sequence_right(depart_b)
+    context_shifted = _shift_sequence_right(context_b)
+    hdv_shifted = _shift_sequence_right(hdv_context_b)
     if hdv_shifted is not None:
         return action_shifted, depart_shifted, context_shifted, hdv_shifted
     return action_shifted, depart_shifted, context_shifted
@@ -487,26 +453,6 @@ def _infer_model_action_dim(
         dim += int(depart_dim)
     dim += int(context_dim)
     return dim
-
-
-def _maybe_load_action_compressor_from_ckpt(path: Optional[str]) -> Optional[Dict[str, Any]]:
-    if not path:
-        return None
-    p = Path(path)
-    if not p.exists():
-        return None
-    try:
-        ckpt = torch.load(p, map_location="cpu", weights_only=False)
-    except Exception:
-        return None
-    comp = ckpt.get("action_compressor")
-    if not isinstance(comp, dict):
-        return None
-    if "mean" in comp:
-        comp["mean"] = torch.as_tensor(comp["mean"], dtype=torch.float32).cpu()
-    if "proj" in comp:
-        comp["proj"] = torch.as_tensor(comp["proj"], dtype=torch.float32).cpu()
-    return comp
 
 
 def _maybe_load_depart_compressor_from_ckpt(path: Optional[str]) -> Optional[Dict[str, Any]]:
@@ -2893,121 +2839,11 @@ def train(args):
 
     action_compressor_state: Optional[Dict[str, Any]] = None
     depart_compressor_state: Optional[Dict[str, Any]] = None
-    action_compress_mode = str(getattr(args, "action_compress", "none")).lower()
-    if action_compress_mode not in {"none", "pca"}:
-        raise ValueError(f"Unknown --action_compress={action_compress_mode!r}; expected 'none' or 'pca'.")
-
-    action_encoder_type = str(getattr(args, "action_encoder_type", "mlp")).lower()
-    if action_encoder_type in {"edge_gnn", "graph_cond"} and action_compress_mode != "none":
-        raise ValueError(f"{action_encoder_type} requires raw edge inputs; use --action_compress none")
-    if bool(getattr(args, "edge_action_injection", False)) and action_compress_mode != "none":
-        raise ValueError("edge_action_injection requires raw edge inputs; use --action_compress none")
-
-    if action_compress_mode == "pca":
-        if not hasattr(dataset, "_act_all") or dataset._act_all is None:
-            raise RuntimeError("FlowDataset has no _act_all tensor; cannot fit/apply PCA action compression.")
-        acts_raw = dataset._act_all.to(torch.float32).cpu()  # (N, A_raw)
-        raw_dim = int(acts_raw.shape[-1])
-        req_dim = int(getattr(args, "action_pca_dim", 32))
-        req_dim = max(1, min(req_dim, raw_dim))
-
-        # Priority:
-        # 1) explicit action_pca_ckpt
-        # 2) compressor embedded in resume checkpoint
-        # 3) fit from current dataset
-        loaded_comp: Optional[Dict[str, Any]] = None
-        pca_ckpt = str(getattr(args, "action_pca_ckpt", "") or "")
-        if pca_ckpt and Path(pca_ckpt).exists():
-            try:
-                obj = torch.load(pca_ckpt, map_location="cpu", weights_only=False)
-                comp_obj = obj.get("action_compressor", obj)
-                if isinstance(comp_obj, dict) and str(comp_obj.get("type", "")) == "pca_linear":
-                    loaded_comp = {
-                        **comp_obj,
-                        "mean": torch.as_tensor(comp_obj["mean"], dtype=torch.float32).cpu(),
-                        "proj": torch.as_tensor(comp_obj["proj"], dtype=torch.float32).cpu(),
-                    }
-            except Exception as exc:
-                if is_rank0():
-                    print(f"[warn] Failed to load --action_pca_ckpt={pca_ckpt}: {exc}")
-
-        if loaded_comp is None:
-            loaded_comp = _maybe_load_action_compressor_from_ckpt(getattr(args, "resume", None))
-        loaded_depart_comp = _maybe_load_depart_compressor_from_ckpt(getattr(args, "resume", None))
-
-        if loaded_comp is not None:
-            in_dim = int(loaded_comp.get("input_dim", -1))
-            out_dim = int(loaded_comp.get("output_dim", -1))
-            if in_dim != raw_dim:
-                if is_rank0():
-                    print(
-                        f"[warn] Ignore loaded action compressor due to input_dim mismatch: "
-                        f"loaded={in_dim}, dataset={raw_dim}"
-                    )
-                loaded_comp = None
-            elif out_dim <= 0:
-                loaded_comp = None
-
-        if loaded_comp is None:
-            loaded_comp = _fit_linear_pca(acts_raw, req_dim)
-            if is_rank0():
-                print(
-                    "Fitted action PCA: "
-                    f"input_dim={int(loaded_comp['input_dim'])}, "
-                    f"output_dim={int(loaded_comp['output_dim'])}, "
-                    f"explained_var={float(loaded_comp.get('explained_variance_ratio', 0.0)):.6f}"
-                )
-        else:
-            if is_rank0():
-                print(
-                    "Loaded action PCA compressor: "
-                    f"input_dim={int(loaded_comp.get('input_dim', -1))}, "
-                    f"output_dim={int(loaded_comp.get('output_dim', -1))}"
-                )
-
-        action_compressor_state = loaded_comp
-        setattr(args, "action_raw_dim", raw_dim)
-        setattr(args, "action_pca_dim_effective", int(loaded_comp["output_dim"]))
-
-        if getattr(dataset, "_depart_all", None) is not None:
-            dep_raw = dataset._depart_all.to(torch.float32).cpu()
-            dep_dim = int(dep_raw.shape[-1])
-            dep_req_dim = int(getattr(args, "depart_pca_dim", req_dim))
-            dep_req_dim = max(1, min(dep_req_dim, dep_dim))
-            if loaded_depart_comp is not None:
-                dep_in_dim = int(loaded_depart_comp.get("input_dim", -1))
-                dep_out_dim = int(loaded_depart_comp.get("output_dim", -1))
-                if dep_in_dim == dep_dim and dep_out_dim > 0:
-                    depart_compressor_state = loaded_depart_comp
-                    if is_rank0():
-                        print(
-                            "Loaded depart PCA compressor: "
-                            f"input_dim={int(loaded_depart_comp.get('input_dim', -1))}, "
-                            f"output_dim={int(loaded_depart_comp.get('output_dim', -1))}"
-                        )
-                else:
-                    loaded_depart_comp = None
-            if depart_compressor_state is None:
-                depart_compressor_state = _fit_linear_pca(dep_raw, dep_req_dim)
-                if is_rank0():
-                    print(
-                        "Fitted depart PCA: "
-                        f"input_dim={int(depart_compressor_state['input_dim'])}, "
-                        f"output_dim={int(depart_compressor_state['output_dim'])}, "
-                        f"explained_var={float(depart_compressor_state.get('explained_variance_ratio', 0.0)):.6f}"
-                    )
-            setattr(args, "depart_raw_dim", dep_dim)
-            setattr(args, "depart_pca_dim_effective", int(depart_compressor_state["output_dim"]))
-
-        if is_rank0():
-            default_path = Path(args.ckpt_dir) / "action_compressor.pt"
-            out_path = Path(pca_ckpt) if pca_ckpt else default_path
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            torch.save({
-                "action_compressor": action_compressor_state,
-                "depart_compressor": depart_compressor_state,
-            }, out_path)
-            print(f"Saved action compressor -> {out_path}")
+    action_encoder_type = str(getattr(args, "action_encoder_type", "graph_cond")).lower()
+    if action_encoder_type != "graph_cond":
+        raise ValueError("Current UrbanDreamer world-model training supports --action_encoder_type graph_cond only.")
+    if str(getattr(args, "action_compress", "none")).lower() != "none":
+        raise ValueError("Current graph_cond mainline requires --action_compress none.")
 
     sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank, shuffle=True) if ddp else None
     loader  = DataLoader(
@@ -3232,17 +3068,14 @@ def train(args):
             "Failed to infer action dimension from FlowDataset. "
             "Check action_key/aux_action_key and dataset format."
         )
-    model_action_uses_depart_context = action_encoder_type not in {"edge_gnn"}
-    if action_encoder_type == "edge_gnn":
-        model_action_dim = int(action_dim_flow)
-    else:
-        model_action_dim = _infer_model_action_dim(
-            raw_action_dim=action_dim_flow,
-            action_compressor=action_compressor_state,
-            depart_compressor=depart_compressor_state,
-            depart_dim=(int(dataset._depart_all.shape[-1]) if getattr(dataset, "_depart_all", None) is not None else 0),
-            context_dim=(int(dataset._context_all.shape[-1]) if getattr(dataset, "_context_all", None) is not None else 0),
-        )
+    model_action_uses_depart_context = True
+    model_action_dim = _infer_model_action_dim(
+        raw_action_dim=action_dim_flow,
+        action_compressor=action_compressor_state,
+        depart_compressor=depart_compressor_state,
+        depart_dim=(int(dataset._depart_all.shape[-1]) if getattr(dataset, "_depart_all", None) is not None else 0),
+        context_dim=(int(dataset._context_all.shape[-1]) if getattr(dataset, "_context_all", None) is not None else 0),
+    )
     # Persist inferred action dim in args so UrbanWorldModel can recover it
     # robustly from checkpoint metadata.
     setattr(args, "action_dim", int(model_action_dim))
@@ -3254,61 +3087,31 @@ def train(args):
                 f"action_dim={action_dim_flow}, n_routes={n_routes_cfg} "
                 f"(action_key={getattr(args, 'action_key', 'av_planned_edge_flow')!r})"
             )
-    action_encoder_type = str(getattr(args, "action_encoder_type", "mlp")).lower()
-    if action_encoder_type == "mlp":
-        action_encoder = ActionEncoder(d_model=args.d_model_dyn, action_dim=model_action_dim)
-    elif action_encoder_type == "edge_gnn":
-        if action_dim_flow != n_spatial:
-            raise ValueError(
-                "edge_gnn action encoder requires edge-level action_dim == n_edges. "
-                f"Got action_dim={action_dim_flow}, n_edges={n_spatial}. "
-                "Disable PCA compression or use --action_encoder_type mlp."
-            )
-        action_encoder = EdgeGNNActionEncoder(
-            d_model=args.d_model_dyn,
-            n_edges=n_spatial,
-            n_static=int(edge_registry.static_features.shape[1]) if edge_registry.static_features is not None else 0,
-            d_edge=int(getattr(args, "action_gnn_d_edge", 64)),
-            n_gnn_layers=int(getattr(args, "action_gnn_layers", 2)),
-        )
-        if edge_registry.static_features is not None:
-            action_encoder.set_static_features(
-                torch.from_numpy(np.asarray(edge_registry.static_features, dtype=np.float32))
-            )
-        if edge_registry.adjacency is not None:
-            action_encoder.set_adjacency(
-                torch.from_numpy(np.asarray(edge_registry.adjacency, dtype=np.float32))
-            )
-    elif action_encoder_type == "graph_cond":
-        if action_dim_flow != n_spatial:
-            raise ValueError(
-                "graph_cond action encoder requires edge-level action_dim == n_edges. "
-                f"Got action_dim={action_dim_flow}, n_edges={n_spatial}."
-            )
-        action_encoder = ActionDepartGNNEncoder(
-            d_model=args.d_model_dyn,
-            n_edges=n_spatial,
-            n_static=int(edge_registry.static_features.shape[1]) if edge_registry.static_features is not None else 0,
-            d_edge=int(getattr(args, "cond_gnn_hidden_dim", 64)),
-            n_gnn_layers=int(getattr(args, "cond_gnn_layers", 2)),
-            context_dim=3,
-            context_hidden=int(getattr(args, "cond_context_hidden_dim", 64)),
-            use_hdv_context=str(getattr(args, "transition_hdv_context_mode", "none") or "none").strip().lower()
-            not in {"", "none", "off", "disabled"},
-        )
-        if edge_registry.static_features is not None:
-            action_encoder.set_static_features(
-                torch.from_numpy(np.asarray(edge_registry.static_features, dtype=np.float32))
-            )
-        else:
-            action_encoder.set_static_features(torch.zeros(n_spatial, 0, dtype=torch.float32))
-        if edge_registry.adjacency is not None:
-            action_encoder.set_adjacency(
-                torch.from_numpy(np.asarray(edge_registry.adjacency, dtype=np.float32))
-            )
-    else:
+    if action_dim_flow != n_spatial:
         raise ValueError(
-            f"Unknown --action_encoder_type={action_encoder_type!r}; expected 'mlp', 'edge_gnn', or 'graph_cond'."
+            "graph_cond action encoder requires edge-level action_dim == n_edges. "
+            f"Got action_dim={action_dim_flow}, n_edges={n_spatial}."
+        )
+    action_encoder = ActionDepartGNNEncoder(
+        d_model=args.d_model_dyn,
+        n_edges=n_spatial,
+        n_static=int(edge_registry.static_features.shape[1]) if edge_registry.static_features is not None else 0,
+        d_edge=int(getattr(args, "cond_gnn_hidden_dim", 64)),
+        n_gnn_layers=int(getattr(args, "cond_gnn_layers", 2)),
+        context_dim=3,
+        context_hidden=int(getattr(args, "cond_context_hidden_dim", 64)),
+        use_hdv_context=str(getattr(args, "transition_hdv_context_mode", "none") or "none").strip().lower()
+        not in {"", "none", "off", "disabled"},
+    )
+    if edge_registry.static_features is not None:
+        action_encoder.set_static_features(
+            torch.from_numpy(np.asarray(edge_registry.static_features, dtype=np.float32))
+        )
+    else:
+        action_encoder.set_static_features(torch.zeros(n_spatial, 0, dtype=torch.float32))
+    if edge_registry.adjacency is not None:
+        action_encoder.set_adjacency(
+            torch.from_numpy(np.asarray(edge_registry.adjacency, dtype=np.float32))
         )
 
     # Build dynamics model
@@ -3491,7 +3294,7 @@ def train(args):
             "Action encoder: "
             f"type={action_encoder_type}, raw_action_dim={action_dim_flow}, "
             f"model_action_dim={int(getattr(args, 'action_dim', action_dim_flow))}, "
-            f"compress={action_compress_mode}"
+            "compress=none"
         )
         if action_compressor_state is not None:
             print(
@@ -3839,21 +3642,12 @@ def train(args):
                     scale=float(getattr(args, "transition_hdv_context_scale", 1.0)),
                 )
 
-                if action_encoder_type == "graph_cond":
-                    actions = _build_graph_cond_model_actions(
-                        act_raw=act_for_transition,
-                        depart_b=depart_b,
-                        context_b=context_b,
-                        hdv_context_b=hdv_context_for_transition,
-                    )
-                else:
-                    actions = _build_model_actions(
-                        act_raw=act_for_transition,
-                        depart_b=depart_b if model_action_uses_depart_context else None,
-                        context_b=context_b if model_action_uses_depart_context else None,
-                        action_compressor=action_compressor_state,
-                        depart_compressor=depart_compressor_state if model_action_uses_depart_context else None,
-                    )
+                actions = _build_graph_cond_model_actions(
+                    act_raw=act_for_transition,
+                    depart_b=depart_b,
+                    context_b=context_b,
+                    hdv_context_b=hdv_context_for_transition,
+                )
                 act_mask = None
 
                 if actions is not None and not isinstance(actions, tuple):
@@ -3883,153 +3677,31 @@ def train(args):
                         (flow_projector.module if hasattr(flow_projector, "module") else flow_projector)
                         if stackelberg_layer is not None else None
                     )
-                    if action_encoder_type == "graph_cond":
-                        base_loss, aux = cfm_loss(
-                            dyn.module if hasattr(dyn, "module") else dyn,
-                            z1=z1,
-                            actions=actions,
-                            act_mask=act_mask,
-                            hdv_actions=hdv_actions,
-                            agent_tokens=None,
-                            hdv_target=hdv_target,
-                            hdv_policy_weight=float(getattr(args, "hdv_policy_weight", 0.0)),
-                            stackelberg=stackelberg_layer,
-                            flow_projector=_fp_for_stk,
-                            eq_weight=stackelberg_eq_weight,
-                            stackelberg_hdv_weight=stackelberg_hdv_weight,
-                            action_compressor=action_compressor_state,
-                            av_action_dim=(
-                                int(action_compressor_state["output_dim"])
-                                if action_compressor_state is not None else int(action_dim_flow)
-                            ),
-                            action_reconstruction_weight=action_reconstruction_weight,
-                            action_reconstruction_eps=action_reconstruction_eps,
-                            flow_targets=flows_b,
-                            cfm_active_weight=cfm_active_weight,
-                            cfm_busy_weight=cfm_busy_weight,
-                            cfm_busy_threshold=cfm_busy_threshold,
-                            cfm_active_threshold=cfm_active_threshold,
-                            cfm_max_weight=cfm_max_weight,
-                            volume_index=bpr_veh_index,
-                        )
-                    else:
-                        rollout_targets = _build_rollout_targets(z1, horizon=rollout_horizon)
-                        rollout_flow_targets = _build_rollout_targets(flows_b, horizon=rollout_horizon)
-                        rollout_inputs = _build_rollout_inputs(act_raw, depart_b, context_b, horizon=rollout_horizon)
-                        base_loss = torch.zeros((), device=device, dtype=torch.float32)
-                        aux = {}
-                        sched_prob = _scheduled_sampling_prob(
-                            step=step,
-                            enabled=bool(getattr(args, "scheduled_sampling", False)),
-                            warmup=int(getattr(args, "sched_sample_warmup", 3000)),
-                            end=float(getattr(args, "sched_sample_end", 0.5)),
-                        )
-                        for h, target_h in enumerate(rollout_targets):
-                            inp_h = rollout_inputs[h]
-                            flow_target_h = rollout_flow_targets[h]
-                            hdv_target_h_for_transition = (
-                                None if hdv_target is None
-                                else hdv_target[:, h:h + inp_h["act"].shape[1]]
-                            )
-                            hdv_context_h_for_transition = _build_transition_hdv_context(
-                                act_raw=inp_h["act"],
-                                hdv_target=hdv_target_h_for_transition,
-                                mode=str(getattr(args, "transition_hdv_context_mode", "none")),
-                                weight=float(getattr(args, "transition_hdv_context_weight", 0.0)),
-                                scale=float(getattr(args, "transition_hdv_context_scale", 1.0)),
-                            )
-                            actions_h = _build_model_actions(
-                                act_raw=_compose_transition_hdv_action(
-                                    act_raw=inp_h["act"],
-                                    hdv_target=hdv_target_h_for_transition,
-                                    mode=str(getattr(args, "transition_hdv_action_mode", "none")),
-                                    weight=float(getattr(args, "transition_hdv_action_weight", 0.0)),
-                                    scale=float(getattr(args, "transition_hdv_action_scale", 1.0)),
-                                ),
-                                depart_b=inp_h["depart"] if model_action_uses_depart_context else None,
-                                context_b=inp_h["context"] if model_action_uses_depart_context else None,
-                                action_compressor=action_compressor_state,
-                                depart_compressor=depart_compressor_state if model_action_uses_depart_context else None,
-                            ).to(device, non_blocking=True)
-                            if action_encoder_type == "graph_cond":
-                                actions_h = _build_graph_cond_model_actions(
-                                    act_raw=_compose_transition_hdv_action(
-                                        act_raw=inp_h["act"],
-                                        hdv_target=hdv_target_h_for_transition,
-                                        mode=str(getattr(args, "transition_hdv_action_mode", "none")),
-                                        weight=float(getattr(args, "transition_hdv_action_weight", 0.0)),
-                                        scale=float(getattr(args, "transition_hdv_action_scale", 1.0)),
-                                    ),
-                                    depart_b=inp_h["depart"],
-                                    context_b=inp_h["context"],
-                                    hdv_context_b=hdv_context_h_for_transition,
-                                )
-                            hdv_actions_h = None
-                            if hdv_target is not None and float(getattr(args, "hdv_policy_weight", 0.0)) > 0.0:
-                                hdv_actions_h = _build_hdv_policy_condition_actions(
-                                    mode=hdv_policy_action_mode,
-                                    action_encoder_type=action_encoder_type,
-                                    act_raw=inp_h["act"],
-                                    episode_act_raw=(
-                                        None if episode_act_b is None
-                                        else episode_act_b[:, h:h + inp_h["act"].shape[1]]
-                                    ),
-                                    depart_b=inp_h["depart"],
-                                    context_b=inp_h["context"],
-                                    model_action_uses_depart_context=model_action_uses_depart_context,
-                                    action_compressor=action_compressor_state,
-                                    depart_compressor=depart_compressor_state,
-                                )
-                                if hdv_actions_h is not None and not isinstance(hdv_actions_h, tuple):
-                                    hdv_actions_h = hdv_actions_h.to(device, non_blocking=True)
-                            hdv_target_h = None if hdv_target is None else hdv_target[:, h + 1:h + 1 + target_h.shape[1]]
-                            target_for_loss = target_h
-                            if h > 0 and sched_prob > 0.0:
-                                z_pred_h = cfm_predict_one_timestep(
-                                    dyn.module if hasattr(dyn, "module") else dyn,
-                                    past_packed=z1[:, h - 1:h],
-                                    actions=actions_h,
-                                    act_mask=act_mask,
-                                    n_steps=int(getattr(args, "n_ode_steps", 1)),
-                                )
-                                use_pred = torch.rand(z_pred_h.shape[0], device=device) < sched_prob
-                                target_for_loss = _select_rollout_state(
-                                    z_gt=target_h[:, 0],
-                                    z_pred=z_pred_h,
-                                    use_pred_mask=use_pred,
-                                ).unsqueeze(1).expand_as(target_h)
-                            loss_h, aux_h = cfm_loss(
-                                dyn.module if hasattr(dyn, "module") else dyn,
-                                z1=target_for_loss,
-                                actions=actions_h,
-                                act_mask=act_mask,
-                                hdv_actions=hdv_actions_h,
-                                agent_tokens=None,
-                                hdv_target=hdv_target_h,
-                                hdv_policy_weight=float(getattr(args, "hdv_policy_weight", 0.0)),
-                                stackelberg=stackelberg_layer,
-                                flow_projector=_fp_for_stk,
-                                eq_weight=stackelberg_eq_weight,
-                                stackelberg_hdv_weight=stackelberg_hdv_weight,
-                                action_compressor=action_compressor_state,
-                                av_action_dim=(
-                                    int(action_compressor_state["output_dim"])
-                                    if action_compressor_state is not None else int(action_dim_flow)
-                                ),
-                                action_reconstruction_weight=action_reconstruction_weight,
-                                action_reconstruction_eps=action_reconstruction_eps,
-                                flow_targets=flow_target_h,
-                                cfm_active_weight=cfm_active_weight,
-                                cfm_busy_weight=cfm_busy_weight,
-                                cfm_busy_threshold=cfm_busy_threshold,
-                                cfm_active_threshold=cfm_active_threshold,
-                                cfm_max_weight=cfm_max_weight,
-                                volume_index=bpr_veh_index,
-                            )
-                            base_loss = base_loss + (float(rollout_gamma) ** h) * loss_h
-                            for k, v in aux_h.items():
-                                aux[k] = v
-                        aux["scheduled_sampling_prob"] = torch.tensor(float(sched_prob), device=device)
+                    base_loss, aux = cfm_loss(
+                        dyn.module if hasattr(dyn, "module") else dyn,
+                        z1=z1,
+                        actions=actions,
+                        act_mask=act_mask,
+                        hdv_actions=hdv_actions,
+                        agent_tokens=None,
+                        hdv_target=hdv_target,
+                        hdv_policy_weight=float(getattr(args, "hdv_policy_weight", 0.0)),
+                        stackelberg=stackelberg_layer,
+                        flow_projector=_fp_for_stk,
+                        eq_weight=stackelberg_eq_weight,
+                        stackelberg_hdv_weight=stackelberg_hdv_weight,
+                        action_compressor=action_compressor_state,
+                        av_action_dim=int(action_dim_flow),
+                        action_reconstruction_weight=action_reconstruction_weight,
+                        action_reconstruction_eps=action_reconstruction_eps,
+                        flow_targets=flows_b,
+                        cfm_active_weight=cfm_active_weight,
+                        cfm_busy_weight=cfm_busy_weight,
+                        cfm_busy_threshold=cfm_busy_threshold,
+                        cfm_active_threshold=cfm_active_threshold,
+                        cfm_max_weight=cfm_max_weight,
+                        volume_index=bpr_veh_index,
+                    )
                     decoder_recon_loss, decoder_recon_aux = decoder_reconstruction_loss(
                         decoded_dyn=decoded_dyn,
                         flow_targets=flows_b,
@@ -4439,19 +4111,10 @@ def train(args):
                                 depart_h = depart_h.to(device, non_blocking=True)
                             if context_h is not None:
                                 context_h = context_h.to(device, non_blocking=True)
-                            if action_encoder_type == "graph_cond":
-                                actions_adm = (
-                                    (act_for_transition_h, depart_h, context_h, hdv_context_h)
-                                    if hdv_context_h is not None else (act_for_transition_h, depart_h, context_h)
-                                )
-                            else:
-                                actions_adm = _build_model_actions(
-                                    act_raw=act_for_transition_h,
-                                    depart_b=depart_h if model_action_uses_depart_context else None,
-                                    context_b=context_h if model_action_uses_depart_context else None,
-                                    action_compressor=action_compressor_state,
-                                    depart_compressor=depart_compressor_state if model_action_uses_depart_context else None,
-                                ).to(device, non_blocking=True)
+                            actions_adm = (
+                                (act_for_transition_h, depart_h, context_h, hdv_context_h)
+                                if hdv_context_h is not None else (act_for_transition_h, depart_h, context_h)
+                            )
                             if adm_max_windows > 0 and context_z_h.shape[0] > adm_max_windows:
                                 adm_idx = torch.randperm(context_z_h.shape[0], device=device)[:adm_max_windows]
                                 context_z_h = context_z_h.index_select(0, adm_idx)
@@ -5127,18 +4790,10 @@ if __name__ == "__main__":
                        "'av_edge_action'/'action_edge' for older edge-action data, "
                        "and 'action' -> 'joint_action'."
                    ))
-    p.add_argument("--action_compress", type=str, default="none", choices=["none", "pca"],
-                   help="Optional action compression before training. 'pca' fits/loads linear PCA projector.")
-    p.add_argument("--action_pca_dim", type=int, default=32,
-                   help="Target PCA dimension when --action_compress pca.")
-    p.add_argument("--action_pca_ckpt", type=str, default="",
-                   help="Optional path to read/write action compressor checkpoint.")
-    p.add_argument("--action_encoder_type", type=str, default="mlp", choices=["mlp", "edge_gnn", "graph_cond"],
-                   help="Action encoder architecture for dynamics conditioning.")
-    p.add_argument("--action_gnn_layers", type=int, default=2,
-                   help="Number of message-passing layers for edge_gnn action encoder.")
-    p.add_argument("--action_gnn_d_edge", type=int, default=64,
-                   help="Edge hidden dim for edge_gnn action encoder.")
+    p.add_argument("--action_compress", type=str, default="none", choices=["none"],
+                   help="Current graph_cond mainline uses raw edge actions.")
+    p.add_argument("--action_encoder_type", type=str, default="graph_cond", choices=["graph_cond"],
+                   help="Current UrbanDreamer world-model action encoder.")
     p.add_argument("--edge_action_injection", action="store_true", default=False,
                    help="Inject raw per-edge action values into matching spatial tokens, masked where action is zero.")
     p.add_argument("--edge_action_injection_eps", type=float, default=1e-6,

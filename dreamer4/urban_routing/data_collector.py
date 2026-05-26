@@ -1097,7 +1097,9 @@ class DataCollector:
         first_valid = next((list(route) for route in suffixes if route), [])
         if not first_valid:
             return []
-        return [list(route) if route else list(first_valid) for route in suffixes[: self.n_routes]]
+        return self._normalize_valid_candidate_bank(
+            [list(route) if route else list(first_valid) for route in suffixes[: self.n_routes]]
+        )
 
     # ------------------------------------------------------------------
     # Per-episode vehicle role assignment
