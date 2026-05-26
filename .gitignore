@@ -1,0 +1,63 @@
+# Python caches and build outputs
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Virtual environments and local environment files
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Editor, OS, and local agent state
+.DS_Store
+.vscode/
+.idea/
+.claude/
+.codex/
+.agents/
+.omx/
+.urbandreamer/
+
+# Experiment data, generated networks, logs, and evaluation outputs
+data/
+networks/
+logs/
+results/
+wandb/
+tmp/
+
+# Model checkpoints and large binary artifacts
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.pkl
+*.pickle
+*.npz
+*.npy
+*.h5
+*.hdf5
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
+# Generated reports and presentation artifacts
+*.pptx
+*.pdf
+
+# Runtime logs
+*.log
+*.out
+*.err
