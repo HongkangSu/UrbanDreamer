@@ -163,15 +163,15 @@ def build_stage_defaults(cfg: Dict[str, str], stage: str) -> Dict[str, object]:
             "dreamer_value_coef": _maybe_float(cfg.get("DREAMER_VALUE_COEF")),
             "dreamer_entropy_coef": _maybe_float(cfg.get("DREAMER_ENTROPY_COEF")),
             "dreamer_critic_variant": cfg.get("DREAMER_CRITIC_VARIANT", ""),
+            "dreamer_ac_route_credit_mode": cfg.get("DREAMER_AC_ROUTE_CREDIT_MODE", ""),
+            "dreamer_ac_route_credit_pressure_weight": _maybe_float(cfg.get("DREAMER_AC_ROUTE_CREDIT_PRESSURE_WEIGHT")),
+            "dreamer_ac_route_credit_pressure_mode": cfg.get("DREAMER_AC_ROUTE_CREDIT_PRESSURE_MODE", ""),
+            "dreamer_ac_route_credit_pressure_reference": cfg.get("DREAMER_AC_ROUTE_CREDIT_PRESSURE_REFERENCE", ""),
             "lr": _maybe_float(cfg.get("MARL_LR")),
             "gamma": _maybe_float(cfg.get("MARL_GAMMA")),
             "gae_lambda": _maybe_float(cfg.get("MARL_GAE_LAMBDA")),
             "hidden_dim": _maybe_int(cfg.get("MARL_HIDDEN_DIM")),
             "n_hidden_layers": _maybe_int(cfg.get("MARL_N_HIDDEN_LAYERS")),
-            "eval_ratio_machines": _maybe_float(cfg.get("RATIO_MACHINES")),
-            "eval_network": cfg.get("NETWORK_NAME", ""),
-            "eval_network_folder": cfg.get("NETWORK_DIR", ""),
-            "eval_results_dir": cfg.get("EVAL_RESULTS_DIR", ""),
         })
     if stage == "eval":
         return _drop_none({

@@ -45,6 +45,18 @@ def compute_agent_counts(agents_df: pd.DataFrame, ratio_machines: float) -> Tupl
     return num_agents, num_machines, max_start_time
 
 
+def imagined_gawron_mode(mode: str) -> str:
+    """Return the differentiable imagination surrogate for a RouteRL mode."""
+    mode_key = str(mode or "replicator").strip().lower()
+    if mode_key == "routerl_blackbox":
+        return "routerl"
+    if mode_key in {"replicator", "routerl"}:
+        return mode_key
+    raise ValueError(
+        f"Unsupported gawron_mode={mode!r}; expected replicator, routerl, or routerl_blackbox"
+    )
+
+
 def ensure_agents_csv_in_records(
     network_folder: str,
     records_folder: str,
