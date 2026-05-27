@@ -269,6 +269,7 @@ class UrbanWorldModel(nn.Module):
                 context_dim=int(self.context_dim if self.context_dim > 0 else 3),
                 context_hidden=int(dyn_args.get("cond_context_hidden_dim", 64)),
                 use_hdv_context=bool(self.use_hdv_context),
+                edge_conditioning=bool(dyn_args.get("graph_cond_edge_conditioning", False)),
             )
             if self._registry.static_features is not None:
                 action_encoder.set_static_features(
@@ -309,6 +310,8 @@ class UrbanWorldModel(nn.Module):
             edge_action_tokenizer_fuse_encoder = bool(dyn_args.get("edge_action_tokenizer_fuse_encoder", False)),
             edge_action_output_injection = bool(dyn_args.get("edge_action_output_injection", False)),
             edge_action_output_from_injection = bool(dyn_args.get("edge_action_output_from_injection", False)),
+            graph_cond_edge_conditioning = bool(dyn_args.get("graph_cond_edge_conditioning", False)),
+            graph_cond_edge_conditioning_scale = float(dyn_args.get("graph_cond_edge_conditioning_scale", 1.0)),
             action_reconstruction = bool(float(dyn_args.get("action_reconstruction_weight", 0.0)) > 0.0),
         ).to(self.device).eval()
 

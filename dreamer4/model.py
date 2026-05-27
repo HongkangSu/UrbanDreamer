@@ -502,6 +502,7 @@ class ActionDepartGNNEncoder(nn.Module):
         context_dim: int = 3,
         context_hidden: int = 64,
         use_hdv_context: bool = False,
+        edge_conditioning: bool = False,
     ):
         super().__init__()
         self.n_edges = int(n_edges)
@@ -509,6 +510,7 @@ class ActionDepartGNNEncoder(nn.Module):
         self.d_model = int(d_model)
         self.context_dim = int(max(0, context_dim))
         self.use_hdv_context = bool(use_hdv_context)
+        self.edge_conditioning = bool(edge_conditioning)
         self.action_in = nn.Linear(1 + self.n_static, d_edge)
         self.depart_in = nn.Linear(1 + self.n_static, d_edge)
         self.action_gnn = nn.ModuleList([EdgeGNNLayer(d_edge) for _ in range(n_gnn_layers)])
@@ -519,6 +521,13 @@ class ActionDepartGNNEncoder(nn.Module):
             nn.Linear(context_hidden, context_hidden),
         )
         self.out = nn.Linear(4 * d_edge + context_hidden, d_model)
+        edge_conditioning_dim = (3 if self.use_hdv_context else 2) * d_edge
+        if self.edge_conditioning:
+            self.edge_conditioning_out = nn.Linear(edge_conditioning_dim, d_model)
+            nn.init.normal_(self.edge_conditioning_out.weight, std=0.02)
+            nn.init.zeros_(self.edge_conditioning_out.bias)
+        else:
+            self.edge_conditioning_out = None
         if self.use_hdv_context:
             self.hdv_context_in = nn.Linear(1 + self.n_static, d_edge)
             self.hdv_context_gnn = nn.ModuleList([EdgeGNNLayer(d_edge) for _ in range(n_gnn_layers)])
@@ -568,8 +577,9 @@ class ActionDepartGNNEncoder(nn.Module):
         context: Optional[torch.Tensor] = None,
         hdv_context: Optional[torch.Tensor] = None,
         as_tokens: bool = True,
+        return_edge_tokens: bool = False,
         **_: object,
-    ) -> torch.Tensor:
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, Optional[torch.Tensor]]]:
         if action.dim() == 2:
             action = action.unsqueeze(1)
         if action.dim() != 3 or int(action.shape[-1]) != self.n_edges:
@@ -630,6 +640,12 @@ class ActionDepartGNNEncoder(nn.Module):
             action_h = layer(action_h, adj)
         for layer in self.depart_gnn:
             depart_h = layer(depart_h, adj)
+        hdv_h = None
+        if self.use_hdv_context and hdv_in is not None and self.hdv_context_in is not None:
+            hdv_h = self.hdv_context_in(hdv_in)
+            assert self.hdv_context_gnn is not None
+            for layer in self.hdv_context_gnn:
+                hdv_h = layer(hdv_h, adj)
 
         pooled_parts = [
             action_h.mean(dim=2),
@@ -639,11 +655,7 @@ class ActionDepartGNNEncoder(nn.Module):
             self.ctx_mlp(context),
         ]
         out = self.out(torch.cat(pooled_parts, dim=-1))
-        if self.use_hdv_context and hdv_in is not None and self.hdv_context_in is not None:
-            hdv_h = self.hdv_context_in(hdv_in)
-            assert self.hdv_context_gnn is not None
-            for layer in self.hdv_context_gnn:
-                hdv_h = layer(hdv_h, adj)
+        if self.use_hdv_context and hdv_h is not None:
             hdv_pooled = torch.cat(
                 [
                     hdv_h.mean(dim=2),
@@ -653,7 +665,16 @@ class ActionDepartGNNEncoder(nn.Module):
             )
             assert self.hdv_context_out is not None
             out = out + self.hdv_context_out(hdv_pooled)
-        return out[:, :, None, :] if as_tokens else out
+        action_token = out[:, :, None, :] if as_tokens else out
+        if not bool(return_edge_tokens):
+            return action_token
+        edge_tokens = None
+        if self.edge_conditioning and self.edge_conditioning_out is not None:
+            edge_parts = [action_h, depart_h]
+            if self.use_hdv_context:
+                edge_parts.append(hdv_h if hdv_h is not None else torch.zeros_like(action_h))
+            edge_tokens = self.edge_conditioning_out(torch.cat(edge_parts, dim=-1))
+        return action_token, edge_tokens
 
 
 class FlowTimeEmbedder(nn.Module):
@@ -850,6 +871,8 @@ class Dynamics(nn.Module):
         edge_action_tokenizer_fuse_encoder: bool = False,
         edge_action_output_injection: bool = False,
         edge_action_output_from_injection: bool = False,
+        graph_cond_edge_conditioning: bool = False,
+        graph_cond_edge_conditioning_scale: float = 1.0,
         action_reconstruction: bool = False,
     ):
         super().__init__()
@@ -875,6 +898,8 @@ class Dynamics(nn.Module):
         self.edge_action_tokenizer_fuse_encoder = bool(edge_action_tokenizer_fuse_encoder)
         self.edge_action_output_injection = bool(edge_action_output_injection)
         self.edge_action_output_from_injection = bool(edge_action_output_from_injection)
+        self.graph_cond_edge_conditioning = bool(graph_cond_edge_conditioning)
+        self.graph_cond_edge_conditioning_scale = float(graph_cond_edge_conditioning_scale)
         if not self.use_cfm:
             raise ValueError("Dynamics now supports CFM only (use_cfm must be True).")
         self.hdv_policy_dim = int(hdv_policy_dim)
@@ -1021,25 +1046,33 @@ class Dynamics(nn.Module):
                 edge_action_values,
                 dtype=spatial_tokens.dtype,
             )
+        graph_cond_edge_tokens = None
+        encoder_action_tokens = None
+        if isinstance(actions, tuple):
+            encoder_out = self.action_encoder(
+                actions[0],
+                depart=actions[1],
+                context=actions[2],
+                hdv_context=(actions[3] if len(actions) > 3 else None),
+                as_tokens=True,
+                return_edge_tokens=self.graph_cond_edge_conditioning,
+            )
+            if isinstance(encoder_out, tuple):
+                encoder_action_tokens, graph_cond_edge_tokens = encoder_out
+            else:
+                encoder_action_tokens = encoder_out
+        elif tokenizer_action_tokens is None or self.edge_action_tokenizer_fuse_encoder:
+            encoder_action_tokens = self.action_encoder(
+                actions,
+                batch_time_shape=(B, T),
+                act_mask=act_mask,
+                as_tokens=True,
+            )  # (B,T,1,d_model)
+
         if tokenizer_action_tokens is not None and not self.edge_action_tokenizer_fuse_encoder:
             action_tokens = tokenizer_action_tokens
         else:
-            if isinstance(actions, tuple):
-                hdv_context = actions[3] if len(actions) > 3 else None
-                action_tokens = self.action_encoder(
-                    actions[0],
-                    depart=actions[1],
-                    context=actions[2],
-                    hdv_context=hdv_context,
-                    as_tokens=True,
-                )
-            else:
-                action_tokens = self.action_encoder(
-                    actions,
-                    batch_time_shape=(B, T),
-                    act_mask=act_mask,
-                    as_tokens=True,
-                )  # (B,T,1,d_model)
+            action_tokens = encoder_action_tokens
             if tokenizer_action_tokens is not None:
                 # Preserve the full encoder-conditioned ACTION token (e.g. HDV
                 # departures and context) while still injecting edge-indexed
@@ -1054,6 +1087,11 @@ class Dynamics(nn.Module):
                 dtype=spatial_tokens.dtype,
             )
         spatial_tokens = self._inject_edge_actions(spatial_tokens, actions, edge_action_tokens=edge_action_tokens)
+        if graph_cond_edge_tokens is not None:
+            spatial_tokens = spatial_tokens + graph_cond_edge_tokens.to(
+                device=spatial_tokens.device,
+                dtype=spatial_tokens.dtype,
+            ) * self.graph_cond_edge_conditioning_scale
         spatial_tokens = self._inject_hdv_context(spatial_tokens, actions)
 
         reg = self.register_tokens.view(1, 1, self.n_register, self.d_model).expand(B, T, -1, -1)

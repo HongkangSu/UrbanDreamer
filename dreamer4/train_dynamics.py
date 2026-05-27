@@ -1472,6 +1472,7 @@ def train(args):
         context_hidden=int(getattr(args, "cond_context_hidden_dim", 64)),
         use_hdv_context=str(getattr(args, "transition_hdv_context_mode", "none") or "none").strip().lower()
         not in {"", "none", "off", "disabled"},
+        edge_conditioning=bool(getattr(args, "graph_cond_edge_conditioning", False)),
     )
     if edge_registry.static_features is not None:
         action_encoder.set_static_features(
@@ -1512,6 +1513,8 @@ def train(args):
         edge_action_tokenizer_fuse_encoder=bool(getattr(args, "edge_action_tokenizer_fuse_encoder", False)),
         edge_action_output_injection=bool(getattr(args, "edge_action_output_injection", False)),
         edge_action_output_from_injection=bool(getattr(args, "edge_action_output_from_injection", False)),
+        graph_cond_edge_conditioning=bool(getattr(args, "graph_cond_edge_conditioning", False)),
+        graph_cond_edge_conditioning_scale=float(getattr(args, "graph_cond_edge_conditioning_scale", 1.0)),
         action_reconstruction=(float(getattr(args, "action_reconstruction_weight", 0.0)) > 0.0),
     ).to(device)
 
@@ -3200,6 +3203,13 @@ if __name__ == "__main__":
                    help="Number of graph layers for graph_cond.")
     p.add_argument("--cond_context_hidden_dim", type=int, default=64,
                    help="Hidden dim for graph_cond context MLP.")
+    p.add_argument("--graph_cond_edge_conditioning", action="store_true", default=False,
+                   help=(
+                       "Inject graph-conditioned per-edge action/depart/HDV features into matching spatial tokens. "
+                       "This avoids making graph_cond actions depend only on pooled ACTION-token summaries."
+                   ))
+    p.add_argument("--graph_cond_edge_conditioning_scale", type=float, default=1.0,
+                   help="Multiplier for graph_cond per-edge conditioning injected into spatial tokens.")
     p.add_argument("--aux_action_key", type=str, default="",
                    help="Optional auxiliary action key for HDV edge-distribution supervision (recommended: 'hdv_edge_action').")
     p.add_argument("--reward_key", type=str, default="reward",

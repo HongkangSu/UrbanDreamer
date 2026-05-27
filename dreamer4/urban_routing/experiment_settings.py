@@ -126,6 +126,13 @@ def build_stage_defaults(cfg: Dict[str, str], stage: str) -> Dict[str, object]:
             "flow_task_name": cfg.get("FLOW_TASK_NAME", ""),
             "action_key": cfg.get("ACTION_KEY", ""),
             "aux_action_key": cfg.get("AUX_ACTION_KEY", ""),
+            "hdv_policy_target_mode": cfg.get("HDV_POLICY_TARGET_MODE", ""),
+            "hdv_policy_action_mode": cfg.get("HDV_POLICY_ACTION_MODE", ""),
+            "transition_hdv_context_mode": cfg.get("TRANSITION_HDV_CONTEXT_MODE", ""),
+            "transition_hdv_context_weight": _maybe_float(cfg.get("TRANSITION_HDV_CONTEXT_WEIGHT")),
+            "transition_hdv_context_scale": _maybe_float(cfg.get("TRANSITION_HDV_CONTEXT_SCALE")),
+            "graph_cond_edge_conditioning": _maybe_bool(cfg.get("GRAPH_COND_EDGE_CONDITIONING")),
+            "graph_cond_edge_conditioning_scale": _maybe_float(cfg.get("GRAPH_COND_EDGE_CONDITIONING_SCALE")),
             "ckpt_dir": cfg.get("DYNAMICS_LOG_DIR", ""),
         })
     if stage == "marl":

@@ -30,6 +30,16 @@ from dreamer4.urban_routing.routerl_shared import (  # noqa: E402
 )
 
 
+DEFAULT_INCIDENT_START = 500.0
+DEFAULT_INCIDENT_END = 1500.0
+DEFAULT_INCIDENT_SPEED = 1.0
+DEFAULT_INCIDENTS = {
+    "ingolstadt_custom": "201201950#0",
+    "ingolstadt_custom2": "201201950#0",
+    "gretz_armainvilliers": "-78047947#0",
+}
+
+
 @dataclass(frozen=True)
 class FullCyclePlan:
     collect_settings: Path
@@ -125,6 +135,45 @@ def _write_settings(path: Path, values: dict[str, object]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _default_incident_edge(args: argparse.Namespace) -> str:
+    for key in (str(args.network_name or ""), Path(str(args.network_dir or "")).name):
+        edge = DEFAULT_INCIDENTS.get(key)
+        if edge:
+            return edge
+    return ""
+
+
+def apply_incident_defaults(args: argparse.Namespace) -> None:
+    incident_edge_arg = args.incident_edge
+    default_edge = _default_incident_edge(args)
+    if incident_edge_arg is None:
+        args.incident_edge = default_edge
+    else:
+        args.incident_edge = str(incident_edge_arg).strip()
+
+    if args.incident_start is None:
+        args.incident_start = DEFAULT_INCIDENT_START
+    if args.incident_end is None:
+        args.incident_end = DEFAULT_INCIDENT_END
+    if args.incident_speed is None:
+        args.incident_speed = DEFAULT_INCIDENT_SPEED
+
+    incident_enabled = (
+        bool(str(args.incident_edge or "").strip())
+        and float(args.incident_end) > float(args.incident_start)
+        and float(args.incident_speed) > 0.0
+    )
+    if bool(args.require_incident) and not incident_enabled:
+        known = ", ".join(sorted(DEFAULT_INCIDENTS))
+        raise ValueError(
+            "Incident is required by the URB-fair full-cycle mainline, but no valid "
+            f"default incident is configured for network_name={args.network_name!r} "
+            f"or network_dir={args.network_dir!r}. Known incident defaults: {known}. "
+            "Pass --incident-edge explicitly, or pass --no-require-incident for a "
+            "deliberate no-incident baseline."
+        )
+
+
 def _has_route_artifact_bundle(path: Path) -> bool:
     return (
         (path / "agents.csv").exists()
@@ -173,6 +222,15 @@ def _base_settings(args: argparse.Namespace, paths: dict[str, object], n_av: int
         "DISABLE_HUMAN_LEARNING_AFTER_MUTATION": "1",
         "FLOW_DATA_DIR": paths["collect_output_dir"],
         "FLOW_TASK_NAME": paths["collect_task_name"],
+        "ACTION_KEY": "av_planned_edge_flow",
+        "AUX_ACTION_KEY": "hdv_edge_action",
+        "HDV_POLICY_TARGET_MODE": args.hdv_policy_target_mode,
+        "HDV_POLICY_ACTION_MODE": args.hdv_policy_action_mode,
+        "TRANSITION_HDV_CONTEXT_MODE": args.transition_hdv_context_mode,
+        "TRANSITION_HDV_CONTEXT_WEIGHT": args.transition_hdv_context_weight,
+        "TRANSITION_HDV_CONTEXT_SCALE": args.transition_hdv_context_scale,
+        "GRAPH_COND_EDGE_CONDITIONING": "1" if args.graph_cond_edge_conditioning else "0",
+        "GRAPH_COND_EDGE_CONDITIONING_SCALE": args.graph_cond_edge_conditioning_scale,
         "DYNAMICS_LOG_DIR": paths["wm_ckpt_dir"],
         "PROJECTOR_CKPT": paths["projector_ckpt"],
         "DYNAMICS_CKPT": paths["dynamics_ckpt"],
@@ -288,6 +346,18 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
         "active_count",
         "--hdv_policy_weight",
         str(args.hdv_policy_weight),
+        "--hdv_policy_target_mode",
+        str(args.hdv_policy_target_mode),
+        "--hdv_policy_action_mode",
+        str(args.hdv_policy_action_mode),
+        "--transition_hdv_context_mode",
+        str(args.transition_hdv_context_mode),
+        "--transition_hdv_context_weight",
+        str(args.transition_hdv_context_weight),
+        "--transition_hdv_context_scale",
+        str(args.transition_hdv_context_scale),
+        "--graph_cond_edge_conditioning_scale",
+        str(args.graph_cond_edge_conditioning_scale),
         "--decoder_recon_weight",
         str(args.decoder_recon_weight),
         "--packing_factor",
@@ -319,6 +389,8 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
     ]
     if args.wm_resume_ckpt:
         dynamics_command.extend(["--resume", str(_resolve(args.wm_resume_ckpt))])
+    if bool(args.graph_cond_edge_conditioning):
+        dynamics_command.append("--graph_cond_edge_conditioning")
 
     marl_command = [
         py,
@@ -549,11 +621,13 @@ def resolve_paths(args: argparse.Namespace) -> dict[str, object]:
 
 
 def build_plan(args: argparse.Namespace) -> FullCyclePlan:
+    apply_incident_defaults(args)
     paths = resolve_paths(args)
     return _commands(args, paths, parse_checkpoint_episodes(args.checkpoint_episodes))
 
 
 def write_plan_settings(args: argparse.Namespace, plan: FullCyclePlan) -> None:
+    apply_incident_defaults(args)
     paths = resolve_paths(args)
     agents_csv = Path(paths["agents_csv"])
     n_av, n_hdv = derive_agent_counts(agents_csv, args.ratio_machines, args.n_av, args.n_hdv)
@@ -693,10 +767,11 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--n-hdv", type=int, default=0, help=hidden)
     p.add_argument("--episode-steps", type=int, default=60, help=hidden)
     p.add_argument("--sim-buffer-after-last-depart", type=int, default=1000, help=hidden)
-    p.add_argument("--incident-edge", default="", help=hidden)
-    p.add_argument("--incident-start", type=float, default=0.0, help=hidden)
-    p.add_argument("--incident-end", type=float, default=0.0, help=hidden)
-    p.add_argument("--incident-speed", type=float, default=0.0, help=hidden)
+    p.add_argument("--incident-edge", default=None, help=hidden)
+    p.add_argument("--incident-start", type=float, default=None, help=hidden)
+    p.add_argument("--incident-end", type=float, default=None, help=hidden)
+    p.add_argument("--incident-speed", type=float, default=None, help=hidden)
+    p.add_argument("--require-incident", action=argparse.BooleanOptionalAction, default=True, help=hidden)
     p.add_argument("--route-generator", default="dijkstra", help=hidden)
     p.add_argument("--path-gen-beta", type=float, default=-5.0, help=hidden)
     p.add_argument("--path-num-samples", type=int, default=10, help=hidden)
@@ -725,6 +800,13 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--wm-eval-every", type=int, default=1000, help=hidden)
     p.add_argument("--wm-resume-ckpt", default="", help=hidden)
     p.add_argument("--hdv-policy-weight", type=float, default=0.05, help=hidden)
+    p.add_argument("--hdv-policy-target-mode", choices=["step", "episode_mean", "window_mean", "episode_response", "response"], default="episode_mean", help=hidden)
+    p.add_argument("--hdv-policy-action-mode", choices=["step", "window_mean", "episode_mean", "episode_response", "response"], default="window_mean", help=hidden)
+    p.add_argument("--transition-hdv-context-mode", choices=["none", "step", "per_step", "raw", "raw_step", "episode_mean", "episode_response", "response"], default="episode_response", help=hidden)
+    p.add_argument("--transition-hdv-context-weight", type=float, default=1.0, help=hidden)
+    p.add_argument("--transition-hdv-context-scale", type=float, default=1.0, help=hidden)
+    p.add_argument("--graph-cond-edge-conditioning", action=argparse.BooleanOptionalAction, default=True, help=hidden)
+    p.add_argument("--graph-cond-edge-conditioning-scale", type=float, default=1.0, help=hidden)
     p.add_argument("--decoder-recon-weight", type=float, default=0.20, help=hidden)
     p.add_argument("--transition-decoded-supervision-weight", type=float, default=1.0, help=hidden)
     p.add_argument("--bpr-supervision-weight", type=float, default=0.10, help=hidden)
@@ -773,6 +855,7 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Iterable[str] | None = None) -> int:
     args = parse_args(argv)
+    apply_incident_defaults(args)
     plan = build_plan(args)
     write_plan_settings(args, plan)
     if args.dry_run:
