@@ -314,6 +314,131 @@ class CentralizedLatentValueCritic(nn.Module):
         return self.value_head(h)
 
 
+class CentralizedVehicleValueCritic(nn.Module):
+    """Per-vehicle critic over route-observation tokens.
+
+    The critic predicts one value for each active vehicle.  In ``self_attention``
+    mode, vehicles from the same imagined step attend to each other before the
+    value head, preserving a per-vehicle output while still allowing centralized
+    information flow within the active fleet.
+    """
+
+    def __init__(
+        self,
+        obs_dim: int,
+        context_dim: int = 0,
+        hidden_dim: int = 256,
+        n_hidden_layers: int = 2,
+        architecture: str = "self_attention",
+        n_attention_heads: int = 4,
+    ):
+        super().__init__()
+        self.obs_dim = int(obs_dim)
+        self.context_dim = int(max(context_dim, 0))
+        self.hidden_dim = int(hidden_dim)
+        self.architecture = str(architecture or "self_attention").strip().lower()
+        if self.architecture in {"attention", "transformer"}:
+            self.architecture = "self_attention"
+        if self.architecture not in {"mlp", "self_attention"}:
+            raise ValueError(f"Unsupported CentralizedVehicleValueCritic architecture: {architecture!r}")
+
+        heads = int(max(n_attention_heads, 1))
+        while heads > 1 and self.hidden_dim % heads != 0:
+            heads -= 1
+        self.n_attention_heads = heads
+
+        input_dim = self.obs_dim + self.context_dim
+        layers = [nn.Linear(input_dim, self.hidden_dim), nn.Tanh()]
+        for _ in range(max(int(n_hidden_layers) - 1, 0)):
+            layers += [nn.Linear(self.hidden_dim, self.hidden_dim), nn.Tanh()]
+        self.encoder = nn.Sequential(*layers)
+
+        self.use_attention = self.architecture == "self_attention"
+        if self.use_attention:
+            self.token_norm = nn.LayerNorm(self.hidden_dim)
+            self.vehicle_attention = nn.MultiheadAttention(
+                embed_dim=self.hidden_dim,
+                num_heads=self.n_attention_heads,
+                batch_first=True,
+            )
+            self.output_norm = nn.LayerNorm(self.hidden_dim)
+        else:
+            self.token_norm = None
+            self.vehicle_attention = None
+            self.output_norm = None
+        self.value_head = nn.Linear(self.hidden_dim, 1)
+
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.orthogonal_(m.weight, gain=math.sqrt(2))
+                nn.init.zeros_(m.bias)
+        nn.init.orthogonal_(self.value_head.weight, gain=1.0)
+
+    def _prepare_context(self, context: Optional[torch.Tensor], batch_size: int) -> torch.Tensor:
+        if self.context_dim <= 0:
+            return torch.zeros((batch_size, 0), dtype=torch.float32)
+        if context is None:
+            return torch.zeros((batch_size, self.context_dim), dtype=torch.float32)
+        if context.dim() == 1:
+            context = context.unsqueeze(0)
+        if context.dim() != 2 or context.shape[0] != batch_size:
+            raise ValueError(
+                f"expected context shape ({batch_size}, {self.context_dim}), got {tuple(context.shape)}"
+            )
+        if context.shape[1] < self.context_dim:
+            pad = torch.zeros(
+                (batch_size, self.context_dim - int(context.shape[1])),
+                device=context.device,
+                dtype=context.dtype,
+            )
+            context = torch.cat([context, pad], dim=-1)
+        elif context.shape[1] > self.context_dim:
+            context = context[:, : self.context_dim]
+        return context
+
+    def forward(
+        self,
+        obs: torch.Tensor,
+        context: Optional[torch.Tensor] = None,
+        group_index: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        if obs.dim() != 2 or int(obs.shape[1]) != self.obs_dim:
+            raise ValueError(f"expected obs shape (N, {self.obs_dim}), got {tuple(obs.shape)}")
+        batch_size = int(obs.shape[0])
+        if batch_size <= 0:
+            return torch.zeros((0, 1), device=obs.device, dtype=obs.dtype)
+
+        critic_in = obs
+        if self.context_dim > 0:
+            context_in = self._prepare_context(context, batch_size).to(device=obs.device, dtype=obs.dtype)
+            critic_in = torch.cat([critic_in, context_in], dim=-1)
+        h = self.encoder(critic_in)
+
+        if self.use_attention:
+            assert self.token_norm is not None
+            assert self.vehicle_attention is not None
+            assert self.output_norm is not None
+            if group_index is None:
+                groups = torch.zeros((batch_size,), device=obs.device, dtype=torch.long)
+            else:
+                groups = group_index.reshape(-1)[:batch_size].to(device=obs.device, dtype=torch.long)
+                if int(groups.numel()) != batch_size:
+                    raise ValueError(
+                        f"group_index length {int(groups.numel())} must match obs batch {batch_size}"
+                    )
+            attended = h.clone()
+            for group_value in torch.unique(groups, sorted=True):
+                mask = groups == group_value
+                if not bool(mask.any().detach().cpu().item()):
+                    continue
+                tokens = self.token_norm(h[mask]).unsqueeze(0)
+                attn_out, _ = self.vehicle_attention(tokens, tokens, tokens, need_weights=False)
+                attended[mask] = self.output_norm(tokens.squeeze(0) + attn_out.squeeze(0))
+            h = attended
+
+        return self.value_head(h)
+
+
 def lambda_return(
     rewards: torch.Tensor,
     next_values: torch.Tensor,
