@@ -63,6 +63,7 @@ try:
     )
     from .dreamer_route_objectives import (
         _combined_grpo_policy_loss,
+        _counterfactual_fleet_pressure_cost_matrix,
         _dreamer_action_route_probs,
         _expected_cost_policy_loss,
         _expected_route_cost_from_cost_matrix,
@@ -79,6 +80,7 @@ try:
         _planned_av_pressure_edge_weights,
         _rollout_baseline_relative_advantages,
         _rollout_group_relative_advantages,
+        _route_credit_base_cost_matrix,
         _route_cost_matrix_from_paths,
         _route_cost_policy_aux_loss,
         _route_prob_churn,
@@ -116,7 +118,7 @@ try:
         build_vehicle_obs_from_path_batch,
         build_vehicle_obs_vectorized,
         build_vehicle_route_cost_obs_features,
-        choose_vehicle_next_edge,
+        advance_vehicle_along_path_time_budget,
         vehicle_route_feature_dim,
     )
 except ImportError:
@@ -147,6 +149,7 @@ except ImportError:
     )
     from dreamer_route_objectives import (
         _combined_grpo_policy_loss,
+        _counterfactual_fleet_pressure_cost_matrix,
         _dreamer_action_route_probs,
         _expected_cost_policy_loss,
         _expected_route_cost_from_cost_matrix,
@@ -163,6 +166,7 @@ except ImportError:
         _planned_av_pressure_edge_weights,
         _rollout_baseline_relative_advantages,
         _rollout_group_relative_advantages,
+        _route_credit_base_cost_matrix,
         _route_cost_matrix_from_paths,
         _route_cost_policy_aux_loss,
         _route_prob_churn,
@@ -200,7 +204,7 @@ except ImportError:
         build_vehicle_obs_from_path_batch,
         build_vehicle_obs_vectorized,
         build_vehicle_route_cost_obs_features,
-        choose_vehicle_next_edge,
+        advance_vehicle_along_path_time_budget,
         vehicle_route_feature_dim,
     )
 
@@ -363,6 +367,8 @@ class TrainConfig:
     stackelberg_damping: float = 0.5
     vehicle_path_penalty_factor: float = 3.0
     vehicle_candidate_source: str = "current_to_dest"  # current_to_dest | od_suffix
+    vehicle_path_cache_mode: str = "lazy"  # lazy | precompute
+    vehicle_path_cache_max_entries: int = 250000
     vehicle_routes_csv: str = ""       # optional route artifacts CSV for od_suffix vehicle candidates
     vehicle_obs_include_global: bool = True
     vehicle_obs_route_stats: str = "mean"
@@ -411,16 +417,22 @@ class TrainConfig:
     dreamer_value_coef: float = 1.0
     dreamer_entropy_coef: float = 1e-3
     dreamer_critic_variant: str = "v_only"  # v_only | action_conditioned
-    dreamer_actor_objective: str = "direct_return"  # direct_return | critic_q | direct_plus_q | discrete_actor_critic
+    dreamer_critic_aggregation: str = "mean"  # mean | global_attention
+    dreamer_critic_attention_heads: int = 4
+    dreamer_actor_objective: str = "discrete_actor_critic"  # direct_return | critic_q | direct_plus_q | discrete_actor_critic
     dreamer_actor_q_weight: float = 1.0
     dreamer_ac_advantage_clip: float = 5.0
     dreamer_ac_step_advantage_weight: float = 0.2
     dreamer_ac_route_advantage_weight: float = 1.0
-    dreamer_ac_route_credit_mode: str = "route_cost"  # route_cost | planned_pressure | marginal_pressure | sequential_marginal
+    dreamer_ac_route_credit_mode: str = "route_cost"  # route_cost | planned_pressure | marginal_pressure | sequential_marginal | counterfactual_pressure
     dreamer_ac_route_credit_pressure_weight: float = 1.0
     dreamer_ac_route_credit_pressure_mode: str = "clipped_excess_tt_ratio"
     dreamer_ac_route_credit_pressure_reference: str = "soft"  # soft | argmax | sequential_argmax
     dreamer_ac_route_credit_normalize_by_path_length: bool = False
+    dreamer_ac_route_credit_base_cost_mode: str = "progress_fraction"
+    dreamer_ac_route_credit_remaining_tt_eps: float = 1.0
+    dreamer_ac_route_credit_progress_cap: float = 1.0
+    dreamer_ac_route_credit_include_base_cost: bool = True
     dreamer_ac_route_advantage_temperature: float = 60.0
     dreamer_ac_normalize_route_advantages: bool = True
     dreamer_action_mode: str = "expected"  # expected | straight_through_sample | straight_through_argmax
@@ -1192,6 +1204,7 @@ def _route_credit_cost_matrix(
     pressure_mode: str,
     pressure_reference: str,
     normalize_by_path_length: bool,
+    include_base_cost: bool = True,
     detach_pressure: bool = True,
 ) -> torch.Tensor:
     """Build the route-credit cost matrix used by per-vehicle policy gradients.
@@ -1265,18 +1278,53 @@ def _route_credit_cost_matrix(
             edge_weights=edge_weights,
             normalize_by_path_length=bool(normalize_by_path_length),
         )
+    elif mode_key in {
+        "counterfactual_pressure",
+        "counterfactual_fleet_pressure",
+        "coma_pressure",
+        "rollout_pressure",
+    }:
+        _, _, _, t_e_cf = edge_tt_from_latent_state(
+            wm=wm,
+            z=z,
+            bpr_alpha=cfg.bpr_alpha,
+            bpr_beta=cfg.bpr_beta,
+            edge_cost_source=cfg.wm_edge_cost_source,
+            decoded_speed_min_ratio=cfg.wm_decoded_speed_min_ratio,
+            decoded_speed_max_ratio=cfg.wm_decoded_speed_max_ratio,
+            decoded_speed_excess_scale=cfg.wm_decoded_speed_excess_scale,
+        )
+        edge_tt_cf = torch.from_numpy(np.asarray(t_e_cf, dtype=np.float32)).to(
+            device=device,
+            dtype=base_route_costs.dtype,
+        )
+        credit_costs = _counterfactual_fleet_pressure_cost_matrix(
+            route_probs=route_probs,
+            path_batch=path_batch,
+            route_valid=route_valid,
+            edge_tt=edge_tt_cf,
+            n_edges=n_edges,
+            n_routes=n_routes,
+            edge_weights=edge_weights,
+            normalize_by_path_length=bool(normalize_by_path_length),
+            detach_pressure=bool(detach_pressure),
+        )
     else:
         raise ValueError(
             "Unsupported route credit mode "
-            f"{mode!r}; expected route_cost, planned_pressure, marginal_pressure, or sequential_marginal"
+            f"{mode!r}; expected route_cost, planned_pressure, marginal_pressure, "
+            "sequential_marginal, or counterfactual_pressure"
         )
 
     if credit_costs is None:
         return base_route_costs
-    return base_route_costs + pressure_weight * credit_costs.to(
+    pressure_costs = pressure_weight * credit_costs.to(
         device=base_route_costs.device,
         dtype=base_route_costs.dtype,
     )
+    if not bool(include_base_cost):
+        return pressure_costs
+    return base_route_costs + pressure_costs
 
 
 def imagined_episode_dynamic_dreamer(
@@ -1441,12 +1489,22 @@ def imagined_episode_dynamic_dreamer(
             "n_hdv": 0,
         })
         for veh in dep.get("av_vehicles", []):
-            active_avs.append({**veh, "depart_step": step})
+            av_new = {**veh, "depart_step": step}
+            if route_registry is not None:
+                od_idx_new = int(av_new.get("od_idx", -1))
+                if 0 <= od_idx_new < int(route_registry.n_od):
+                    od_routes_new = route_registry.route_edge_indices[od_idx_new]
+                    if od_routes_new:
+                        av_new["current_route"] = list(od_routes_new[0])
+            active_avs.append(av_new)
         for veh in dep.get("hdv_vehicles", []):
             active_hdvs.append({**veh, "depart_step": step})
 
         max_life = int(avg_route_steps * 1.5)
-        active_avs = [av for av in active_avs if (step - av["depart_step"]) < max_life]
+        active_avs = [
+            av for av in active_avs
+            if (step - av["depart_step"]) < max_life and not bool(av.get("arrived", False))
+        ]
         active_hdvs = [hdv for hdv in active_hdvs if (step - hdv["depart_step"]) < max_life]
         _ensure_active_vehicle_current_edges(
             active_avs=active_avs,
@@ -1480,6 +1538,13 @@ def imagined_episode_dynamic_dreamer(
                 dtype=np.int64,
             )
             dest_edges_np = np.asarray([int(av["dest_edge"]) for av in active_avs], dtype=np.int64)
+            elapsed_time_np = np.asarray(
+                [
+                    max(0.0, float(step - int(av.get("depart_step", step)))) * float(step_interval)
+                    for av in active_avs
+                ],
+                dtype=np.float32,
+            )
             done_np = np.zeros((n_active_av,), dtype=bool)
             if str(getattr(cfg, "vehicle_candidate_source", "current_to_dest")).strip().lower() == "od_suffix":
                 path_batch = _od_suffix_path_batch(
@@ -2114,8 +2179,24 @@ def imagined_episode_dynamic_dreamer(
                         route_adv_route_cost_matrix_needed
                         and selected_route_idx_t_for_update is not None
                     ):
+                        ac_base_route_costs = _route_credit_base_cost_matrix(
+                            route_tt_costs=route_costs.detach(),
+                            route_valid=route_valid,
+                            mode=str(getattr(cfg, "dreamer_ac_route_credit_base_cost_mode", "progress_fraction")),
+                            step_interval=float(getattr(cfg, "step_interval", 30.0)),
+                            elapsed_time=torch.from_numpy(elapsed_time_np).to(
+                                device=route_costs.device,
+                                dtype=route_costs.dtype,
+                            ),
+                            remaining_tt_eps=float(
+                                getattr(cfg, "dreamer_ac_route_credit_remaining_tt_eps", 1.0)
+                            ),
+                            progress_cap=float(
+                                getattr(cfg, "dreamer_ac_route_credit_progress_cap", 1.0)
+                            ),
+                        )
                         ac_route_costs = _route_credit_cost_matrix(
-                            base_route_costs=route_costs.detach(),
+                            base_route_costs=ac_base_route_costs.detach(),
                             route_probs=route_probs.detach(),
                             path_batch=path_batch,
                             route_valid=route_valid,
@@ -2137,6 +2218,9 @@ def imagined_episode_dynamic_dreamer(
                             ),
                             normalize_by_path_length=bool(
                                 getattr(cfg, "dreamer_ac_route_credit_normalize_by_path_length", False)
+                            ),
+                            include_base_cost=bool(
+                                getattr(cfg, "dreamer_ac_route_credit_include_base_cost", True)
                             ),
                             detach_pressure=True,
                         )
@@ -2198,10 +2282,16 @@ def imagined_episode_dynamic_dreamer(
                 chosen_path = paths[k_sel]
                 if not chosen_path:
                     continue
-                next_edge = choose_vehicle_next_edge(int(current_edges_np[i]), chosen_path)
-                av["current_edge"] = int(next_edge)
                 av["last_route_idx"] = int(k_sel)
-                av["arrived"] = int(next_edge) == int(av.get("dest_edge", next_edge))
+                av["current_route"] = list(chosen_path)
+                advance_vehicle_along_path_time_budget(
+                    av,
+                    current_edge=int(current_edges_np[i]),
+                    chosen_path=chosen_path,
+                    edge_travel_times=np.asarray(t_e_curr, dtype=np.float32),
+                    step_interval=float(cfg.step_interval),
+                    n_edges=n_edges,
+                )
             route_probs_for_reward = action_route_probs
             path_batch_for_reward = path_batch
             actor_step_flags.append(1 if valid_path_agents > 0 else 0)
@@ -3425,19 +3515,22 @@ def train(cfg: TrainConfig) -> None:
         action_dim=(int(wm.n_edges) if str(cfg.dreamer_critic_variant).lower() == "action_conditioned" else 0),
         hidden_dim=cfg.hidden_dim,
         n_hidden_layers=cfg.n_hidden_layers,
+        aggregation=str(getattr(cfg, "dreamer_critic_aggregation", "mean")),
+        n_attention_heads=int(getattr(cfg, "dreamer_critic_attention_heads", 4)),
     ).to(device)
     freeze_module(wm)
     policy = actor
     actor_optimizer = torch.optim.Adam(actor.parameters(), lr=cfg.lr)
     critic_optimizer = torch.optim.Adam(critic.parameters(), lr=cfg.lr)
     logger.info(
-        "Dreamer CTDE mainline active: actor_obs_dim=%d n_routes=%d d_spatial=%d batch_eps=%d actor_h=%d critic_variant=%s",
+        "Dreamer CTDE mainline active: actor_obs_dim=%d n_routes=%d d_spatial=%d batch_eps=%d actor_h=%d critic_variant=%s critic_aggregation=%s",
         obs_dim,
         int(cfg.n_routes),
         int(wm.d_spatial),
         int(cfg.dreamer_batch_episodes),
         min(int(cfg.imagination_horizon), int(cfg.dreamer_actor_horizon)),
         str(cfg.dreamer_critic_variant),
+        str(getattr(cfg, "dreamer_critic_aggregation", "mean")),
     )
 
     horizon_proxy: Optional[ActionHorizonProxyReward] = None
@@ -3522,10 +3615,48 @@ def train(cfg: TrainConfig) -> None:
             for d in route_registry.destinations
         ))
         _dest_edges_unique = [d for d in _dest_edges_unique if d >= 0]
-        if str(getattr(cfg, "vehicle_candidate_source", "od_suffix")).strip().lower() != "od_suffix":
-            raise RuntimeError("Current Dreamer CTDE mainline requires vehicle_candidate_source=od_suffix.")
-        _vehicle_path_cache = None
-        logger.info("Vehicle path cache disabled: using precomputed od_suffix candidate routes.")
+        _candidate_source = str(getattr(cfg, "vehicle_candidate_source", "current_to_dest")).strip().lower()
+        if _candidate_source == "od_suffix":
+            _vehicle_path_cache = None
+            logger.info("Vehicle path cache disabled: using precomputed od_suffix candidate routes.")
+        elif _candidate_source == "current_to_dest":
+            _cache_mode = str(getattr(cfg, "vehicle_path_cache_mode", "lazy") or "lazy").strip().lower()
+            if _cache_mode in {"lazy", "on_demand", "ondemand"}:
+                _vehicle_path_cache = LazyVehiclePathCache(
+                    adj_list=_adj_list,
+                    n_edges=int(wm.n_edges),
+                    K=int(cfg.n_routes),
+                    penalty_factor=float(cfg.vehicle_path_penalty_factor),
+                    max_entries=int(getattr(cfg, "vehicle_path_cache_max_entries", 250000)),
+                )
+                logger.info(
+                    "Vehicle path cache enabled: current_edge->dest lazy candidates max_entries=%d",
+                    int(getattr(cfg, "vehicle_path_cache_max_entries", 250000)),
+                )
+            elif _cache_mode in {"precompute", "eager", "full"}:
+                _vehicle_path_cache = VehiclePathCache(
+                    adj_list=_adj_list,
+                    edge_tt_ref=_edge_tt_ref,
+                    dest_edges_unique=_dest_edges_unique,
+                    n_edges=int(wm.n_edges),
+                    K=int(cfg.n_routes),
+                    penalty_factor=float(cfg.vehicle_path_penalty_factor),
+                )
+                logger.info(
+                    "Vehicle path cache enabled: current_edge->dest precomputed candidates destinations=%d entries=%d",
+                    len(_dest_edges_unique),
+                    len(getattr(_vehicle_path_cache, "_cache", {})),
+                )
+            else:
+                raise ValueError(
+                    "vehicle_path_cache_mode must be one of {'lazy', 'precompute'}, "
+                    f"got {_cache_mode!r}"
+                )
+        else:
+            raise ValueError(
+                "vehicle_candidate_source must be one of {'current_to_dest', 'od_suffix'}, "
+                f"got {_candidate_source!r}"
+            )
         agents_path = cfg.agents_csv or os.path.join(cfg.network_folder, "agents.csv")
         if agents_path and os.path.exists(agents_path):
             _departure_cap_mode = str(getattr(cfg, "dreamer_departure_cap_mode", "cfg")).strip().lower()
@@ -4332,7 +4463,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dreamer_critic_variant", type=str, default="v_only",
                    choices=["v_only", "action_conditioned"],
                    help="Dreamer critic variant. 'action_conditioned' concatenates action_edge to the pooled latent critic input.")
-    p.add_argument("--dreamer_actor_objective", type=str, default="direct_return",
+    p.add_argument("--dreamer_critic_aggregation", type=str, default="mean",
+                   choices=["mean", "global_attention", "attention", "transformer"],
+                   help=(
+                       "Global latent aggregation used by the centralized critic. "
+                       "global_attention uses a learned query over edge tokens instead "
+                       "of mean pooling, closer to a GAWM-style centralized world-state critic."
+                   ))
+    p.add_argument("--dreamer_critic_attention_heads", type=int, default=4,
+                   help="Attention heads for --dreamer_critic_aggregation=global_attention.")
+    p.add_argument("--dreamer_actor_objective", type=str, default="discrete_actor_critic",
                    choices=["direct_return", "critic_q", "direct_plus_q", "discrete_actor_critic", "discrete_ac", "score_function", "reinforce"],
                    help="Dreamer actor objective. direct_return differentiates rewards; discrete_actor_critic uses score-function gradients on sampled route actions.")
     p.add_argument("--dreamer_actor_q_weight", type=float, default=1.0,
@@ -4344,11 +4484,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dreamer_ac_route_advantage_weight", type=float, default=1.0,
                    help="Weight for per-vehicle selected-route cost advantage in discrete_actor_critic.")
     p.add_argument("--dreamer_ac_route_credit_mode", type=str, default="route_cost",
-                   choices=["route_cost", "planned_pressure", "marginal_pressure", "sequential_marginal"],
+                   choices=[
+                       "route_cost", "planned_pressure", "marginal_pressure",
+                       "sequential_marginal", "counterfactual_pressure",
+                       "counterfactual_fleet_pressure", "coma_pressure", "rollout_pressure",
+                   ],
                    help=(
                        "Cost matrix used for discrete_actor_critic per-vehicle route credit. "
                        "route_cost is the legacy local candidate-path cost; pressure modes use "
-                       "centralized planned-fleet externality costs for GAWM-style credit assignment."
+                       "centralized planned-fleet externality costs for GAWM-style credit assignment. "
+                       "counterfactual_pressure scores same-state per-route fleet pressure cost "
+                       "under COMA-style replacement of one vehicle's route."
                    ))
     p.add_argument("--dreamer_ac_route_credit_pressure_weight", type=float, default=1.0,
                    help="Scale for pressure/externality costs when --dreamer_ac_route_credit_mode is not route_cost.")
@@ -4368,6 +4514,28 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dreamer_ac_route_credit_normalize_by_path_length",
                    action=argparse.BooleanOptionalAction, default=False,
                    help="Normalize discrete_actor_critic pressure route credit by candidate path edge count.")
+    p.add_argument("--dreamer_ac_route_credit_base_cost_mode", type=str, default="progress_fraction",
+                   choices=[
+                       "progress_fraction", "remaining_tt_inverse", "neg_inverse_remaining_tt",
+                       "step_progress", "full_path", "remaining_tt", "route_tt", "legacy",
+                       "none", "zero", "disabled",
+                   ],
+                   help=(
+                       "Base cost used by AC route credit before pressure/externality terms. "
+                       "progress_fraction uses -step_interval / (elapsed_time + remaining_route_tt) "
+                       "so one decision contributes trip-progress credit without over-rewarding "
+                       "short late-trip suffixes."
+                   ))
+    p.add_argument("--dreamer_ac_route_credit_remaining_tt_eps", type=float, default=1.0,
+                   help="Minimum elapsed-plus-remaining route TT in seconds for progress-fraction AC route credit.")
+    p.add_argument("--dreamer_ac_route_credit_progress_cap", type=float, default=1.0,
+                   help="Upper clip for step_interval / (elapsed_time + remaining_route_tt) in AC progress-fraction route credit; <=0 disables the cap.")
+    p.add_argument("--dreamer_ac_route_credit_include_base_cost",
+                   action=argparse.BooleanOptionalAction, default=True,
+                   help=(
+                       "Include base route travel-time cost in pressure-mode discrete_actor_critic "
+                       "route credit. Disable to ablate pure planned/marginal pressure credit."
+                   ))
     p.add_argument("--dreamer_ac_route_advantage_temperature", type=float, default=60.0,
                    help="Seconds scale for discrete_actor_critic route advantages when normalization is disabled.")
     p.add_argument("--dreamer_ac_normalize_route_advantages", action=argparse.BooleanOptionalAction, default=True,
@@ -4720,6 +4888,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--vehicle_candidate_source", type=str, default="current_to_dest",
                    choices=["current_to_dest", "od_suffix"],
                    help="Vehicle imagined candidate action space. Use od_suffix to match urb_fair od_suffix evaluation.")
+    p.add_argument("--vehicle_path_cache_mode", type=str, default="lazy",
+                   choices=["lazy", "precompute"],
+                   help=(
+                       "Path cache strategy for current_to_dest vehicle candidates. "
+                       "lazy computes only queried (current_edge, dest_edge) pairs; "
+                       "precompute eagerly builds all edge-destination pairs and is only "
+                       "reasonable for small networks."
+                   ))
+    p.add_argument("--vehicle_path_cache_max_entries", type=int, default=250000,
+                   help="Maximum cached current_to_dest path entries when --vehicle_path_cache_mode=lazy.")
     p.add_argument("--vehicle_routes_csv", type=str, default="",
                    help="routes.csv artifact used when --vehicle_candidate_source=od_suffix.")
     p.add_argument("--vehicle_reward_scale", type=float, default=1.0,

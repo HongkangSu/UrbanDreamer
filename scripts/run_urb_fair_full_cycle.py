@@ -189,6 +189,18 @@ def _effective_route_artifacts_dir(args: argparse.Namespace, paths: dict[str, ob
     return Path(paths["collect_records_dir"])
 
 
+def _eval_candidate_source(args: argparse.Namespace) -> str:
+    eval_source = str(getattr(args, "eval_candidate_source", "auto") or "auto").strip().lower()
+    if eval_source != "auto":
+        return eval_source
+    route_source = str(args.route_candidate_source or "current_to_dest").strip().lower()
+    if route_source == "od_suffix":
+        return "od_suffix"
+    if route_source == "current_to_dest":
+        return "current_shortest_wm"
+    raise ValueError(f"Unsupported route candidate source: {args.route_candidate_source!r}")
+
+
 def _base_settings(args: argparse.Namespace, paths: dict[str, object], n_av: int, n_hdv: int) -> dict[str, object]:
     effective_route_artifacts_dir = _effective_route_artifacts_dir(args, paths)
     return {
@@ -434,14 +446,34 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
         "decoded_speed",
         "--vehicle_candidate_source",
         args.route_candidate_source,
+        "--vehicle_path_cache_mode",
+        str(args.marl_vehicle_path_cache_mode),
+        "--vehicle_actor_architecture",
+        str(args.marl_vehicle_actor_architecture),
         "--vehicle_routes_csv",
         str(effective_route_artifacts_dir / "routes.csv"),
         "--vehicle_reward_scale",
         "1.0",
+        "--dreamer_actor_objective",
+        str(args.marl_actor_objective),
+        "--gamma",
+        str(args.marl_gamma),
+        "--gae_lambda",
+        str(args.marl_gae_lambda),
+        "--dreamer_ac_step_advantage_weight",
+        str(args.marl_ac_step_advantage_weight),
+        "--dreamer_ac_route_advantage_weight",
+        str(args.marl_ac_route_advantage_weight),
+        "--dreamer_ac_route_credit_mode",
+        str(args.marl_ac_route_credit_mode),
+        "--dreamer_ac_route_credit_base_cost_mode",
+        str(args.marl_ac_route_credit_base_cost_mode),
+        "--dreamer_ac_route_advantage_temperature",
+        str(args.marl_ac_route_advantage_temperature),
         "--dreamer_all_reward_weight",
         "0.0",
         "--dreamer_remaining_time_progress_weight",
-        "1.0",
+        str(args.marl_remaining_time_progress_weight),
         "--dreamer_route_cost_reward_weight",
         str(args.marl_route_cost_reward_weight),
         "--dreamer_grpo_route_cost_weight",
@@ -456,10 +488,34 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
         str(args.marl_grpo_policy_kl_coef),
         "--dreamer_grpo_combined_advantage_clip",
         str(args.marl_grpo_combined_advantage_clip),
+        "--dreamer_grpo_rollout_baseline_policy",
+        str(args.marl_grpo_rollout_baseline_policy),
         "--dreamer_grpo_advantage_temperature",
         str(args.marl_expected_cost_temperature),
         "--dreamer_grpo_planned_av_pressure_weight",
         str(args.marl_expected_cost_planned_av_pressure_weight),
+        "--dreamer_rollout_cost_reward_weight",
+        str(args.marl_rollout_cost_reward_weight),
+        "--dreamer_rollout_cost_reward_source",
+        str(args.marl_rollout_cost_reward_source),
+        "--dreamer_rollout_cost_reward_scale_seconds",
+        str(args.marl_rollout_cost_reward_scale_seconds),
+        "--dreamer_hdv_background_mode",
+        str(args.marl_hdv_background_mode),
+        "--dreamer_hdv_background_state",
+        str(effective_route_artifacts_dir / "hdv_learning_state_final.json"),
+        "--dreamer_hdv_background_weight",
+        str(args.marl_hdv_background_weight),
+        "--dreamer_hdv_background_combine",
+        str(args.marl_hdv_background_combine),
+        "--dreamer_hdv_response_head_fallback",
+        str(args.marl_hdv_response_head_fallback),
+        "--dreamer_hdv_response_pressure_weight",
+        str(args.marl_hdv_response_pressure_weight),
+        "--dreamer_hdv_response_temperature",
+        str(args.marl_hdv_response_temperature),
+        "--dreamer_hdv_response_prior_mix",
+        str(args.marl_hdv_response_prior_mix),
         "--terminal_tall_reward_weight",
         "0.0",
         "--dreamer_entropy_coef",
@@ -468,6 +524,10 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
         str(args.marl_dreamer_action_mode),
         "--dreamer_action_temperature",
         str(args.marl_dreamer_action_temperature),
+        "--dreamer_critic_aggregation",
+        str(args.marl_critic_aggregation),
+        "--dreamer_critic_attention_heads",
+        str(args.marl_critic_attention_heads),
         "--dreamer_route_cost_aux_weight",
         str(args.marl_route_cost_aux_weight),
         "--dreamer_route_cost_aux_temperature",
@@ -538,7 +598,7 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
                 "--wm_candidate_edge_cost_source",
                 "decoded_speed",
                 "--av_candidate_source",
-                args.route_candidate_source,
+                _eval_candidate_source(args),
             ]
         )
         if str(args.eval_av_route_cost_policy).strip().lower() != "none":
@@ -775,7 +835,13 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--route-generator", default="dijkstra", help=hidden)
     p.add_argument("--path-gen-beta", type=float, default=-5.0, help=hidden)
     p.add_argument("--path-num-samples", type=int, default=10, help=hidden)
-    p.add_argument("--route-candidate-source", choices=["od_suffix"], default="od_suffix", help=hidden)
+    p.add_argument("--route-candidate-source", choices=["current_to_dest", "od_suffix"], default="current_to_dest", help=hidden)
+    p.add_argument(
+        "--eval-candidate-source",
+        choices=["auto", "od_suffix", "current_shortest_live", "current_shortest_wm"],
+        default="auto",
+        help=hidden,
+    )
     p.add_argument("--warmup-episodes", type=int, default=200, help=hidden)
     p.add_argument("--collect-episodes", type=int, default=50, help=hidden)
     p.add_argument("--collect-max-steps", type=int, default=3600, help=hidden)
@@ -816,22 +882,54 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--marl-episodes", type=int, default=100, help=hidden)
     p.add_argument("--marl-log-every", type=int, default=10, help=hidden)
     p.add_argument("--marl-checkpoint-every", type=int, default=100, help=hidden)
+    p.add_argument("--marl-actor-objective", choices=["direct_return", "critic_q", "direct_plus_q", "discrete_actor_critic", "discrete_ac", "score_function", "reinforce"], default="discrete_actor_critic", help=hidden)
+    p.add_argument("--marl-gamma", type=float, default=1.0, help=hidden)
+    p.add_argument("--marl-gae-lambda", type=float, default=1.0, help=hidden)
+    p.add_argument("--marl-ac-step-advantage-weight", type=float, default=0.1, help=hidden)
+    p.add_argument("--marl-ac-route-advantage-weight", type=float, default=1.0, help=hidden)
+    p.add_argument("--marl-ac-route-credit-mode", choices=[
+        "route_cost", "planned_pressure", "marginal_pressure",
+        "sequential_marginal", "counterfactual_pressure",
+        "counterfactual_fleet_pressure", "coma_pressure", "rollout_pressure",
+    ], default="route_cost", help=hidden)
+    p.add_argument("--marl-ac-route-credit-base-cost-mode", choices=[
+        "progress_fraction", "remaining_tt_inverse", "neg_inverse_remaining_tt",
+        "step_progress", "full_path", "remaining_tt", "route_tt", "legacy",
+        "none", "zero", "disabled",
+    ], default="progress_fraction", help=hidden)
+    p.add_argument("--marl-ac-route-advantage-temperature", type=float, default=60.0, help=hidden)
+    p.add_argument("--marl-vehicle-actor-architecture", choices=["mlp", "route_shared"], default="route_shared", help=hidden)
+    p.add_argument("--marl-vehicle-path-cache-mode", choices=["lazy", "precompute"], default="lazy", help=hidden)
+    p.add_argument("--marl-critic-aggregation", choices=["mean", "global_attention", "attention", "transformer"], default="global_attention", help=hidden)
+    p.add_argument("--marl-critic-attention-heads", type=int, default=4, help=hidden)
     p.add_argument("--marl-dreamer-entropy-coef", type=float, default=1e-3, help=hidden)
     p.add_argument("--marl-dreamer-action-mode", choices=["expected", "straight_through_sample", "straight_through_argmax", "st_sample", "st_argmax"], default="expected", help=hidden)
     p.add_argument("--marl-dreamer-action-temperature", type=float, default=1.0, help=hidden)
     p.add_argument("--marl-dreamer-actor-horizon", type=int, default=8, help=hidden)
     p.add_argument("--marl-seed", type=int, default=42, help=hidden)
     p.add_argument("--marl-route-cost-reward-weight", type=float, default=0.0, help=hidden)
+    p.add_argument("--marl-remaining-time-progress-weight", type=float, default=0.0, help=hidden)
     p.add_argument("--marl-expected-cost-weight", type=float, default=0.0, help=hidden)
     p.add_argument("--marl-expected-cost-temperature", type=float, default=60.0, help=hidden)
     p.add_argument("--marl-expected-cost-planned-av-pressure-weight", type=float, default=0.0, help=hidden)
     p.add_argument("--marl-expected-cost-detach-cost", action=argparse.BooleanOptionalAction, default=True, help=hidden)
-    p.add_argument("--marl-grpo-route-cost-weight", type=float, default=0.05, help=hidden)
-    p.add_argument("--marl-grpo-rollout-weight", type=float, default=1.0, help=hidden)
-    p.add_argument("--marl-grpo-rollout-group-size", type=int, default=4, help=hidden)
+    p.add_argument("--marl-grpo-route-cost-weight", type=float, default=0.0, help=hidden)
+    p.add_argument("--marl-grpo-rollout-weight", type=float, default=0.0, help=hidden)
+    p.add_argument("--marl-grpo-rollout-group-size", type=int, default=1, help=hidden)
     p.add_argument("--marl-grpo-policy-clip-ratio", type=float, default=0.2, help=hidden)
     p.add_argument("--marl-grpo-policy-kl-coef", type=float, default=0.0, help=hidden)
     p.add_argument("--marl-grpo-combined-advantage-clip", type=float, default=5.0, help=hidden)
+    p.add_argument("--marl-grpo-rollout-baseline-policy", choices=["none", "route_cost_greedy", "route_cost_pressure_greedy"], default="none", help=hidden)
+    p.add_argument("--marl-rollout-cost-reward-weight", type=float, default=0.0, help=hidden)
+    p.add_argument("--marl-rollout-cost-reward-source", choices=["pressure", "cav_proxy", "pressure_cav"], default="pressure_cav", help=hidden)
+    p.add_argument("--marl-rollout-cost-reward-scale-seconds", type=float, default=60.0, help=hidden)
+    p.add_argument("--marl-hdv-background-mode", choices=["none", "uniform", "adapted_state", "episode_av_pressure_response", "episode_hdv_head_response"], default="episode_hdv_head_response", help=hidden)
+    p.add_argument("--marl-hdv-background-weight", type=float, default=1.0, help=hidden)
+    p.add_argument("--marl-hdv-background-combine", choices=["additive", "population"], default="additive", help=hidden)
+    p.add_argument("--marl-hdv-response-head-fallback", choices=["analytic", "prior", "error"], default="error", help=hidden)
+    p.add_argument("--marl-hdv-response-pressure-weight", type=float, default=60.0, help=hidden)
+    p.add_argument("--marl-hdv-response-temperature", type=float, default=60.0, help=hidden)
+    p.add_argument("--marl-hdv-response-prior-mix", type=float, default=0.0, help=hidden)
     p.add_argument("--marl-route-cost-aux-weight", type=float, default=0.0, help=hidden)
     p.add_argument("--marl-route-cost-aux-balance", action="store_true", help=hidden)
     p.add_argument("--marl-route-cost-aux-hard-target", action="store_true", help=hidden)

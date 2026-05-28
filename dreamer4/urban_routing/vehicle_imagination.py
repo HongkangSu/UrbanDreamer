@@ -356,7 +356,13 @@ def _od_suffix_path_batch(
     done: np.ndarray,
     K: int,
 ) -> List[List[List[int]]]:
-    """Return OD-route suffix candidates matching the SUMO od_suffix action space."""
+    """Return OD-route suffix candidates matching collection-time od_suffix.
+
+    Collection falls back to the vehicle's current SUMO route suffix whenever a
+    precomputed OD candidate does not contain the current edge, then normalizes
+    the bank back to K valid candidates.  In offline imagination, ``current_route``
+    is the route proxy produced by the last selected action.
+    """
     batch: List[List[List[int]]] = []
     n_od = int(route_registry.n_od)
     k_eff = int(K)
@@ -369,20 +375,30 @@ def _od_suffix_path_batch(
         if od_idx < 0 or od_idx >= n_od:
             batch.append([[cur] for _ in range(k_eff)])
             continue
+        current_route = [int(e) for e in av.get("current_route", [])]
+        fallback: List[int] = []
+        if current_route:
+            matches = [j for j, edge_idx in enumerate(current_route) if int(edge_idx) == cur]
+            if matches:
+                fallback = list(current_route[int(matches[-1]):])
         suffixes: List[List[int]] = []
         for route in route_registry.route_edge_indices[od_idx][:k_eff]:
             matches = [j for j, edge_idx in enumerate(route) if int(edge_idx) == cur]
             if not matches:
-                suffixes.append([])
+                suffixes.append(list(fallback) if fallback else [])
                 continue
             suffix = list(route[int(matches[-1]):])
             if suffix and int(suffix[0]) == cur:
                 suffixes.append(suffix)
             else:
-                suffixes.append([])
+                suffixes.append(list(fallback) if fallback else [])
         while len(suffixes) < k_eff:
-            suffixes.append([])
-        batch.append(suffixes[:k_eff])
+            suffixes.append(list(fallback) if fallback else [])
+        first_valid = next((list(route) for route in suffixes if route), [])
+        if not first_valid:
+            batch.append([[cur] for _ in range(k_eff)])
+            continue
+        batch.append([list(route) if route else list(first_valid) for route in suffixes[:k_eff]])
     return batch
 
 
@@ -415,6 +431,8 @@ def _ensure_active_vehicle_current_edges(
                 od_routes = route_registry.route_edge_indices[od_idx]
                 if od_routes:
                     ref_route = list(od_routes[0])
+        if ref_route and "current_route" not in av:
+            av["current_route"] = list(ref_route)
         av["current_edge"] = int(
             estimate_vehicle_position(
                 av,
@@ -808,3 +826,80 @@ def choose_vehicle_next_edge(current_edge: int, chosen_path: List[int]) -> int:
             return int(chosen_path[1])
         return int(chosen_path[0])
     return int(chosen_path[0])
+
+
+def advance_vehicle_along_path_time_budget(
+    vehicle: Dict[str, Any],
+    *,
+    current_edge: int,
+    chosen_path: List[int],
+    edge_travel_times: np.ndarray,
+    step_interval: float,
+    n_edges: int,
+    min_edge_time: float = 1e-3,
+) -> None:
+    """Advance one imagined vehicle along a selected suffix for one decision step.
+
+    Offline MARL does not have SUMO's per-vehicle microscopic state.  This helper
+    keeps a small deterministic proxy state by spending the current decision
+    interval on the selected route suffix using WM-decoded edge travel times.
+    The vehicle is marked arrived only after its time budget finishes the final
+    edge in the suffix.
+    """
+    cur = int(current_edge)
+    if int(n_edges) <= 0:
+        vehicle["current_edge"] = cur
+        vehicle["arrived"] = False
+        return
+
+    edge_tt = np.asarray(edge_travel_times, dtype=np.float32).reshape(-1)
+    if edge_tt.size < int(n_edges):
+        padded = np.full((int(n_edges),), float(min_edge_time), dtype=np.float32)
+        padded[: edge_tt.size] = edge_tt
+        edge_tt = padded
+    edge_tt = np.nan_to_num(edge_tt[: int(n_edges)], nan=float(min_edge_time), posinf=float(min_edge_time))
+    edge_tt = np.maximum(edge_tt, float(min_edge_time))
+
+    path = [int(e) for e in chosen_path if 0 <= int(e) < int(n_edges)]
+    if not path:
+        vehicle["current_edge"] = cur
+        vehicle["edge_remaining_time"] = float(edge_tt[cur]) if 0 <= cur < int(n_edges) else float(min_edge_time)
+        vehicle["edge_remaining_edge"] = cur
+        vehicle["arrived"] = False
+        return
+
+    matches = [idx for idx, edge_idx in enumerate(path) if int(edge_idx) == cur]
+    if matches:
+        pos = int(matches[-1])
+    else:
+        pos = 0
+        cur = int(path[0])
+
+    remaining_edge = int(vehicle.get("edge_remaining_edge", cur))
+    if int(remaining_edge) == int(cur) and "edge_remaining_time" in vehicle:
+        remaining = max(float(vehicle.get("edge_remaining_time", edge_tt[cur])), float(min_edge_time))
+    else:
+        remaining = float(edge_tt[cur]) if 0 <= cur < int(n_edges) else float(min_edge_time)
+
+    budget = max(float(step_interval), 0.0)
+    arrived = False
+    while budget > 1e-6:
+        if budget + 1e-6 < remaining:
+            remaining -= budget
+            budget = 0.0
+            break
+
+        budget -= remaining
+        if pos >= len(path) - 1:
+            remaining = 0.0
+            arrived = True
+            break
+
+        pos += 1
+        cur = int(path[pos])
+        remaining = float(edge_tt[cur]) if 0 <= cur < int(n_edges) else float(min_edge_time)
+
+    vehicle["current_edge"] = int(cur)
+    vehicle["edge_remaining_time"] = float(max(remaining, 0.0))
+    vehicle["edge_remaining_edge"] = int(cur)
+    vehicle["arrived"] = bool(arrived)

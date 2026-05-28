@@ -649,6 +649,110 @@ def _marginal_av_pressure_cost_matrix(
     return pressure_costs
 
 
+def _counterfactual_fleet_pressure_cost_matrix(
+    *,
+    route_probs: torch.Tensor,
+    path_batch: List[List[List[int]]],
+    route_valid: torch.Tensor,
+    edge_tt: torch.Tensor,
+    n_edges: int,
+    n_routes: int,
+    edge_weights: Optional[torch.Tensor] = None,
+    normalize_by_path_length: bool = False,
+    detach_pressure: bool = True,
+) -> Optional[torch.Tensor]:
+    """Return COMA-style route costs aligned with fleet pressure reward.
+
+    For each vehicle i and candidate route k, fixed other-vehicle route
+    probabilities define the counterfactual planned edge pressure after forcing
+    i to k.  The cost is the same fleet-level planned-pressure readout used by
+    the rollout reward, rather than a local suffix travel-time label.
+    """
+    if route_probs.dim() != 2:
+        raise ValueError(f"route_probs must be 2D, got {tuple(route_probs.shape)}")
+    if route_valid.dim() != 2:
+        raise ValueError(f"route_valid must be 2D, got {tuple(route_valid.shape)}")
+    if edge_tt.dim() != 1:
+        raise ValueError(f"edge_tt must be 1D, got {tuple(edge_tt.shape)}")
+
+    n_agents = min(int(route_probs.shape[0]), len(path_batch), int(route_valid.shape[0]))
+    k_eff = min(int(route_probs.shape[1]), int(route_valid.shape[1]), int(n_routes))
+    if n_agents <= 0 or k_eff <= 0 or int(n_edges) <= 0:
+        return None
+
+    device = route_probs.device
+    dtype = route_probs.dtype
+    valid = route_valid[:n_agents, :k_eff].to(device=device)
+    probs = torch.relu(route_probs[:n_agents, :k_eff].to(device=device, dtype=dtype))
+    probs = probs * valid.to(dtype=dtype)
+    probs = probs / probs.sum(dim=-1, keepdim=True).clamp_min(1e-8)
+    if bool(detach_pressure):
+        probs = probs.detach()
+
+    edge_tt = torch.nan_to_num(
+        edge_tt.to(device=device, dtype=dtype).reshape(-1),
+        nan=0.0,
+        posinf=0.0,
+        neginf=0.0,
+    ).clamp_min(0.0)
+    if int(edge_tt.numel()) < int(n_edges):
+        padded = torch.zeros((int(n_edges),), device=device, dtype=dtype)
+        padded[: int(edge_tt.numel())] = edge_tt
+        edge_tt = padded
+    else:
+        edge_tt = edge_tt[: int(n_edges)]
+    if edge_weights is not None:
+        edge_weights = torch.nan_to_num(
+            edge_weights.to(device=device, dtype=dtype).reshape(-1),
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        ).clamp_min(0.0)
+        if int(edge_weights.numel()) < int(n_edges):
+            padded = torch.zeros((int(n_edges),), device=device, dtype=dtype)
+            padded[: int(edge_weights.numel())] = edge_weights
+            edge_weights = padded
+        else:
+            edge_weights = edge_weights[: int(n_edges)]
+        edge_cost = edge_tt * edge_weights
+    else:
+        edge_cost = edge_tt
+
+    route_masks = torch.zeros((n_agents, k_eff, int(n_edges)), device=device, dtype=dtype)
+    valid_counts = torch.zeros((n_agents, k_eff), device=device, dtype=dtype)
+    for i in range(n_agents):
+        paths = path_batch[i] if i < len(path_batch) else []
+        for k in range(k_eff):
+            path = paths[k] if k < len(paths) else []
+            idxs = sorted({int(e) for e in path if 0 <= int(e) < int(n_edges)})
+            if not idxs or not bool(valid[i, k].detach().cpu().item()):
+                continue
+            edge_idx = torch.tensor(idxs, device=device, dtype=torch.long)
+            route_masks[i, k, edge_idx] = 1.0
+            valid_counts[i, k] = float(len(idxs))
+    if bool(normalize_by_path_length):
+        route_masks = route_masks / valid_counts.clamp_min(1.0).unsqueeze(-1)
+
+    agent_expected_pressure = torch.einsum("ik,ike->ie", probs, route_masks)
+    fleet_pressure = agent_expected_pressure.sum(dim=0) / float(max(n_agents, 1))
+    if bool(detach_pressure):
+        fleet_pressure = fleet_pressure.detach()
+        agent_expected_pressure = agent_expected_pressure.detach()
+
+    costs = torch.zeros((n_agents, k_eff), device=device, dtype=dtype)
+    for i in range(n_agents):
+        other_pressure = fleet_pressure - agent_expected_pressure[i] / float(max(n_agents, 1))
+        other_pressure = other_pressure.clamp_min(0.0)
+        for k in range(k_eff):
+            if not bool(valid[i, k].detach().cpu().item()):
+                continue
+            cf_pressure = other_pressure + route_masks[i, k] / float(max(n_agents, 1))
+            pressure_sum = cf_pressure.sum().clamp_min(1e-8)
+            pressure_dist = cf_pressure / pressure_sum
+            costs[i, k] = torch.sum(pressure_dist * edge_cost)
+    return costs.masked_fill(~valid, 0.0)
+
+
 def _sequential_marginal_av_pressure_cost_matrix(
     *,
     route_probs: torch.Tensor,
@@ -1216,6 +1320,80 @@ def _masked_route_log_probs(
         safe_valid[~agent_has_valid, 0] = True
     masked_logits = (logits / float(max(temperature, 1e-6))).masked_fill(~safe_valid, -large)
     return torch.log_softmax(masked_logits, dim=-1)
+
+
+def _route_credit_base_cost_matrix(
+    *,
+    route_tt_costs: torch.Tensor,
+    route_valid: torch.Tensor,
+    mode: str,
+    step_interval: float,
+    elapsed_time: Optional[torch.Tensor] = None,
+    remaining_tt_eps: float = 1.0,
+    progress_cap: float = 1.0,
+) -> torch.Tensor:
+    """Convert route suffix travel times into the local AC credit base.
+
+    The default ``progress_fraction`` mode scores a decision by the fraction of
+    the current trip's elapsed-plus-remaining time budget that can be covered
+    before the next decision: ``-step_interval / (elapsed_time +
+    remaining_route_tt)``.  This keeps the local credit as a per-step trip
+    progress signal instead of over-rewarding short remaining suffixes late in
+    the trip.
+    """
+    mode_key = str(mode or "progress_fraction").strip().lower()
+    if mode_key in {"", "full_path", "remaining_tt", "route_tt", "legacy"}:
+        return route_tt_costs
+    if mode_key in {
+        "progress_fraction",
+        "elapsed_progress",
+        "trip_progress_fraction",
+        "remaining_tt_inverse",
+        "neg_inverse_remaining_tt",
+        "step_progress",
+    }:
+        eps = float(max(remaining_tt_eps, 1e-6))
+        delta_t = float(max(step_interval, 1e-6))
+        cap = float(progress_cap)
+        if elapsed_time is None:
+            elapsed = torch.zeros(
+                (route_tt_costs.shape[0], 1),
+                device=route_tt_costs.device,
+                dtype=route_tt_costs.dtype,
+            )
+        else:
+            elapsed = elapsed_time.to(device=route_tt_costs.device, dtype=route_tt_costs.dtype)
+            if elapsed.dim() == 0:
+                elapsed = elapsed.reshape(1, 1).expand(route_tt_costs.shape[0], 1)
+            elif elapsed.dim() == 1:
+                elapsed = elapsed.reshape(-1, 1)
+            elif elapsed.dim() == 2:
+                pass
+            else:
+                raise ValueError(f"elapsed_time must be scalar, 1D, or 2D, got {tuple(elapsed.shape)}")
+            if elapsed.shape[0] == 1 and route_tt_costs.shape[0] != 1:
+                elapsed = elapsed.expand(route_tt_costs.shape[0], elapsed.shape[1])
+            if elapsed.shape[0] != route_tt_costs.shape[0]:
+                raise ValueError(
+                    f"elapsed_time first dimension {elapsed.shape[0]} must match "
+                    f"route_tt_costs rows {route_tt_costs.shape[0]}"
+                )
+            if elapsed.shape[1] not in {1, route_tt_costs.shape[1]}:
+                raise ValueError(
+                    f"elapsed_time second dimension {elapsed.shape[1]} must be 1 "
+                    f"or match route count {route_tt_costs.shape[1]}"
+                )
+        total_trip_tt = (route_tt_costs + elapsed).clamp_min(eps)
+        progress = delta_t / total_trip_tt
+        if cap > 0.0:
+            progress = progress.clamp(max=cap)
+        return (-progress).masked_fill(~route_valid.to(device=route_tt_costs.device), 0.0)
+    if mode_key in {"none", "zero", "disabled"}:
+        return torch.zeros_like(route_tt_costs)
+    raise ValueError(
+        f"Unsupported route credit base cost mode {mode!r}; expected "
+        "progress_fraction, full_path, or none"
+    )
 
 
 def _selected_route_cost_advantages(

@@ -200,10 +200,31 @@ class CentralizedLatentValueCritic(nn.Module):
         action_dim: int = 0,
         hidden_dim: int = 256,
         n_hidden_layers: int = 2,
+        aggregation: str = "mean",
+        n_attention_heads: int = 4,
     ):
         super().__init__()
         self.d_spatial = int(d_spatial)
         self.action_dim = int(max(action_dim, 0))
+        self.aggregation = str(aggregation or "mean").strip().lower()
+        self.n_attention_heads = int(max(n_attention_heads, 1))
+        if self.aggregation not in {"mean", "global_attention", "attention", "transformer"}:
+            raise ValueError(f"Unsupported centralized critic aggregation: {aggregation!r}")
+        self.use_attention = self.aggregation in {"global_attention", "attention", "transformer"}
+        if self.use_attention:
+            self.query_token = nn.Parameter(torch.zeros(1, 1, self.d_spatial))
+            self.edge_norm = nn.LayerNorm(self.d_spatial)
+            self.edge_attention = nn.MultiheadAttention(
+                embed_dim=self.d_spatial,
+                num_heads=self.n_attention_heads,
+                batch_first=True,
+            )
+            self.summary_norm = nn.LayerNorm(self.d_spatial)
+        else:
+            self.query_token = None
+            self.edge_norm = None
+            self.edge_attention = None
+            self.summary_norm = None
         input_dim = self.d_spatial + self.action_dim
         layers = [nn.Linear(input_dim, hidden_dim), nn.Tanh()]
         for _ in range(max(int(n_hidden_layers) - 1, 0)):
@@ -216,13 +237,26 @@ class CentralizedLatentValueCritic(nn.Module):
                 nn.init.orthogonal_(m.weight, gain=math.sqrt(2))
                 nn.init.zeros_(m.bias)
         nn.init.orthogonal_(self.value_head.weight, gain=1.0)
+        if self.query_token is not None:
+            nn.init.normal_(self.query_token, mean=0.0, std=0.02)
 
     def summarize(self, z: torch.Tensor) -> torch.Tensor:
         if z.dim() == 2:
-            return z.mean(dim=0, keepdim=True)
-        if z.dim() == 3:
-            return z.mean(dim=1)
-        raise ValueError(f"expected z shape (E, D) or (B, E, D), got {tuple(z.shape)}")
+            z_b = z.unsqueeze(0)
+        elif z.dim() == 3:
+            z_b = z
+        else:
+            raise ValueError(f"expected z shape (E, D) or (B, E, D), got {tuple(z.shape)}")
+        if not self.use_attention:
+            return z_b.mean(dim=1)
+        assert self.query_token is not None
+        assert self.edge_attention is not None
+        assert self.edge_norm is not None
+        assert self.summary_norm is not None
+        tokens = self.edge_norm(z_b)
+        query = self.query_token.expand(tokens.shape[0], -1, -1).to(device=tokens.device, dtype=tokens.dtype)
+        summary, _ = self.edge_attention(query, tokens, tokens, need_weights=False)
+        return self.summary_norm(summary.squeeze(1))
 
     def _prepare_action(self, action: Optional[torch.Tensor], batch_size: int) -> torch.Tensor:
         if self.action_dim <= 0:
