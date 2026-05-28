@@ -22,6 +22,8 @@ def save_dreamer_checkpoint(
     episode,
     stats,
     extra_state=None,
+    target_critic=None,
+    return_normalizer=None,
 ) -> str:
     Path(cfg.checkpoint_dir).mkdir(parents=True, exist_ok=True)
     obj = {
@@ -36,10 +38,51 @@ def save_dreamer_checkpoint(
         "cfg": cfg.__dict__,
         "extra_state": extra_state or {},
     }
+    if target_critic is not None:
+        obj["target_critic"] = target_critic.state_dict()
+    if return_normalizer is not None:
+        obj["return_normalizer"] = return_normalizer.state_dict()
     path = os.path.join(cfg.checkpoint_dir, f"checkpoint_ep{episode:05d}.pt")
     torch.save(obj, path)
     torch.save(obj, os.path.join(cfg.checkpoint_dir, "latest.pt"))
     return path
+
+
+def _load_state_dict_with_input_padding(module, state_dict, *, module_name: str) -> bool:
+    try:
+        module.load_state_dict(state_dict)
+        return False
+    except RuntimeError as exc:
+        current_state = module.state_dict()
+        migrated_state = dict(state_dict)
+        changed = False
+        for key, saved_tensor in state_dict.items():
+            current_tensor = current_state.get(key)
+            if not (torch.is_tensor(saved_tensor) and torch.is_tensor(current_tensor)):
+                continue
+            if tuple(saved_tensor.shape) == tuple(current_tensor.shape):
+                continue
+            if (
+                saved_tensor.dim() == 2
+                and current_tensor.dim() == 2
+                and int(saved_tensor.shape[0]) == int(current_tensor.shape[0])
+                and int(saved_tensor.shape[1]) < int(current_tensor.shape[1])
+            ):
+                padded = current_tensor.detach().clone()
+                padded[:, : int(saved_tensor.shape[1])] = saved_tensor.to(
+                    device=padded.device,
+                    dtype=padded.dtype,
+                )
+                migrated_state[key] = padded
+                changed = True
+        if not changed:
+            raise exc
+        module.load_state_dict(migrated_state, strict=False)
+        logger.info(
+            "Loaded %s checkpoint with padded input weights for newly added critic context features.",
+            module_name,
+        )
+        return True
 
 
 def load_dreamer_checkpoint(
@@ -50,6 +93,8 @@ def load_dreamer_checkpoint(
     critic_optimizer=None,
     *,
     reset_actor_optimizer: bool = False,
+    target_critic=None,
+    return_normalizer=None,
 ):
     ckpt = torch.load(path, map_location="cpu", weights_only=False)
     actor_state = ckpt.get("actor", ckpt.get("policy"))
@@ -57,12 +102,34 @@ def load_dreamer_checkpoint(
         raise RuntimeError(f"checkpoint has no actor/policy state: {path}")
     actor.load_state_dict(actor_state)
     critic_state = ckpt.get("critic")
+    critic_migrated = False
     if critic_state is not None:
-        critic.load_state_dict(critic_state)
+        critic_migrated = _load_state_dict_with_input_padding(critic, critic_state, module_name="critic")
+    if target_critic is not None:
+        target_state = ckpt.get("target_critic", critic_state)
+        target_migrated = False
+        if target_state is not None:
+            target_migrated = _load_state_dict_with_input_padding(
+                target_critic,
+                target_state,
+                module_name="target_critic",
+            )
+        if target_migrated and critic_state is not None:
+            target_critic.load_state_dict(critic.state_dict())
+            logger.info("Initialized migrated target_critic from the live critic state.")
+        for param in target_critic.parameters():
+            param.requires_grad_(False)
+        target_critic.eval()
+    if return_normalizer is not None and "return_normalizer" in ckpt:
+        return_normalizer.load_state_dict(ckpt.get("return_normalizer"))
     if actor_optimizer is not None and "actor_optimizer" in ckpt and not reset_actor_optimizer:
         actor_optimizer.load_state_dict(ckpt["actor_optimizer"])
-    if critic_optimizer is not None and "critic_optimizer" in ckpt:
+    if critic_optimizer is not None and "critic_optimizer" in ckpt and not critic_migrated:
         critic_optimizer.load_state_dict(ckpt["critic_optimizer"])
+    elif critic_optimizer is not None and "critic_optimizer" in ckpt and critic_migrated:
+        logger.info(
+            "Skipped critic optimizer state because critic input weights were migrated to a wider context-conditioned shape."
+        )
     return ckpt.get("episode", 0), ckpt.get("stats", {}), dict(ckpt.get("extra_state", {}) or {})
 
 
@@ -154,6 +221,9 @@ def normalize_stats_history_defaults(stats_history):
         "dreamer_ac_route_adv_mean", "dreamer_ac_route_adv_std",
         "dreamer_ac_combined_adv_mean", "dreamer_ac_combined_adv_std",
         "dreamer_ac_selected_nonzero_frac", "dreamer_ac_sample_count",
+        "dreamer_ac_policy_kl", "dreamer_ac_clip_frac", "dreamer_ac_weight_mean",
+        "critic_target_mean", "critic_target_std", "critic_explained_variance",
+        "return_norm_mean", "return_norm_std",
         "dreamer_rollout_reward", "dreamer_rollout_reward_cost",
         "dreamer_rollout_reward_pressure_cost", "dreamer_rollout_reward_cav_proxy_cost",
         "hdv_response_av_pressure_sum", "hdv_response_background_sum", "hdv_response_background_active_edges",
@@ -176,6 +246,8 @@ def maybe_resume_dreamer_checkpoint(
     critic_optimizer,
     device,
     reset_actor_optimizer=False,
+    target_critic=None,
+    return_normalizer=None,
     load_checkpoint_fn: Optional[Callable[..., tuple[Any, Any, Any]]] = None,
 ):
     if not resume_ckpt or not os.path.exists(resume_ckpt):
@@ -185,6 +257,10 @@ def maybe_resume_dreamer_checkpoint(
         return None
     actor_state_before = copy.deepcopy(actor.state_dict())
     critic_state_before = copy.deepcopy(critic.state_dict())
+    target_critic_state_before = copy.deepcopy(target_critic.state_dict()) if target_critic is not None else None
+    return_normalizer_state_before = (
+        copy.deepcopy(return_normalizer.state_dict()) if return_normalizer is not None else None
+    )
     actor_opt_state_before = copy.deepcopy(actor_optimizer.state_dict()) if actor_optimizer is not None else None
     critic_opt_state_before = copy.deepcopy(critic_optimizer.state_dict()) if critic_optimizer is not None else None
     try:
@@ -196,6 +272,8 @@ def maybe_resume_dreamer_checkpoint(
             actor_optimizer=actor_optimizer,
             critic_optimizer=critic_optimizer,
             reset_actor_optimizer=reset_actor_optimizer,
+            target_critic=target_critic,
+            return_normalizer=return_normalizer,
         )
         logger.info("Resumed Dreamer checkpoint from ep %d", start_episode)
         if reset_actor_optimizer:
@@ -212,6 +290,13 @@ def maybe_resume_dreamer_checkpoint(
     except (RuntimeError, ValueError) as exc:
         actor.load_state_dict(actor_state_before)
         critic.load_state_dict(critic_state_before)
+        if target_critic is not None and target_critic_state_before is not None:
+            target_critic.load_state_dict(target_critic_state_before)
+            for param in target_critic.parameters():
+                param.requires_grad_(False)
+            target_critic.eval()
+        if return_normalizer is not None and return_normalizer_state_before is not None:
+            return_normalizer.load_state_dict(return_normalizer_state_before)
         if actor_optimizer is not None and actor_opt_state_before is not None:
             actor_optimizer.load_state_dict(actor_opt_state_before)
         if critic_optimizer is not None and critic_opt_state_before is not None:

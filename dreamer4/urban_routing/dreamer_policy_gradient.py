@@ -66,6 +66,10 @@ def append_discrete_actor_critic_samples(
     step_index: int,
     route_advantage: Optional[torch.Tensor] = None,
     route_adv_steps: Optional[List[torch.Tensor]] = None,
+    old_log_prob: Optional[torch.Tensor] = None,
+    old_log_prob_steps: Optional[List[torch.Tensor]] = None,
+    sample_weight: Optional[torch.Tensor] = None,
+    sample_weight_steps: Optional[List[torch.Tensor]] = None,
 ) -> int:
     """Append valid per-vehicle sampled route decisions for actor-critic loss."""
     if obs is None or selected_idx is None or route_valid is None:
@@ -100,6 +104,20 @@ def append_discrete_actor_critic_samples(
                 route_adv_steps.append(torch.zeros((int(obs_used.shape[0]),), device=obs_used.device, dtype=obs_used.dtype))
         else:
             route_adv_steps.append(torch.zeros((int(obs_used.shape[0]),), device=obs_used.device, dtype=obs_used.dtype))
+    if old_log_prob_steps is not None:
+        if torch.is_tensor(old_log_prob) and old_log_prob.numel() > 0:
+            old_lp_n = old_log_prob.reshape(-1)[:n].to(device=obs_n.device, dtype=obs_n.dtype)
+            if int(old_lp_n.numel()) == n:
+                old_log_prob_steps.append(old_lp_n[usable].detach())
+    if sample_weight_steps is not None:
+        if torch.is_tensor(sample_weight) and sample_weight.numel() > 0:
+            weight_n = sample_weight.reshape(-1)[:n].to(device=obs_n.device, dtype=obs_n.dtype)
+            if int(weight_n.numel()) == n:
+                sample_weight_steps.append(weight_n[usable].detach())
+            else:
+                sample_weight_steps.append(torch.ones((int(obs_used.shape[0]),), device=obs_used.device, dtype=obs_used.dtype))
+        else:
+            sample_weight_steps.append(torch.ones((int(obs_used.shape[0]),), device=obs_used.device, dtype=obs_used.dtype))
     step_index_steps.append(
         torch.full(
             (int(obs_used.shape[0]),),
@@ -121,6 +139,8 @@ def pack_discrete_actor_critic_samples(
     valid_steps: List[torch.Tensor],
     step_index_steps: List[torch.Tensor],
     route_adv_steps: Optional[List[torch.Tensor]] = None,
+    old_log_prob_steps: Optional[List[torch.Tensor]] = None,
+    sample_weight_steps: Optional[List[torch.Tensor]] = None,
     device: torch.device,
     dtype: torch.dtype,
     obs_dim: int,
@@ -133,12 +153,24 @@ def pack_discrete_actor_critic_samples(
             route_adv_cat = torch.cat(route_adv_steps, dim=0).to(device=device, dtype=dtype)
             if int(route_adv_cat.numel()) == int(selected.numel()):
                 route_adv = route_adv_cat
+        old_log_prob = torch.zeros((0,), device=device, dtype=dtype)
+        if old_log_prob_steps:
+            old_log_prob_cat = torch.cat(old_log_prob_steps, dim=0).to(device=device, dtype=dtype)
+            if int(old_log_prob_cat.numel()) == int(selected.numel()):
+                old_log_prob = old_log_prob_cat
+        sample_weight = torch.ones((int(selected.numel()),), device=device, dtype=dtype)
+        if sample_weight_steps:
+            sample_weight_cat = torch.cat(sample_weight_steps, dim=0).to(device=device, dtype=dtype)
+            if int(sample_weight_cat.numel()) == int(selected.numel()):
+                sample_weight = sample_weight_cat.clamp_min(0.0)
         return {
             "dreamer_ac_obs": torch.cat(obs_steps, dim=0),
             "dreamer_ac_selected": selected,
             "dreamer_ac_valid": torch.cat(valid_steps, dim=0),
             "dreamer_ac_step_index": torch.cat(step_index_steps, dim=0),
             "dreamer_ac_route_adv": route_adv,
+            "dreamer_ac_old_log_prob": old_log_prob,
+            "dreamer_ac_sample_weight": sample_weight,
         }
     return {
         "dreamer_ac_obs": torch.zeros((0, int(obs_dim)), device=device, dtype=dtype),
@@ -146,6 +178,8 @@ def pack_discrete_actor_critic_samples(
         "dreamer_ac_valid": torch.zeros((0, int(n_routes)), device=device, dtype=torch.bool),
         "dreamer_ac_step_index": torch.zeros((0,), device=device, dtype=torch.long),
         "dreamer_ac_route_adv": torch.zeros((0,), device=device, dtype=dtype),
+        "dreamer_ac_old_log_prob": torch.zeros((0,), device=device, dtype=dtype),
+        "dreamer_ac_sample_weight": torch.zeros((0,), device=device, dtype=dtype),
     }
 
 
@@ -162,6 +196,9 @@ def _empty_stats() -> Dict[str, float]:
         "dreamer_ac_combined_adv_std": 0.0,
         "dreamer_ac_selected_nonzero_frac": 0.0,
         "dreamer_ac_sample_count": 0.0,
+        "dreamer_ac_policy_kl": 0.0,
+        "dreamer_ac_clip_frac": 0.0,
+        "dreamer_ac_weight_mean": 0.0,
     }
 
 
@@ -176,6 +213,10 @@ def discrete_actor_critic_policy_loss(
     step_advantage_weight: float = 1.0,
     route_advantage_weight: float = 0.0,
     advantage_clip: float = 5.0,
+    old_log_prob: Optional[torch.Tensor] = None,
+    sample_weight: Optional[torch.Tensor] = None,
+    ppo_clip_ratio: float = 0.0,
+    normalize_combined_advantage: bool = False,
 ) -> tuple[Optional[torch.Tensor], Dict[str, float]]:
     """Return score-function actor loss for sampled discrete route actions.
 
@@ -188,6 +229,10 @@ def discrete_actor_critic_policy_loss(
     valid = traj.get("dreamer_ac_valid")
     step_index = traj.get("dreamer_ac_step_index")
     route_advantage = traj.get("dreamer_ac_route_adv")
+    if old_log_prob is None:
+        old_log_prob = traj.get("dreamer_ac_old_log_prob")
+    if sample_weight is None:
+        sample_weight = traj.get("dreamer_ac_sample_weight")
     if not (
         torch.is_tensor(obs)
         and torch.is_tensor(selected)
@@ -217,6 +262,8 @@ def discrete_actor_critic_policy_loss(
     step_idx = step_idx.clamp(0, max(int(step_advantages.reshape(-1).shape[0]) - 1, 0))
 
     log_probs = _masked_log_probs(logits, valid_n, temperature=float(temperature))
+    probs = torch.exp(log_probs)
+    entropy_per_sample = -(probs * log_probs).sum(dim=-1)
     rows = torch.arange(n, device=logits.device)
     selected_logp = log_probs[rows, selected_n]
     selected_valid = valid_n[rows, selected_n]
@@ -227,19 +274,49 @@ def discrete_actor_critic_policy_loss(
         if int(route_n.numel()) == n:
             route_adv = route_n
     combined_adv = float(step_advantage_weight) * adv + float(route_advantage_weight) * route_adv
+    if bool(normalize_combined_advantage) and int(combined_adv.numel()) > 1:
+        ref = combined_adv.detach()
+        combined_adv = (combined_adv - ref.mean()) / ref.std(unbiased=False).clamp_min(1e-6)
     if float(advantage_clip) > 0.0:
         combined_adv = combined_adv.clamp(min=-float(advantage_clip), max=float(advantage_clip))
     finite = selected_valid & torch.isfinite(selected_logp) & torch.isfinite(adv)
     finite = finite & torch.isfinite(combined_adv)
+    sample_w = torch.ones_like(combined_adv)
+    if torch.is_tensor(sample_weight) and sample_weight.numel() > 0:
+        weight_n = sample_weight.reshape(-1)[:n].to(device=logits.device, dtype=logits.dtype).detach()
+        if int(weight_n.numel()) == n:
+            sample_w = weight_n.clamp_min(0.0)
+            finite = finite & torch.isfinite(sample_w)
+    old_logp_n = None
+    if torch.is_tensor(old_log_prob) and old_log_prob.numel() > 0:
+        old_candidate = old_log_prob.reshape(-1)[:n].to(device=logits.device, dtype=logits.dtype).detach()
+        if int(old_candidate.numel()) == n:
+            old_logp_n = old_candidate
+            finite = finite & torch.isfinite(old_logp_n)
     if not bool(finite.any().detach().cpu().item()):
         return None, _empty_stats()
 
     selected_logp = selected_logp[finite]
+    entropy_used = entropy_per_sample[finite]
     adv = adv[finite]
     route_adv = route_adv[finite]
     combined_adv = combined_adv[finite]
-    pg_loss = -(combined_adv * selected_logp).mean()
-    loss = pg_loss - float(entropy_coef) * entropy
+    sample_w = sample_w[finite]
+    weight_sum = sample_w.sum().clamp_min(1e-6)
+    if old_logp_n is not None and float(ppo_clip_ratio) > 0.0:
+        old_logp_used = old_logp_n[finite]
+        ratio = torch.exp(selected_logp - old_logp_used)
+        clipped_ratio = ratio.clamp(1.0 - float(ppo_clip_ratio), 1.0 + float(ppo_clip_ratio))
+        surrogate = torch.minimum(ratio * combined_adv, clipped_ratio * combined_adv)
+        pg_loss = -((sample_w * surrogate).sum() / weight_sum)
+        approx_kl = (old_logp_used - selected_logp).detach()
+        clip_frac = ((ratio - 1.0).abs() > float(ppo_clip_ratio)).to(dtype=logits.dtype)
+    else:
+        pg_loss = -((sample_w * combined_adv * selected_logp).sum() / weight_sum)
+        approx_kl = torch.zeros_like(selected_logp)
+        clip_frac = torch.zeros_like(selected_logp)
+    entropy_loss = (sample_w * entropy_used).sum() / weight_sum
+    loss = pg_loss - float(entropy_coef) * entropy_loss
     stats = _empty_stats()
     stats.update(
         {
@@ -268,6 +345,9 @@ def discrete_actor_critic_policy_loss(
                 (selected_n[finite] != 0).to(dtype=torch.float32).mean().detach().cpu().item()
             ),
             "dreamer_ac_sample_count": float(int(adv.numel())),
+            "dreamer_ac_policy_kl": float(approx_kl.mean().cpu().item()) if int(approx_kl.numel()) > 0 else 0.0,
+            "dreamer_ac_clip_frac": float(clip_frac.mean().cpu().item()) if int(clip_frac.numel()) > 0 else 0.0,
+            "dreamer_ac_weight_mean": float(sample_w.mean().detach().cpu().item()) if int(sample_w.numel()) > 0 else 0.0,
         }
     )
     return loss, stats

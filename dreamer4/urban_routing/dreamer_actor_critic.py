@@ -198,6 +198,7 @@ class CentralizedLatentValueCritic(nn.Module):
         self,
         d_spatial: int,
         action_dim: int = 0,
+        context_dim: int = 0,
         hidden_dim: int = 256,
         n_hidden_layers: int = 2,
         aggregation: str = "mean",
@@ -206,6 +207,7 @@ class CentralizedLatentValueCritic(nn.Module):
         super().__init__()
         self.d_spatial = int(d_spatial)
         self.action_dim = int(max(action_dim, 0))
+        self.context_dim = int(max(context_dim, 0))
         self.aggregation = str(aggregation or "mean").strip().lower()
         self.n_attention_heads = int(max(n_attention_heads, 1))
         if self.aggregation not in {"mean", "global_attention", "attention", "transformer"}:
@@ -225,7 +227,7 @@ class CentralizedLatentValueCritic(nn.Module):
             self.edge_norm = None
             self.edge_attention = None
             self.summary_norm = None
-        input_dim = self.d_spatial + self.action_dim
+        input_dim = self.d_spatial + self.action_dim + self.context_dim
         layers = [nn.Linear(input_dim, hidden_dim), nn.Tanh()]
         for _ in range(max(int(n_hidden_layers) - 1, 0)):
             layers += [nn.Linear(hidden_dim, hidden_dim), nn.Tanh()]
@@ -271,13 +273,43 @@ class CentralizedLatentValueCritic(nn.Module):
             )
         return action
 
-    def forward(self, z: torch.Tensor, action: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def _prepare_context(self, context: Optional[torch.Tensor], batch_size: int) -> torch.Tensor:
+        if self.context_dim <= 0:
+            return torch.zeros((batch_size, 0), dtype=torch.float32)
+        if context is None:
+            return torch.zeros((batch_size, self.context_dim), dtype=torch.float32)
+        if context.dim() == 1:
+            context = context.unsqueeze(0)
+        if context.dim() != 2 or context.shape[0] != batch_size:
+            raise ValueError(
+                f"expected context shape ({batch_size}, {self.context_dim}), got {tuple(context.shape)}"
+            )
+        if context.shape[1] < self.context_dim:
+            pad = torch.zeros(
+                (batch_size, self.context_dim - int(context.shape[1])),
+                device=context.device,
+                dtype=context.dtype,
+            )
+            context = torch.cat([context, pad], dim=-1)
+        elif context.shape[1] > self.context_dim:
+            context = context[:, : self.context_dim]
+        return context
+
+    def forward(
+        self,
+        z: torch.Tensor,
+        action: Optional[torch.Tensor] = None,
+        context: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         pooled = self.summarize(z)
         if self.action_dim > 0:
             action_in = self._prepare_action(action, pooled.shape[0]).to(device=pooled.device, dtype=pooled.dtype)
             critic_in = torch.cat([pooled, action_in], dim=-1)
         else:
             critic_in = pooled
+        if self.context_dim > 0:
+            context_in = self._prepare_context(context, pooled.shape[0]).to(device=pooled.device, dtype=pooled.dtype)
+            critic_in = torch.cat([critic_in, context_in], dim=-1)
         h = self.trunk(critic_in)
         return self.value_head(h)
 

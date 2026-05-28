@@ -25,6 +25,8 @@ import json
 import logging
 import argparse
 import random
+import csv
+import copy
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any, Union
 
@@ -211,6 +213,156 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+class DreamerReturnNormalizer:
+    """EMA return normalizer used to stabilize critic targets and advantages."""
+
+    def __init__(
+        self,
+        *,
+        decay: float = 0.99,
+        eps: float = 1e-6,
+        enabled: bool = True,
+        device: Optional[torch.device] = None,
+    ) -> None:
+        self.decay = float(decay)
+        self.eps = float(eps)
+        self.enabled = bool(enabled)
+        target_device = device if device is not None else torch.device("cpu")
+        self.mean = torch.zeros((), device=target_device, dtype=torch.float32)
+        self.var = torch.ones((), device=target_device, dtype=torch.float32)
+        self.count = torch.zeros((), device=target_device, dtype=torch.float32)
+
+    def to(self, device: torch.device) -> "DreamerReturnNormalizer":
+        self.mean = self.mean.to(device=device)
+        self.var = self.var.to(device=device)
+        self.count = self.count.to(device=device)
+        return self
+
+    def state_dict(self) -> Dict[str, Any]:
+        return {
+            "decay": float(self.decay),
+            "eps": float(self.eps),
+            "enabled": bool(self.enabled),
+            "mean": self.mean.detach().cpu(),
+            "var": self.var.detach().cpu(),
+            "count": self.count.detach().cpu(),
+        }
+
+    def load_state_dict(self, state: Optional[Dict[str, Any]]) -> None:
+        if not state:
+            return
+        device = self.mean.device
+        self.decay = float(state.get("decay", self.decay))
+        self.eps = float(state.get("eps", self.eps))
+        self.enabled = bool(state.get("enabled", self.enabled))
+        self.mean = torch.as_tensor(state.get("mean", self.mean), device=device, dtype=torch.float32).reshape(())
+        self.var = torch.as_tensor(state.get("var", self.var), device=device, dtype=torch.float32).reshape(()).clamp_min(self.eps)
+        self.count = torch.as_tensor(state.get("count", self.count), device=device, dtype=torch.float32).reshape(())
+
+    def update(self, values: torch.Tensor) -> None:
+        if not self.enabled:
+            return
+        finite = values.detach().reshape(-1)
+        finite = finite[torch.isfinite(finite)]
+        if int(finite.numel()) <= 0:
+            return
+        batch_mean = finite.mean().to(device=self.mean.device, dtype=self.mean.dtype)
+        batch_var = finite.var(unbiased=False).to(device=self.var.device, dtype=self.var.dtype).clamp_min(self.eps)
+        if float(self.count.detach().cpu().item()) <= 0.0:
+            self.mean.copy_(batch_mean)
+            self.var.copy_(batch_var)
+        else:
+            decay = min(max(float(self.decay), 0.0), 0.999999)
+            self.mean.mul_(decay).add_(batch_mean, alpha=1.0 - decay)
+            self.var.mul_(decay).add_(batch_var, alpha=1.0 - decay)
+        self.count.add_(float(int(finite.numel())))
+
+    def normalize(self, values: torch.Tensor) -> torch.Tensor:
+        if not self.enabled:
+            return values
+        mean = self.mean.to(device=values.device, dtype=values.dtype)
+        std = self.var.to(device=values.device, dtype=values.dtype).clamp_min(self.eps).sqrt()
+        return (values - mean) / std
+
+    def denormalize(self, values: torch.Tensor) -> torch.Tensor:
+        if not self.enabled:
+            return values
+        mean = self.mean.to(device=values.device, dtype=values.dtype)
+        std = self.var.to(device=values.device, dtype=values.dtype).clamp_min(self.eps).sqrt()
+        return values * std + mean
+
+
+def _polyak_update_module(target: nn.Module, source: nn.Module, tau: float) -> None:
+    tau = min(max(float(tau), 0.0), 1.0)
+    with torch.no_grad():
+        for target_param, source_param in zip(target.parameters(), source.parameters()):
+            target_param.data.mul_(1.0 - tau).add_(source_param.data, alpha=tau)
+        for target_buffer, source_buffer in zip(target.buffers(), source.buffers()):
+            if torch.is_floating_point(target_buffer):
+                target_buffer.data.mul_(1.0 - tau).add_(source_buffer.data, alpha=tau)
+            else:
+                target_buffer.copy_(source_buffer)
+
+
+def _dreamer_critic_context_vector(
+    *,
+    step: int,
+    episode_steps: int,
+    n_active_av: int,
+    n_active_hdv: int,
+    n_total_av: int,
+    n_total_hdv: int,
+    valid_path_agents: int,
+    valid_path_count: int,
+    elapsed_time_np: Optional[np.ndarray],
+    depart_np: Optional[np.ndarray],
+    device: torch.device,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    active_av_denom = float(max(int(n_total_av), 1))
+    active_hdv_denom = float(max(int(n_total_hdv), 1))
+    valid_agent_denom = float(max(int(n_active_av), 1))
+    valid_route_denom = float(max(int(n_active_av), 1))
+    elapsed_mean = 0.0
+    elapsed_max = 0.0
+    if elapsed_time_np is not None and np.asarray(elapsed_time_np).size > 0:
+        elapsed = np.asarray(elapsed_time_np, dtype=np.float32)
+        scale = max(float(episode_steps), 1.0)
+        elapsed_mean = float(np.mean(elapsed) / scale)
+        elapsed_max = float(np.max(elapsed) / scale)
+    depart_sum = 0.0
+    if depart_np is not None:
+        depart_sum = float(np.asarray(depart_np, dtype=np.float32).sum() / active_av_denom)
+    values = [
+        float(step) / float(max(int(episode_steps), 1)),
+        float(n_active_av) / active_av_denom,
+        float(n_active_hdv) / active_hdv_denom,
+        float(valid_path_agents) / valid_agent_denom,
+        float(valid_path_count) / valid_route_denom,
+        elapsed_mean,
+        elapsed_max,
+        depart_sum,
+    ]
+    return torch.tensor(values, device=device, dtype=dtype)
+
+
+def _derive_agent_counts_from_csv(agents_csv: str, ratio_machines: float) -> Tuple[int, int]:
+    """Return full-schedule AV/HDV counts from agents.csv and ratio_machines."""
+    if not agents_csv or not os.path.exists(agents_csv):
+        return 0, 0
+    try:
+        with open(agents_csv, "r", encoding="utf-8", newline="") as f:
+            reader = csv.reader(f)
+            next(reader, None)
+            n_total = sum(1 for row in reader if row)
+    except OSError:
+        return 0, 0
+    if n_total <= 0:
+        return 0, 0
+    n_av = int(n_total * float(ratio_machines))
+    return n_av, max(0, n_total - n_av)
+
+
 class ActionHorizonProxyReward(nn.Module):
     """Frozen long-horizon t_all proxy conditioned on decoded state and edge action."""
 
@@ -332,8 +484,8 @@ class TrainConfig:
     # ── MARL / action ────────────────────────────────────────────────────────
     n_routes: int = 4           # K — must match data collection number_of_paths
     av_fraction: float = 0.3
-    n_av: int = 0               # optional cap only when dreamer_departure_cap_mode=cfg
-    n_hdv: int = 0              # optional cap only when dreamer_departure_cap_mode=cfg
+    n_av: int = 0               # deprecated compatibility argument; ignored by training
+    n_hdv: int = 0              # deprecated compatibility argument; ignored by training
 
     # ── episode / training ───────────────────────────────────────────────────
     episode_len: int = 8        # ≤ history_length，确保 z_0_real 始终在 context 内
@@ -419,9 +571,19 @@ class TrainConfig:
     dreamer_critic_variant: str = "v_only"  # v_only | action_conditioned
     dreamer_critic_aggregation: str = "mean"  # mean | global_attention
     dreamer_critic_attention_heads: int = 4
+    dreamer_critic_context: bool = True
+    dreamer_critic_context_dim: int = 8
+    dreamer_slow_critic_tau: float = 0.01
+    dreamer_return_normalizer: bool = True
+    dreamer_return_normalizer_decay: float = 0.99
+    dreamer_actor_lr: float = 0.0  # 0 keeps legacy cfg.lr
+    dreamer_critic_lr: float = 0.0  # 0 keeps legacy cfg.lr
     dreamer_actor_objective: str = "discrete_actor_critic"  # direct_return | critic_q | direct_plus_q | discrete_actor_critic
     dreamer_actor_q_weight: float = 1.0
     dreamer_ac_advantage_clip: float = 5.0
+    dreamer_ac_ppo_clip_ratio: float = 0.1
+    dreamer_ac_normalize_combined_advantages: bool = True
+    dreamer_ac_weight_by_active_agents: bool = True
     dreamer_ac_step_advantage_weight: float = 0.2
     dreamer_ac_route_advantage_weight: float = 1.0
     dreamer_ac_route_credit_mode: str = "route_cost"  # route_cost | planned_pressure | marginal_pressure | sequential_marginal | counterfactual_pressure
@@ -527,6 +689,32 @@ class TrainConfig:
     use_amp: bool = True
     seed: int = 42
     log_every: int = 10
+
+
+DREAMER_UPDATE_SCALAR_KEYS = (
+    "pg_loss", "value_loss", "entropy", "approx_kl",
+    "route_cost_aux_loss", "route_cost_aux_acc", "route_cost_aux_margin",
+    "expected_cost_loss", "expected_cost_raw", "expected_cost_best_prob",
+    "expected_cost_best_route0_frac", "expected_cost_nonzero_best_frac", "expected_cost_margin",
+    "grpo_route_cost_loss", "grpo_route_cost_raw", "grpo_route_cost_best_prob",
+    "grpo_route_cost_best_route0_frac", "grpo_route_cost_nonzero_best_frac",
+    "grpo_route_cost_margin", "grpo_route_cost_adv_mean", "grpo_route_cost_adv_std",
+    "grpo_rollout_loss", "grpo_rollout_cost", "grpo_rollout_adv_mean",
+    "grpo_rollout_adv_std", "grpo_rollout_logprob", "grpo_rollout_selected_nonzero_frac",
+    "grpo_combined_loss", "grpo_combined_pg_loss", "grpo_combined_kl_loss",
+    "grpo_combined_adv_mean", "grpo_combined_adv_std", "grpo_combined_clip_frac",
+    "grpo_policy_kl",
+    "grpo_rollout_vehicle_cost_loss", "grpo_rollout_vehicle_cost",
+    "grpo_rollout_vehicle_cost_adv_mean", "grpo_rollout_vehicle_cost_adv_std",
+    "dreamer_ac_loss", "dreamer_ac_adv_mean", "dreamer_ac_adv_std",
+    "dreamer_ac_adv_min", "dreamer_ac_adv_max",
+    "dreamer_ac_route_adv_mean", "dreamer_ac_route_adv_std",
+    "dreamer_ac_combined_adv_mean", "dreamer_ac_combined_adv_std",
+    "dreamer_ac_selected_nonzero_frac", "dreamer_ac_sample_count",
+    "dreamer_ac_policy_kl", "dreamer_ac_clip_frac", "dreamer_ac_weight_mean",
+    "critic_target_mean", "critic_target_std", "critic_explained_variance",
+    "return_norm_mean", "return_norm_std",
+)
 
 
 def resolve_wm_candidate_edge_cost_source(cfg: TrainConfig) -> str:
@@ -1420,7 +1608,10 @@ def imagined_episode_dynamic_dreamer(
     dreamer_ac_valid_steps: List[torch.Tensor] = []
     dreamer_ac_step_index_steps: List[torch.Tensor] = []
     dreamer_ac_route_adv_steps: List[torch.Tensor] = []
+    dreamer_ac_old_logprob_steps: List[torch.Tensor] = []
+    dreamer_ac_sample_weight_steps: List[torch.Tensor] = []
     dreamer_ac_selected_nonzero_fracs: List[float] = []
+    critic_contexts: List[torch.Tensor] = []
     rollout_reward_stats_steps: List[Dict[str, float]] = []
     prev_route_probs: Optional[torch.Tensor] = None
     invalid_rates: List[float] = []
@@ -2239,18 +2430,33 @@ def imagined_episode_dynamic_dreamer(
                 and sampled_obs_t is not None
                 and valid_action_mask_for_update is not None
             ):
+                ac_sample_weight = None
+                if bool(getattr(cfg, "dreamer_ac_weight_by_active_agents", True)):
+                    n_weight = int(selected_route_idx_t_for_update.reshape(-1).shape[0])
+                    if n_weight > 0:
+                        valid_agents_for_weight = max(float(valid_path_agents), 1.0)
+                        ac_sample_weight = torch.full(
+                            (n_weight,),
+                            1.0 / valid_agents_for_weight,
+                            device=device,
+                            dtype=z.dtype,
+                        )
                 dreamer_pg.append_discrete_actor_critic_samples(
                     obs_steps=dreamer_ac_obs_steps,
                     selected_steps=dreamer_ac_selected_steps,
                     valid_steps=dreamer_ac_valid_steps,
                     step_index_steps=dreamer_ac_step_index_steps,
                     route_adv_steps=dreamer_ac_route_adv_steps,
+                    old_log_prob_steps=dreamer_ac_old_logprob_steps,
+                    sample_weight_steps=dreamer_ac_sample_weight_steps,
                     selected_nonzero_fracs=dreamer_ac_selected_nonzero_fracs,
                     obs=sampled_obs_t,
                     selected_idx=selected_route_idx_t_for_update,
                     route_valid=valid_action_mask_for_update,
                     step_index=len(rewards),
                     route_advantage=route_adv_for_ac,
+                    old_log_prob=selected_log_probs,
+                    sample_weight=ac_sample_weight,
                 )
             entropies.append(entropy)
             if bool(entropy.requires_grad):
@@ -2312,6 +2518,22 @@ def imagined_episode_dynamic_dreamer(
             n_active_hdv / max(n_total_hdv, 1),
         ], dtype=np.float32)
         context_t = torch.from_numpy(context_np).to(device=device, dtype=z.dtype)
+        critic_contexts.append(
+            _dreamer_critic_context_vector(
+                step=step,
+                episode_steps=episode_steps,
+                n_active_av=n_active_av,
+                n_active_hdv=n_active_hdv,
+                n_total_av=n_total_av,
+                n_total_hdv=n_total_hdv,
+                valid_path_agents=valid_path_agents if n_active_av > 0 else 0,
+                valid_path_count=valid_path_count if n_active_av > 0 else 0,
+                elapsed_time_np=elapsed_time_np if n_active_av > 0 else None,
+                depart_np=depart_np,
+                device=device,
+                dtype=z.dtype,
+            )
+        )
         depart_t = torch.from_numpy(depart_np).to(device=device, dtype=z.dtype)
         past_packed = build_history_packed(latent_history, history_length=cfg.history_length)
         hdv_context_for_wm = None
@@ -2600,6 +2822,8 @@ def imagined_episode_dynamic_dreamer(
         valid_steps=dreamer_ac_valid_steps,
         step_index_steps=dreamer_ac_step_index_steps,
         route_adv_steps=dreamer_ac_route_adv_steps,
+        old_log_prob_steps=dreamer_ac_old_logprob_steps,
+        sample_weight_steps=dreamer_ac_sample_weight_steps,
         device=device,
         dtype=z.dtype,
         obs_dim=int(getattr(actor, "obs_dim", 0)),
@@ -2689,6 +2913,11 @@ def imagined_episode_dynamic_dreamer(
         "traj_id": int(traj_id) if traj_id is not None else int(s),
         "z_states": z_states,
         "action_edges": action_edges,
+        "critic_contexts": (
+            torch.stack(critic_contexts)
+            if critic_contexts
+            else torch.zeros((0, 8), device=device, dtype=z.dtype)
+        ),
         "rewards": reward_tensor,
         "entropies": entropy_tensor,
         "n_active_av_mean": ep_metrics["avg_active_av"],
@@ -2767,10 +2996,14 @@ def dreamer_update(
     critic_optimizer: torch.optim.Optimizer,
     trajectories: List[Dict[str, Any]],
     update_id: Optional[int] = None,
+    target_critic: Optional[CentralizedLatentValueCritic] = None,
+    return_normalizer: Optional[DreamerReturnNormalizer] = None,
 ) -> Dict[str, float]:
     actor_losses: List[torch.Tensor] = []
     critic_losses: List[torch.Tensor] = []
-    q_actor_items: List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]] = []
+    q_actor_items: List[
+        Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], torch.Tensor, Optional[torch.Tensor]]
+    ] = []
     entropies: List[torch.Tensor] = []
     invalid_rates: List[float] = []
     route_churns: List[float] = []
@@ -2821,6 +3054,12 @@ def dreamer_update(
     dreamer_ac_combined_adv_stds: List[float] = []
     dreamer_ac_selected_nonzero_fracs: List[float] = []
     dreamer_ac_sample_counts: List[float] = []
+    dreamer_ac_policy_kls: List[float] = []
+    dreamer_ac_clip_fracs: List[float] = []
+    dreamer_ac_weight_means: List[float] = []
+    critic_target_means: List[float] = []
+    critic_target_stds: List[float] = []
+    critic_explained_variances: List[float] = []
     skipped_actor_trajs = 0
     skip_reason_counts: Dict[str, int] = {}
     skipped_traj_ids: List[int] = []
@@ -2855,6 +3094,19 @@ def dreamer_update(
             continue
         current_z = torch.stack([z.detach() for z in z_states[:-1]], dim=0)
         next_z = torch.stack([z.detach() for z in z_states[1:]], dim=0)
+        critic_context_tensor = traj.get("critic_contexts")
+        current_context = None
+        next_context = None
+        if (
+            int(getattr(critic, "context_dim", 0)) > 0
+            and torch.is_tensor(critic_context_tensor)
+            and int(critic_context_tensor.shape[0]) >= int(rewards.shape[0])
+        ):
+            current_context = critic_context_tensor[: rewards.shape[0]].detach()
+            if int(critic_context_tensor.shape[0]) > int(rewards.shape[0]):
+                next_context = critic_context_tensor[1: rewards.shape[0] + 1].detach()
+            else:
+                next_context = torch.cat([current_context[1:], current_context[-1:]], dim=0)
         current_action = None
         current_action_for_actor = None
         next_action = None
@@ -2868,16 +3120,32 @@ def dreamer_update(
             bootstrap_actions = list(action_edges[1:]) + [action_edges[-1]]
             next_action = torch.stack([a.detach() for a in bootstrap_actions], dim=0)
 
-        values = critic(current_z, action=current_action).squeeze(-1)
+        bootstrap_critic = target_critic if target_critic is not None else critic
+        values = critic(current_z, action=current_action, context=current_context).squeeze(-1)
         with torch.no_grad():
-            next_values = critic(next_z, action=next_action).squeeze(-1)
+            next_values = bootstrap_critic(next_z, action=next_action, context=next_context).squeeze(-1)
             critic_targets = lambda_return(
                 rewards.detach(),
                 next_values,
                 gamma=float(cfg.gamma),
                 lambda_=float(cfg.gae_lambda),
             )
-        if bool(getattr(cfg, "dreamer_normalize_critic_targets", False)):
+        critic_target_means.append(float(critic_targets.detach().mean().cpu().item()))
+        critic_target_stds.append(
+            float(critic_targets.detach().std(unbiased=False).cpu().item())
+            if int(critic_targets.numel()) > 1 else 0.0
+        )
+        target_var = torch.var(critic_targets.detach(), unbiased=False)
+        if bool(torch.isfinite(target_var).detach().cpu().item()) and float(target_var.detach().cpu().item()) > 1e-8:
+            residual_var = torch.var((critic_targets.detach() - values.detach()), unbiased=False)
+            critic_explained_variances.append(
+                float((1.0 - residual_var / target_var.clamp_min(1e-8)).detach().cpu().item())
+            )
+        if return_normalizer is not None and bool(getattr(cfg, "dreamer_return_normalizer", True)):
+            return_normalizer.update(critic_targets)
+            critic_values_for_loss = return_normalizer.normalize(values)
+            critic_targets_for_loss = return_normalizer.normalize(critic_targets.detach())
+        elif bool(getattr(cfg, "dreamer_normalize_critic_targets", False)):
             critic_target_ref = critic_targets.detach()
             critic_target_mean = critic_target_ref.mean()
             critic_target_std = critic_target_ref.std(unbiased=False).clamp_min(1e-6)
@@ -2889,14 +3157,18 @@ def dreamer_update(
         critic_loss = torch.mean((critic_values_for_loss - critic_targets_for_loss) ** 2) * float(cfg.dreamer_value_coef)
         critic_losses.append(critic_loss)
 
-        actor_bootstrap = critic(next_z, action=next_action).squeeze(-1).detach()
+        with torch.no_grad():
+            actor_bootstrap = bootstrap_critic(next_z, action=next_action, context=next_context).squeeze(-1)
         actor_returns = lambda_return(
             rewards,
             actor_bootstrap,
             gamma=float(cfg.gamma),
             lambda_=float(cfg.gae_lambda),
         )
-        actor_advantages = actor_returns - values.detach()
+        if return_normalizer is not None and bool(getattr(cfg, "dreamer_return_normalizer", True)):
+            actor_advantages = return_normalizer.normalize(actor_returns) - return_normalizer.normalize(values.detach())
+        else:
+            actor_advantages = actor_returns - values.detach()
         if bool(getattr(cfg, "dreamer_normalize_actor_advantages", False)):
             actor_advantages = _standardize_with_detached_stats(actor_advantages, center=True)
         entropy = traj["entropies"].mean()
@@ -2983,6 +3255,10 @@ def dreamer_update(
                 advantage_clip=float(getattr(cfg, "dreamer_ac_advantage_clip", 5.0)),
                 step_advantage_weight=float(getattr(cfg, "dreamer_ac_step_advantage_weight", 1.0)),
                 route_advantage_weight=float(getattr(cfg, "dreamer_ac_route_advantage_weight", 0.0)),
+                ppo_clip_ratio=float(getattr(cfg, "dreamer_ac_ppo_clip_ratio", 0.0)),
+                normalize_combined_advantage=bool(
+                    getattr(cfg, "dreamer_ac_normalize_combined_advantages", False)
+                ),
             )
             discrete_ac_has_samples = discrete_ac_loss is not None
             dreamer_ac_loss_values.append(float(discrete_ac_stats.get("dreamer_ac_loss", 0.0)))
@@ -2998,6 +3274,9 @@ def dreamer_update(
                 float(discrete_ac_stats.get("dreamer_ac_selected_nonzero_frac", 0.0))
             )
             dreamer_ac_sample_counts.append(float(discrete_ac_stats.get("dreamer_ac_sample_count", 0.0)))
+            dreamer_ac_policy_kls.append(float(discrete_ac_stats.get("dreamer_ac_policy_kl", 0.0)))
+            dreamer_ac_clip_fracs.append(float(discrete_ac_stats.get("dreamer_ac_clip_frac", 0.0)))
+            dreamer_ac_weight_means.append(float(discrete_ac_stats.get("dreamer_ac_weight_mean", 0.0)))
         direct_actor_loss = -(actor_advantages.mean() + float(cfg.dreamer_entropy_coef) * entropy)
         actor_loss = direct_actor_loss
         if route_cost_aux_loss is not None:
@@ -3042,6 +3321,7 @@ def dreamer_update(
                 q_actor_items.append((
                     current_z,
                     current_action_for_actor,
+                    current_context,
                     entropy,
                     route_cost_aux_loss,
                 ))
@@ -3223,6 +3503,14 @@ def dreamer_update(
             "dreamer_ac_combined_adv_std": 0.0,
             "dreamer_ac_selected_nonzero_frac": 0.0,
             "dreamer_ac_sample_count": 0.0,
+            "dreamer_ac_policy_kl": 0.0,
+            "dreamer_ac_clip_frac": 0.0,
+            "dreamer_ac_weight_mean": 0.0,
+            "critic_target_mean": 0.0,
+            "critic_target_std": 0.0,
+            "critic_explained_variance": 0.0,
+            "return_norm_mean": 0.0,
+            "return_norm_std": 1.0,
             "skipped_actor_trajs": float(skipped_actor_trajs),
             "skip_reason_counts": skip_reason_counts,
             "skipped_traj_ids": skipped_traj_ids,
@@ -3242,14 +3530,20 @@ def dreamer_update(
     critic_loss_total.backward()
     nn.utils.clip_grad_norm_(critic.parameters(), 1.0)
     critic_optimizer.step()
+    if target_critic is not None and float(getattr(cfg, "dreamer_slow_critic_tau", 0.0)) > 0.0:
+        _polyak_update_module(target_critic, critic, tau=float(cfg.dreamer_slow_critic_tau))
 
     if q_actor_items:
         old_requires_grad = [p.requires_grad for p in critic.parameters()]
         for p in critic.parameters():
             p.requires_grad_(False)
         try:
-            for current_z, current_action_for_actor, entropy, route_cost_aux_loss in q_actor_items:
-                q_values = critic(current_z, action=current_action_for_actor).squeeze(-1)
+            for current_z, current_action_for_actor, current_context, entropy, route_cost_aux_loss in q_actor_items:
+                q_values = critic(
+                    current_z,
+                    action=current_action_for_actor,
+                    context=current_context,
+                ).squeeze(-1)
                 q_actor_loss = -float(getattr(cfg, "dreamer_actor_q_weight", 1.0)) * q_values.mean()
                 q_actor_loss = q_actor_loss - float(cfg.dreamer_entropy_coef) * entropy
                 if route_cost_aux_loss is not None:
@@ -3334,6 +3628,21 @@ def dreamer_update(
             if dreamer_ac_selected_nonzero_fracs else 0.0
         ),
         "dreamer_ac_sample_count": float(np.mean(dreamer_ac_sample_counts)) if dreamer_ac_sample_counts else 0.0,
+        "dreamer_ac_policy_kl": float(np.mean(dreamer_ac_policy_kls)) if dreamer_ac_policy_kls else 0.0,
+        "dreamer_ac_clip_frac": float(np.mean(dreamer_ac_clip_fracs)) if dreamer_ac_clip_fracs else 0.0,
+        "dreamer_ac_weight_mean": float(np.mean(dreamer_ac_weight_means)) if dreamer_ac_weight_means else 0.0,
+        "critic_target_mean": float(np.mean(critic_target_means)) if critic_target_means else 0.0,
+        "critic_target_std": float(np.mean(critic_target_stds)) if critic_target_stds else 0.0,
+        "critic_explained_variance": (
+            float(np.mean(critic_explained_variances)) if critic_explained_variances else 0.0
+        ),
+        "return_norm_mean": (
+            float(return_normalizer.mean.detach().cpu().item()) if return_normalizer is not None else 0.0
+        ),
+        "return_norm_std": (
+            float(return_normalizer.var.detach().clamp_min(1e-6).sqrt().cpu().item())
+            if return_normalizer is not None else 1.0
+        ),
         "skipped_actor_trajs": float(skipped_actor_trajs),
         "skip_reason_counts": skip_reason_counts,
         "skipped_traj_ids": skipped_traj_ids,
@@ -3358,6 +3667,8 @@ def maybe_resume_dreamer_checkpoint(
     critic_optimizer,
     device,
     reset_actor_optimizer=False,
+    target_critic=None,
+    return_normalizer=None,
 ):
     return _checkpoint_maybe_resume_dreamer_checkpoint(
         resume_ckpt=resume_ckpt,
@@ -3367,6 +3678,8 @@ def maybe_resume_dreamer_checkpoint(
         critic_optimizer=critic_optimizer,
         device=device,
         reset_actor_optimizer=reset_actor_optimizer,
+        target_critic=target_critic,
+        return_normalizer=return_normalizer,
         load_checkpoint_fn=load_dreamer_checkpoint,
     )
 
@@ -3409,12 +3722,16 @@ def train(cfg: TrainConfig) -> None:
     logger.info("Loading world model...")
     stackelberg_cfg = None
     if bool(cfg.use_stackelberg):
+        stackelberg_av_count, stackelberg_hdv_count = _derive_agent_counts_from_csv(
+            cfg.agents_csv or os.path.join(cfg.network_folder, "agents.csv"),
+            float(cfg.ratio_machines),
+        )
         stackelberg_cfg = {
             "enabled": True,
             "n_iters": int(cfg.stackelberg_n_iters),
             "damping": float(cfg.stackelberg_damping),
-            "total_av_count": float(cfg.n_av),
-            "total_hdv_count": float(cfg.n_hdv),
+            "total_av_count": float(stackelberg_av_count),
+            "total_hdv_count": float(stackelberg_hdv_count),
         }
     wm = UrbanWorldModel(
         edge_registry_path=cfg.edge_registry,
@@ -3516,17 +3833,35 @@ def train(cfg: TrainConfig) -> None:
     critic = CentralizedLatentValueCritic(
         d_spatial=wm.d_spatial,
         action_dim=(int(wm.n_edges) if str(cfg.dreamer_critic_variant).lower() == "action_conditioned" else 0),
+        context_dim=(
+            int(getattr(cfg, "dreamer_critic_context_dim", 8))
+            if bool(getattr(cfg, "dreamer_critic_context", True))
+            else 0
+        ),
         hidden_dim=cfg.hidden_dim,
         n_hidden_layers=cfg.n_hidden_layers,
         aggregation=str(getattr(cfg, "dreamer_critic_aggregation", "mean")),
         n_attention_heads=int(getattr(cfg, "dreamer_critic_attention_heads", 4)),
     ).to(device)
+    target_critic: Optional[CentralizedLatentValueCritic] = None
+    if float(getattr(cfg, "dreamer_slow_critic_tau", 0.0)) > 0.0:
+        target_critic = copy.deepcopy(critic).to(device)
+        target_critic.eval()
+        for param in target_critic.parameters():
+            param.requires_grad_(False)
+    return_normalizer = DreamerReturnNormalizer(
+        decay=float(getattr(cfg, "dreamer_return_normalizer_decay", 0.99)),
+        enabled=bool(getattr(cfg, "dreamer_return_normalizer", True)),
+        device=device,
+    )
     freeze_module(wm)
     policy = actor
-    actor_optimizer = torch.optim.Adam(actor.parameters(), lr=cfg.lr)
-    critic_optimizer = torch.optim.Adam(critic.parameters(), lr=cfg.lr)
+    actor_lr = float(cfg.dreamer_actor_lr) if float(getattr(cfg, "dreamer_actor_lr", 0.0)) > 0.0 else float(cfg.lr)
+    critic_lr = float(cfg.dreamer_critic_lr) if float(getattr(cfg, "dreamer_critic_lr", 0.0)) > 0.0 else float(cfg.lr)
+    actor_optimizer = torch.optim.Adam(actor.parameters(), lr=actor_lr)
+    critic_optimizer = torch.optim.Adam(critic.parameters(), lr=critic_lr)
     logger.info(
-        "Dreamer CTDE mainline active: actor_obs_dim=%d n_routes=%d d_spatial=%d batch_eps=%d actor_h=%d critic_variant=%s critic_aggregation=%s",
+        "Dreamer CTDE mainline active: actor_obs_dim=%d n_routes=%d d_spatial=%d batch_eps=%d actor_h=%d critic_variant=%s critic_aggregation=%s critic_context_dim=%d slow_critic_tau=%.4f return_norm=%s actor_lr=%.2e critic_lr=%.2e",
         obs_dim,
         int(cfg.n_routes),
         int(wm.d_spatial),
@@ -3534,6 +3869,11 @@ def train(cfg: TrainConfig) -> None:
         min(int(cfg.imagination_horizon), int(cfg.dreamer_actor_horizon)),
         str(cfg.dreamer_critic_variant),
         str(getattr(cfg, "dreamer_critic_aggregation", "mean")),
+        int(getattr(critic, "context_dim", 0)),
+        float(getattr(cfg, "dreamer_slow_critic_tau", 0.0)) if target_critic is not None else 0.0,
+        str(bool(getattr(cfg, "dreamer_return_normalizer", True))),
+        actor_lr,
+        critic_lr,
     )
 
     horizon_proxy: Optional[ActionHorizonProxyReward] = None
@@ -3592,7 +3932,8 @@ def train(cfg: TrainConfig) -> None:
 
     pending_bufs: list  = []
     last_update_stats: Dict[str, float] = {
-        "pg_loss": 0.0, "value_loss": 0.0, "entropy": 0.0, "approx_kl": 0.0
+        key: (1.0 if key == "return_norm_std" else 0.0)
+        for key in DREAMER_UPDATE_SCALAR_KEYS
     }
 
     adaptive_penalty_coef = float(cfg.conservative_penalty_coef)
@@ -3668,8 +4009,13 @@ def train(cfg: TrainConfig) -> None:
                     "dreamer_departure_cap_mode must be one of {'cfg', 'none'}, "
                     f"got {_departure_cap_mode!r}"
                 )
-            _max_av_count = int(cfg.n_av) if (_departure_cap_mode == "cfg" and int(cfg.n_av) > 0) else None
-            _max_hdv_count = int(cfg.n_hdv) if (_departure_cap_mode == "cfg" and int(cfg.n_hdv) > 0) else None
+            if _departure_cap_mode == "cfg":
+                logger.warning(
+                    "dreamer_departure_cap_mode=cfg is deprecated and ignored; "
+                    "MARL now derives all AV/HDV counts from the full departure schedule."
+                )
+            _max_av_count = None
+            _max_hdv_count = None
             _departure_schedule = build_departure_schedule(
                 agents_csv=agents_path,
                 step_interval=float(cfg.step_interval),
@@ -3792,22 +4138,14 @@ def train(cfg: TrainConfig) -> None:
         pending_trajs: List[Dict[str, Any]] = []
         update_id = 0
         last_update_stats: Dict[str, float] = {
-            "pg_loss": 0.0, "value_loss": 0.0, "entropy": 0.0, "approx_kl": 0.0,
-            "invalid_route_rate": 0.0, "route_churn": 0.0, "skipped_actor_trajs": 0.0,
-            "route_cost_aux_loss": 0.0, "route_cost_aux_acc": 0.0, "route_cost_aux_margin": 0.0,
-            "expected_cost_loss": 0.0, "expected_cost_raw": 0.0, "expected_cost_best_prob": 0.0,
-            "expected_cost_best_route0_frac": 0.0,
-            "expected_cost_nonzero_best_frac": 0.0,
-            "expected_cost_margin": 0.0,
-            "grpo_combined_loss": 0.0, "grpo_combined_pg_loss": 0.0, "grpo_combined_kl_loss": 0.0,
-            "grpo_combined_adv_mean": 0.0, "grpo_combined_adv_std": 0.0, "grpo_combined_clip_frac": 0.0,
-            "grpo_policy_kl": 0.0,
-            "dreamer_ac_loss": 0.0, "dreamer_ac_adv_mean": 0.0, "dreamer_ac_adv_std": 0.0,
-            "dreamer_ac_adv_min": 0.0, "dreamer_ac_adv_max": 0.0,
-            "dreamer_ac_route_adv_mean": 0.0, "dreamer_ac_route_adv_std": 0.0,
-            "dreamer_ac_combined_adv_mean": 0.0, "dreamer_ac_combined_adv_std": 0.0,
-            "dreamer_ac_selected_nonzero_frac": 0.0, "dreamer_ac_sample_count": 0.0,
+            key: (1.0 if key == "return_norm_std" else 0.0)
+            for key in DREAMER_UPDATE_SCALAR_KEYS
         }
+        last_update_stats.update({
+            "invalid_route_rate": 0.0,
+            "route_churn": 0.0,
+            "skipped_actor_trajs": 0.0,
+        })
 
         if cfg.resume_ckpt and os.path.exists(cfg.resume_ckpt):
             resume_state = maybe_resume_dreamer_checkpoint(
@@ -3818,6 +4156,8 @@ def train(cfg: TrainConfig) -> None:
                 critic_optimizer=critic_optimizer,
                 device=device,
                 reset_actor_optimizer=bool(getattr(cfg, "resume_reset_actor_optimizer", False)),
+                target_critic=target_critic,
+                return_normalizer=return_normalizer,
             )
             if resume_state is not None:
                 start_episode = int(resume_state["start_episode"])
@@ -3839,6 +4179,8 @@ def train(cfg: TrainConfig) -> None:
         for episode in range(start_episode, target_episode):
             actor.train()
             critic.train()
+            if target_critic is not None:
+                target_critic.eval()
             _episode_wall_t0 = _time.perf_counter()
             _rollout_wall_sec = 0.0
             _hdv_response_wall_sec = 0.0
@@ -4127,32 +4469,14 @@ def train(cfg: TrainConfig) -> None:
                     critic_optimizer,
                     pending_trajs,
                     update_id=update_id,
+                    target_critic=target_critic,
+                    return_normalizer=return_normalizer,
                 )
                 _update_wall_sec += _time.perf_counter() - _update_t0
                 pending_trajs.clear()
                 update_id += 1
-                for k in (
-                    "pg_loss", "value_loss", "entropy", "approx_kl",
-                    "route_cost_aux_loss", "route_cost_aux_acc", "route_cost_aux_margin",
-                    "expected_cost_loss", "expected_cost_raw", "expected_cost_best_prob",
-                    "expected_cost_best_route0_frac", "expected_cost_nonzero_best_frac", "expected_cost_margin",
-                    "grpo_route_cost_loss", "grpo_route_cost_raw", "grpo_route_cost_best_prob",
-                    "grpo_route_cost_best_route0_frac", "grpo_route_cost_nonzero_best_frac",
-                    "grpo_route_cost_margin", "grpo_route_cost_adv_mean", "grpo_route_cost_adv_std",
-                    "grpo_rollout_loss", "grpo_rollout_cost", "grpo_rollout_adv_mean",
-                    "grpo_rollout_adv_std", "grpo_rollout_logprob", "grpo_rollout_selected_nonzero_frac",
-                    "grpo_combined_loss", "grpo_combined_pg_loss", "grpo_combined_kl_loss",
-                    "grpo_combined_adv_mean", "grpo_combined_adv_std", "grpo_combined_clip_frac",
-                    "grpo_policy_kl",
-                    "grpo_rollout_vehicle_cost_loss", "grpo_rollout_vehicle_cost",
-                    "grpo_rollout_vehicle_cost_adv_mean", "grpo_rollout_vehicle_cost_adv_std",
-                    "dreamer_ac_loss", "dreamer_ac_adv_mean", "dreamer_ac_adv_std",
-                    "dreamer_ac_adv_min", "dreamer_ac_adv_max",
-                    "dreamer_ac_route_adv_mean", "dreamer_ac_route_adv_std",
-                    "dreamer_ac_combined_adv_mean", "dreamer_ac_combined_adv_std",
-                    "dreamer_ac_selected_nonzero_frac", "dreamer_ac_sample_count",
-                ):
-                    stats_history[k].append(last_update_stats[k])
+                for k in DREAMER_UPDATE_SCALAR_KEYS:
+                    stats_history[k].append(last_update_stats.get(k, 0.0))
                 stats_history["skipped_actor_trajs"].append(last_update_stats.get("skipped_actor_trajs", 0.0))
                 stats_history["update_diagnostics"].append({
                     "update_id": int(last_update_stats.get("update_id", update_id - 1)),
@@ -4207,6 +4531,11 @@ def train(cfg: TrainConfig) -> None:
                 recent_ac_combined_adv_std = np.mean(stats_history["dreamer_ac_combined_adv_std"][-cfg.log_every:]) if stats_history["dreamer_ac_combined_adv_std"] else 0.0
                 recent_ac_nonzero = np.mean(stats_history["dreamer_ac_selected_nonzero_frac"][-cfg.log_every:]) if stats_history["dreamer_ac_selected_nonzero_frac"] else 0.0
                 recent_ac_samples = np.mean(stats_history["dreamer_ac_sample_count"][-cfg.log_every:]) if stats_history["dreamer_ac_sample_count"] else 0.0
+                recent_ac_kl = np.mean(stats_history["dreamer_ac_policy_kl"][-cfg.log_every:]) if stats_history["dreamer_ac_policy_kl"] else 0.0
+                recent_ac_clip = np.mean(stats_history["dreamer_ac_clip_frac"][-cfg.log_every:]) if stats_history["dreamer_ac_clip_frac"] else 0.0
+                recent_ac_weight = np.mean(stats_history["dreamer_ac_weight_mean"][-cfg.log_every:]) if stats_history["dreamer_ac_weight_mean"] else 0.0
+                recent_v_ev = np.mean(stats_history["critic_explained_variance"][-cfg.log_every:]) if stats_history["critic_explained_variance"] else 0.0
+                recent_ret_std = np.mean(stats_history["return_norm_std"][-cfg.log_every:]) if stats_history["return_norm_std"] else 1.0
                 recent_hdv_response_bg = np.mean(stats_history["hdv_response_background_sum"][-cfg.log_every:]) if stats_history["hdv_response_background_sum"] else 0.0
                 recent_active_av = np.mean(stats_history["avg_active_av"][-cfg.log_every:])
                 recent_actor_steps = np.mean(stats_history["n_actor_steps"][-cfg.log_every:]) if stats_history["n_actor_steps"] else 0.0
@@ -4249,7 +4578,9 @@ def train(cfg: TrainConfig) -> None:
                     f"dreamer_ac_adv={recent_ac_adv_mean:.4f}/{recent_ac_adv_std:.4f} "
                     f"route_adv={recent_ac_route_adv_mean:.4f}/{recent_ac_route_adv_std:.4f} "
                     f"combined_adv={recent_ac_combined_adv_mean:.4f}/{recent_ac_combined_adv_std:.4f} "
-                    f"ac_non0={recent_ac_nonzero:.3f} ac_n={recent_ac_samples:.1f} | "
+                    f"ac_non0={recent_ac_nonzero:.3f} ac_n={recent_ac_samples:.1f} "
+                    f"ac_kl/clip/w={recent_ac_kl:.4f}/{recent_ac_clip:.3f}/{recent_ac_weight:.3f} "
+                    f"v_ev={recent_v_ev:.3f} ret_std={recent_ret_std:.3f} | "
                     f"hdv_resp_bg={recent_hdv_response_bg:.4f} | "
                     f"timing(ep={episode_wall_sec:.2f}s rollout={_rollout_wall_sec:.2f}s hdv={_hdv_response_wall_sec:.2f}s baseline={_baseline_wall_sec:.2f}s update={_update_wall_sec:.2f}s group={rollout_group_size}) | "
                     f"skip_reasons={last_skip_reasons} | "
@@ -4275,6 +4606,8 @@ def train(cfg: TrainConfig) -> None:
                     episode + 1,
                     stats_history,
                     extra_state=extra_state,
+                    target_critic=target_critic,
+                    return_normalizer=return_normalizer,
                 )
                 logger.info("  Dreamer checkpoint saved: %s", path)
 
@@ -4287,29 +4620,11 @@ def train(cfg: TrainConfig) -> None:
                 critic_optimizer,
                 pending_trajs,
                 update_id=update_id,
+                target_critic=target_critic,
+                return_normalizer=return_normalizer,
             )
-            for k in (
-                "pg_loss", "value_loss", "entropy", "approx_kl",
-                "route_cost_aux_loss", "route_cost_aux_acc", "route_cost_aux_margin",
-                "expected_cost_loss", "expected_cost_raw", "expected_cost_best_prob",
-                "expected_cost_best_route0_frac", "expected_cost_nonzero_best_frac", "expected_cost_margin",
-                "grpo_route_cost_loss", "grpo_route_cost_raw", "grpo_route_cost_best_prob",
-                "grpo_route_cost_best_route0_frac", "grpo_route_cost_nonzero_best_frac",
-                "grpo_route_cost_margin", "grpo_route_cost_adv_mean", "grpo_route_cost_adv_std",
-                "grpo_rollout_loss", "grpo_rollout_cost", "grpo_rollout_adv_mean",
-                "grpo_rollout_adv_std", "grpo_rollout_logprob", "grpo_rollout_selected_nonzero_frac",
-                "grpo_combined_loss", "grpo_combined_pg_loss", "grpo_combined_kl_loss",
-                "grpo_combined_adv_mean", "grpo_combined_adv_std", "grpo_combined_clip_frac",
-                "grpo_policy_kl",
-                "grpo_rollout_vehicle_cost_loss", "grpo_rollout_vehicle_cost",
-                "grpo_rollout_vehicle_cost_adv_mean", "grpo_rollout_vehicle_cost_adv_std",
-                "dreamer_ac_loss", "dreamer_ac_adv_mean", "dreamer_ac_adv_std",
-                "dreamer_ac_adv_min", "dreamer_ac_adv_max",
-                "dreamer_ac_route_adv_mean", "dreamer_ac_route_adv_std",
-                "dreamer_ac_combined_adv_mean", "dreamer_ac_combined_adv_std",
-                "dreamer_ac_selected_nonzero_frac", "dreamer_ac_sample_count",
-            ):
-                stats_history[k].append(last_update_stats[k])
+            for k in DREAMER_UPDATE_SCALAR_KEYS:
+                stats_history[k].append(last_update_stats.get(k, 0.0))
             stats_history["skipped_actor_trajs"].append(last_update_stats.get("skipped_actor_trajs", 0.0))
             stats_history["update_diagnostics"].append({
                 "update_id": int(last_update_stats.get("update_id", update_id)),
@@ -4343,6 +4658,8 @@ def train(cfg: TrainConfig) -> None:
             target_episode,
             stats_history,
             extra_state=final_extra_state,
+            target_critic=target_critic,
+            return_normalizer=return_normalizer,
         )
         logger.info("Dreamer-style training complete.")
         return
@@ -4373,9 +4690,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="CFM rollout source for MARL imagination.")
     p.add_argument("--n_routes",          type=int,   default=4)
     p.add_argument("--n_av",              type=int,   default=0,
-                   help="Optional AV cap used only when --dreamer_departure_cap_mode=cfg.")
+                   help="Deprecated compatibility cap used only when --dreamer_departure_cap_mode=cfg.")
     p.add_argument("--n_hdv",             type=int,   default=0,
-                   help="Optional HDV cap used only when --dreamer_departure_cap_mode=cfg.")
+                   help="Deprecated compatibility cap used only when --dreamer_departure_cap_mode=cfg.")
     p.add_argument("--episode_len",       type=int,   default=50)
     p.add_argument("--n_total_episodes",  type=int,   default=2000)
     p.add_argument("--training_family",   type=str,   default="dreamer_ctde",
@@ -4457,9 +4774,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dreamer_departure_cap_mode", type=str, default="none",
                    choices=["cfg", "none"],
                    help=(
-                       "Vehicle departure schedule cap for Dreamer imagination. none uses the "
-                       "full agents.csv schedule and is the mainline behavior; cfg caps scheduled "
-                       "vehicles to --n_av/--n_hdv for small-scale ablations."
+                       "Deprecated compatibility switch. Training now always uses the full "
+                       "agents.csv schedule and active vehicle counts."
                    ))
     p.add_argument("--dreamer_value_coef", type=float, default=1.0,
                    help="Scale factor for Dreamer critic regression loss.")
@@ -4477,6 +4793,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    ))
     p.add_argument("--dreamer_critic_attention_heads", type=int, default=4,
                    help="Attention heads for --dreamer_critic_aggregation=global_attention.")
+    p.add_argument("--dreamer_critic_context", action=argparse.BooleanOptionalAction, default=True,
+                   help="Condition the centralized critic on rollout context such as time, active vehicles, valid routes, and elapsed trip state.")
+    p.add_argument("--dreamer_critic_context_dim", type=int, default=8,
+                   help="Number of critic context features to consume. The current rollout builder emits 8 features.")
+    p.add_argument("--dreamer_slow_critic_tau", type=float, default=0.01,
+                   help="Polyak update rate for the target critic used for lambda-return bootstrapping. <=0 disables the target critic.")
+    p.add_argument("--dreamer_return_normalizer", action=argparse.BooleanOptionalAction, default=True,
+                   help="Use an EMA normalizer for Dreamer critic targets and actor advantages.")
+    p.add_argument("--dreamer_return_normalizer_decay", type=float, default=0.99,
+                   help="EMA decay for --dreamer_return_normalizer.")
+    p.add_argument("--dreamer_actor_lr", type=float, default=0.0,
+                   help="Actor learning rate override for Dreamer CTDE. <=0 uses --lr.")
+    p.add_argument("--dreamer_critic_lr", type=float, default=0.0,
+                   help="Critic learning rate override for Dreamer CTDE. <=0 uses --lr.")
     p.add_argument("--dreamer_actor_objective", type=str, default="discrete_actor_critic",
                    choices=["direct_return", "critic_q", "direct_plus_q", "discrete_actor_critic", "discrete_ac", "score_function", "reinforce"],
                    help="Dreamer actor objective. direct_return differentiates rewards; discrete_actor_critic uses score-function gradients on sampled route actions.")
@@ -4484,6 +4814,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="Weight for the action-conditioned critic-Q actor objective when enabled.")
     p.add_argument("--dreamer_ac_advantage_clip", type=float, default=5.0,
                    help="Absolute clip for discrete_actor_critic lambda-return advantages. <=0 disables clipping.")
+    p.add_argument("--dreamer_ac_ppo_clip_ratio", type=float, default=0.1,
+                   help="PPO-style selected-action probability ratio clip for discrete_actor_critic. <=0 disables clipping.")
+    p.add_argument("--dreamer_ac_normalize_combined_advantages",
+                   action=argparse.BooleanOptionalAction, default=True,
+                   help="Normalize combined step and route advantages before discrete_actor_critic clipping.")
+    p.add_argument("--dreamer_ac_weight_by_active_agents",
+                   action=argparse.BooleanOptionalAction, default=True,
+                   help="Weight replicated per-vehicle actor samples by inverse active valid-agent count per imagined step.")
     p.add_argument("--dreamer_ac_step_advantage_weight", type=float, default=0.2,
                    help="Weight for step-level Dreamer lambda-return advantage in discrete_actor_critic.")
     p.add_argument("--dreamer_ac_route_advantage_weight", type=float, default=1.0,
