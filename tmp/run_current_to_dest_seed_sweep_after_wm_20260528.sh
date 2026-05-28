@@ -37,12 +37,6 @@ case "${MODE}" in
     ;;
 esac
 
-if [[ -z "${N_AV:-}" || -z "${N_HDV:-}" ]]; then
-  read -r N_AV N_HDV < <(
-    "${PY}" -c "import csv; p='${NETWORK_DIR}/agents.csv'; ratio=float('${RATIO_MACHINES}'); n=sum(1 for _ in csv.DictReader(open(p, newline=''))); n_av=int(n*ratio); print(n_av, n-n_av)"
-  )
-fi
-
 for seed in ${SEEDS}; do
   RUN_DIR="logs/${ROOT}/marl_${MODE}_current_to_dest_seed${seed}_ep${MARL_EPISODES}"
   EVAL_DIR="results/${ROOT}/eval_${MODE}_current_to_dest_seed${seed}_ep${MARL_EPISODES}"
@@ -59,8 +53,6 @@ for seed in ${SEEDS}; do
     --network_name "${NETWORK_NAME}" \
     --agents_csv "${NETWORK_DIR}/agents.csv" \
     --ratio_machines "${RATIO_MACHINES}" \
-    --n_av "${N_AV}" \
-    --n_hdv "${N_HDV}" \
     --checkpoint_dir "${RUN_DIR}" \
     --training_family dreamer_ctde \
     --wm_cfm_init_mode zero \
