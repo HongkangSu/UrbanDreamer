@@ -584,8 +584,8 @@ class TrainConfig:
     dreamer_ac_ppo_clip_ratio: float = 0.1
     dreamer_ac_normalize_combined_advantages: bool = True
     dreamer_ac_weight_by_active_agents: bool = True
-    dreamer_ac_step_advantage_weight: float = 0.2
-    dreamer_ac_route_advantage_weight: float = 1.0
+    dreamer_ac_step_advantage_weight: float = 1.0
+    dreamer_ac_route_advantage_weight: float = 0.0
     dreamer_ac_route_credit_mode: str = "route_cost"  # route_cost | planned_pressure | marginal_pressure | sequential_marginal | counterfactual_pressure
     dreamer_ac_route_credit_pressure_weight: float = 1.0
     dreamer_ac_route_credit_pressure_mode: str = "clipped_excess_tt_ratio"
@@ -4822,10 +4822,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dreamer_ac_weight_by_active_agents",
                    action=argparse.BooleanOptionalAction, default=True,
                    help="Weight replicated per-vehicle actor samples by inverse active valid-agent count per imagined step.")
-    p.add_argument("--dreamer_ac_step_advantage_weight", type=float, default=0.2,
+    p.add_argument("--dreamer_ac_step_advantage_weight", type=float, default=1.0,
                    help="Weight for step-level Dreamer lambda-return advantage in discrete_actor_critic.")
-    p.add_argument("--dreamer_ac_route_advantage_weight", type=float, default=1.0,
-                   help="Weight for per-vehicle selected-route cost advantage in discrete_actor_critic.")
+    p.add_argument("--dreamer_ac_route_advantage_weight", type=float, default=0.0,
+                   help="Weight for per-vehicle selected-route cost advantage in discrete_actor_critic. This is an actor-only shaping term; keep 0.0 for pure critic-visible reward training.")
     p.add_argument("--dreamer_ac_route_credit_mode", type=str, default="route_cost",
                    choices=[
                        "route_cost", "planned_pressure", "marginal_pressure",
