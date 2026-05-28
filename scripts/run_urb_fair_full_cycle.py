@@ -37,6 +37,7 @@ DEFAULT_INCIDENTS = {
     "ingolstadt_custom": "201201950#0",
     "ingolstadt_custom2": "201201950#0",
     "gretz_armainvilliers": "-78047947#0",
+    "les_mureaux": "144915712#2",
 }
 
 
