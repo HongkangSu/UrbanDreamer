@@ -26,8 +26,6 @@ mkdir -p "${RUN_DIR}" "${EVAL_DIR}"
   --network_name ingolstadt_custom \
   --agents_csv "${NETWORK_DIR}/agents.csv" \
   --ratio_machines 0.4 \
-  --n_av 414 \
-  --n_hdv 621 \
   --checkpoint_dir "${RUN_DIR}" \
   --training_family dreamer_ctde \
   --wm_cfm_init_mode zero \

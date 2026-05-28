@@ -136,14 +136,6 @@ def build_stage_defaults(cfg: Dict[str, str], stage: str) -> Dict[str, object]:
             "ckpt_dir": cfg.get("DYNAMICS_LOG_DIR", ""),
         })
     if stage == "marl":
-        n_agents = _maybe_int(cfg.get("N_AGENTS"))
-        n_av = _maybe_int(cfg.get("N_AV"))
-        n_hdv = _maybe_int(cfg.get("N_HDV"))
-        if (n_agents is None or n_av is None or n_hdv is None) and cfg.get("AGENTS_CSV") and cfg.get("RATIO_MACHINES"):
-            derived = _derive_agent_counts(cfg["AGENTS_CSV"], float(cfg["RATIO_MACHINES"]))
-            n_agents = n_agents if n_agents is not None else derived["n_agents"]
-            n_av = n_av if n_av is not None else derived["n_av"]
-            n_hdv = n_hdv if n_hdv is not None else derived["n_hdv"]
         return _drop_none({
             "data_dir": cfg.get("FLOW_DATA_DIR", ""),
             "meta_file": _task_meta_file(cfg),
@@ -156,8 +148,6 @@ def build_stage_defaults(cfg: Dict[str, str], stage: str) -> Dict[str, object]:
             "network_name": cfg.get("NETWORK_NAME", ""),
             "vehicle_routes_csv": str(Path(cfg["ROUTE_ARTIFACTS_DIR"]) / "routes.csv") if cfg.get("ROUTE_ARTIFACTS_DIR") else "",
             "n_routes": _maybe_int(cfg.get("N_ROUTES")),
-            "n_av": n_av,
-            "n_hdv": n_hdv,
             "checkpoint_dir": cfg.get("MARL_CKPT_DIR", ""),
             "training_family": cfg.get("TRAINING_FAMILY", ""),
             "wm_cfm_init_mode": cfg.get("WM_CFM_INIT_MODE", ""),
@@ -244,20 +234,3 @@ def _maybe_bool(value: Optional[str]) -> Optional[bool]:
     if norm in {"0", "false", "no", "n", "off"}:
         return False
     raise ValueError(f"Cannot parse boolean value: {value}")
-
-
-def _derive_agent_counts(agents_csv: str, ratio_machines: float) -> Dict[str, int]:
-    path = Path(agents_csv).expanduser()
-    if not path.is_absolute():
-        path = (Path.cwd() / path).resolve()
-    n_agents = 0
-    with path.open("r", encoding="utf-8") as f:
-        next(f, None)
-        for _ in f:
-            n_agents += 1
-    n_av = int(n_agents * float(ratio_machines))
-    return {
-        "n_agents": n_agents,
-        "n_av": n_av,
-        "n_hdv": n_agents - n_av,
-    }

@@ -331,9 +331,9 @@ class TrainConfig:
 
     # ── MARL / action ────────────────────────────────────────────────────────
     n_routes: int = 4           # K — must match data collection number_of_paths
-    av_fraction: float = 0.3    # notional AV fraction used to compute n_av / n_hdv
-    n_av: int = 98              # int(491 * 0.2) — matches agents.csv + ratio_machines=0.2
-    n_hdv: int = 393            # 491 - 98
+    av_fraction: float = 0.3
+    n_av: int = 0               # optional cap only when dreamer_departure_cap_mode=cfg
+    n_hdv: int = 0              # optional cap only when dreamer_departure_cap_mode=cfg
 
     # ── episode / training ───────────────────────────────────────────────────
     episode_len: int = 8        # ≤ history_length，确保 z_0_real 始终在 context 内
@@ -3455,12 +3455,14 @@ def train(cfg: TrainConfig) -> None:
         edge_to_idx=wm._registry._edge_to_idx,
         routes_csv=cfg.vehicle_routes_csv,
     )
+    route_topology_av_count = int(route_registry.od_av_counts.sum())
+    route_topology_hdv_count = int(route_registry.od_hdv_counts.sum())
     logger.info(
         "Built lightweight vehicle path topology: N_od=%d, K=%d, AVs=%d, HDVs=%d, route_edges=%d",
         route_registry.n_od,
         route_registry.K,
-        int(route_registry.od_av_counts.sum()),
-        int(route_registry.od_hdv_counts.sum()),
+        route_topology_av_count,
+        route_topology_hdv_count,
         int(np.count_nonzero(route_registry.route_masks)),
     )
 
@@ -3473,9 +3475,10 @@ def train(cfg: TrainConfig) -> None:
         include_fleet_pressure=bool(getattr(cfg, "vehicle_obs_include_fleet_pressure", False)),
     )
     logger.info(
-        "Vehicle mode: obs_dim=%d, N_av=%d, K=%d, global_obs=%s, route_stats=%s, route_cost_obs=%s, fleet_pressure_obs=%s",
+        "Vehicle mode: obs_dim=%d, topology_av=%d, topology_hdv=%d, K=%d, global_obs=%s, route_stats=%s, route_cost_obs=%s, fleet_pressure_obs=%s",
         obs_dim,
-        int(cfg.n_av),
+        route_topology_av_count,
+        route_topology_hdv_count,
         route_registry.K,
         bool(cfg.vehicle_obs_include_global),
         str(cfg.vehicle_obs_route_stats),
@@ -3562,8 +3565,8 @@ def train(cfg: TrainConfig) -> None:
     # ── training loop ─────────────────────────────────────────────────────────
     logger.info("Starting offline MARL (dreamer_ctde): ep %d -> %d", start_episode, target_episode)
     logger.info(
-        "  Vehicle mode: N_av=%d, K=%d, H=%d, episode_steps=%d, path_penalty=%.2f, reward_scale=%.3f",
-        int(cfg.n_av), cfg.n_routes, int(cfg.imagination_horizon), int(cfg.episode_steps),
+        "  Vehicle mode: topology_av=%d topology_hdv=%d K=%d H=%d episode_steps=%d path_penalty=%.2f reward_scale=%.3f",
+        route_topology_av_count, route_topology_hdv_count, cfg.n_routes, int(cfg.imagination_horizon), int(cfg.episode_steps),
         float(cfg.vehicle_path_penalty_factor), float(cfg.vehicle_reward_scale),
     )
 
@@ -4369,8 +4372,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--wm_cfm_init_mode",  choices=["randn", "zero"], default="zero",
                    help="CFM rollout source for MARL imagination.")
     p.add_argument("--n_routes",          type=int,   default=4)
-    p.add_argument("--n_av",              type=int,   default=30)
-    p.add_argument("--n_hdv",             type=int,   default=70)
+    p.add_argument("--n_av",              type=int,   default=0,
+                   help="Optional AV cap used only when --dreamer_departure_cap_mode=cfg.")
+    p.add_argument("--n_hdv",             type=int,   default=0,
+                   help="Optional HDV cap used only when --dreamer_departure_cap_mode=cfg.")
     p.add_argument("--episode_len",       type=int,   default=50)
     p.add_argument("--n_total_episodes",  type=int,   default=2000)
     p.add_argument("--training_family",   type=str,   default="dreamer_ctde",
