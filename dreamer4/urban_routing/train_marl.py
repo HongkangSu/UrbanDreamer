@@ -338,8 +338,13 @@ def _dreamer_global_return_discount(cfg: Any) -> float:
         abs(float(getattr(cfg, name, 0.0))) > 1e-12
         for name in non_route_weights
     )
+    route_scope = str(getattr(cfg, "dreamer_route_cost_reward_scope", "both") or "both").strip().lower()
+    route_cost_reaches_global = route_scope in {"both", "global", "global_critic", "step"}
     has_route_duration_reward = (
-        abs(float(getattr(cfg, "dreamer_route_cost_reward_weight", 0.0))) > 1e-12
+        (
+            route_cost_reaches_global
+            and abs(float(getattr(cfg, "dreamer_route_cost_reward_weight", 0.0))) > 1e-12
+        )
         or abs(float(getattr(cfg, "dreamer_pred_t_cav_proxy_reward_weight", 0.0))) > 1e-12
         or abs(float(getattr(cfg, "dreamer_remaining_time_progress_weight", 0.0))) > 1e-12
     )
@@ -349,8 +354,13 @@ def _dreamer_global_return_discount(cfg: Any) -> float:
 
 
 def _vehicle_critic_reward_enabled(cfg: Any) -> bool:
+    route_scope = str(getattr(cfg, "dreamer_route_cost_reward_scope", "both") or "both").strip().lower()
+    route_cost_reaches_vehicle = route_scope in {"both", "vehicle", "vehicle_critic", "per_vehicle"}
     return (
-        abs(float(getattr(cfg, "dreamer_route_cost_reward_weight", 0.0))) > 1e-12
+        (
+            route_cost_reaches_vehicle
+            and abs(float(getattr(cfg, "dreamer_route_cost_reward_weight", 0.0))) > 1e-12
+        )
         or abs(float(getattr(cfg, "dreamer_vehicle_route_credit_reward_weight", 0.0))) > 1e-12
         or abs(float(getattr(cfg, "dreamer_vehicle_social_reward_weight", 0.0))) > 1e-12
     )
@@ -364,10 +374,12 @@ def _dreamer_vehicle_return_discount(cfg: Any) -> float:
     discounted return.  Mixed route+social runs intentionally keep the unit
     discount so the route-duration term retains its physical meaning.
     """
+    route_scope = str(getattr(cfg, "dreamer_route_cost_reward_scope", "both") or "both").strip().lower()
+    route_cost_reaches_vehicle = route_scope in {"both", "vehicle", "vehicle_critic", "per_vehicle"}
     if (
-        abs(float(getattr(cfg, "dreamer_route_cost_reward_weight", 0.0))) > 1e-12
-        or _vehicle_route_credit_has_unit_discount(cfg)
-    ):
+        route_cost_reaches_vehicle
+        and abs(float(getattr(cfg, "dreamer_route_cost_reward_weight", 0.0))) > 1e-12
+    ) or _vehicle_route_credit_has_unit_discount(cfg):
         return ROUTE_COST_RETURN_DISCOUNT
     if abs(float(getattr(cfg, "dreamer_vehicle_route_credit_reward_weight", 0.0))) > 1e-12:
         return float(
@@ -401,6 +413,28 @@ def _vehicle_route_credit_has_unit_discount(cfg: Any) -> bool:
         "neg_inverse_remaining_tt",
         "step_progress",
     }
+
+
+def _global_critic_reward_enabled(cfg: Any) -> bool:
+    """Whether imagined step rewards contain a critic-visible global signal."""
+    route_scope = str(getattr(cfg, "dreamer_route_cost_reward_scope", "both") or "both").strip().lower()
+    route_cost_reaches_global = route_scope in {"both", "global", "global_critic", "step"}
+    weighted_terms = (
+        "dreamer_all_reward_weight",
+        "dreamer_remaining_time_progress_weight",
+        "dreamer_current_edge_reward_weight",
+        "dreamer_cav_reward_weight",
+        "dreamer_pred_t_cav_proxy_reward_weight",
+        "dreamer_action_congestion_weight",
+        "dreamer_route_balance_weight",
+        "dreamer_route_max_share_weight",
+        "dreamer_horizon_proxy_reward_weight",
+        "dreamer_rollout_cost_reward_weight",
+        "terminal_tall_reward_weight",
+    )
+    if route_cost_reaches_global and abs(float(getattr(cfg, "dreamer_route_cost_reward_weight", 0.0))) > 1e-12:
+        return True
+    return any(abs(float(getattr(cfg, name, 0.0))) > 1e-12 for name in weighted_terms)
 
 
 def _enabled_legacy_actor_only_losses(cfg: Any) -> List[str]:
@@ -744,6 +778,7 @@ class TrainConfig:
     dreamer_current_edge_reward_weight: float = 0.0
     dreamer_cav_reward_weight: float = 0.0
     dreamer_route_cost_reward_weight: float = 0.0
+    dreamer_route_cost_reward_scope: str = "both"
     dreamer_route_cost_reward_mode: str = "progress_fraction"
     dreamer_pred_t_cav_proxy_reward_weight: float = 0.0
     dreamer_route_cost_reward_normalize_regret: bool = False
@@ -2056,6 +2091,9 @@ def imagined_episode_dynamic_dreamer(
         use_discrete_actor_critic
         and float(getattr(cfg, "dreamer_ac_route_advantage_weight", 0.0)) != 0.0
     )
+    route_reward_scope = str(getattr(cfg, "dreamer_route_cost_reward_scope", "both") or "both").strip().lower()
+    route_cost_reaches_global = route_reward_scope in {"both", "global", "global_critic", "step"}
+    route_cost_reaches_vehicle = route_reward_scope in {"both", "vehicle", "vehicle_critic", "per_vehicle"}
     vehicle_critic_reward_needed = (
         use_discrete_actor_critic
         and bool(getattr(cfg, "dreamer_vehicle_critic", True))
@@ -2068,13 +2106,15 @@ def imagined_episode_dynamic_dreamer(
             "dreamer_remaining_time_progress_weight",
             "dreamer_current_edge_reward_weight",
             "dreamer_cav_reward_weight",
-            "dreamer_route_cost_reward_weight",
             "dreamer_pred_t_cav_proxy_reward_weight",
             "dreamer_action_congestion_weight",
             "dreamer_route_balance_weight",
             "dreamer_route_max_share_weight",
             "dreamer_horizon_proxy_reward_weight",
         )
+    ) or (
+        route_cost_reaches_global
+        and float(getattr(cfg, "dreamer_route_cost_reward_weight", 0.0)) != 0.0
     ) or rollout_rewards.rollout_reward_requires_dynamics_grad(cfg)
     if use_discrete_actor_critic:
         direct_reward_requires_dynamics_grad = False
@@ -2982,7 +3022,11 @@ def imagined_episode_dynamic_dreamer(
             remaining_time_progress_weight=float(cfg.dreamer_remaining_time_progress_weight),
             current_edge_reward_weight=float(cfg.dreamer_current_edge_reward_weight),
             cav_reward_weight=float(cfg.dreamer_cav_reward_weight),
-            route_cost_reward_weight=float(cfg.dreamer_route_cost_reward_weight),
+            route_cost_reward_weight=(
+                float(cfg.dreamer_route_cost_reward_weight)
+                if route_cost_reaches_global
+                else 0.0
+            ),
             pred_t_cav_proxy_reward_weight=float(cfg.dreamer_pred_t_cav_proxy_reward_weight),
             route_cost_reward_normalize_regret=bool(cfg.dreamer_route_cost_reward_normalize_regret),
             route_cost_reward_temperature=float(cfg.dreamer_route_cost_reward_temperature),
@@ -3079,7 +3123,11 @@ def imagined_episode_dynamic_dreamer(
                                     )
                                 )
                         vehicle_reward_parts: List[torch.Tensor] = []
-                        route_reward_weight = float(getattr(cfg, "dreamer_route_cost_reward_weight", 0.0))
+                        route_reward_weight = (
+                            float(getattr(cfg, "dreamer_route_cost_reward_weight", 0.0))
+                            if route_cost_reaches_vehicle
+                            else 0.0
+                        )
                         if route_reward_weight != 0.0:
                             vehicle_route_progress_reward_for_ac = (
                                 _selected_route_vehicle_rewards_from_cost_matrix(
@@ -3843,6 +3891,7 @@ def dreamer_update(
         and vehicle_critic is not None
         and vehicle_critic_optimizer is not None
     )
+    train_global_critic = _global_critic_reward_enabled(cfg)
     critic_return_discount = _dreamer_global_return_discount(cfg)
     vehicle_return_discount = _dreamer_vehicle_return_discount(cfg)
 
@@ -3890,54 +3939,61 @@ def dreamer_update(
             next_action = torch.stack([a.detach() for a in bootstrap_actions], dim=0)
 
         bootstrap_critic = target_critic if target_critic is not None else critic
-        values = critic(current_z, action=current_action, context=current_context).squeeze(-1)
-        with torch.no_grad():
-            next_values = bootstrap_critic(next_z, action=next_action, context=next_context).squeeze(-1)
-            critic_targets = lambda_return(
-                rewards.detach(),
-                next_values,
+        if train_global_critic:
+            values = critic(current_z, action=current_action, context=current_context).squeeze(-1)
+            with torch.no_grad():
+                next_values = bootstrap_critic(next_z, action=next_action, context=next_context).squeeze(-1)
+                critic_targets = lambda_return(
+                    rewards.detach(),
+                    next_values,
+                    gamma=critic_return_discount,
+                    lambda_=float(cfg.gae_lambda),
+                )
+            critic_target_means.append(float(critic_targets.detach().mean().cpu().item()))
+            critic_target_stds.append(
+                float(critic_targets.detach().std(unbiased=False).cpu().item())
+                if int(critic_targets.numel()) > 1 else 0.0
+            )
+            target_var = torch.var(critic_targets.detach(), unbiased=False)
+            if bool(torch.isfinite(target_var).detach().cpu().item()) and float(target_var.detach().cpu().item()) > 1e-8:
+                residual_var = torch.var((critic_targets.detach() - values.detach()), unbiased=False)
+                critic_explained_variances.append(
+                    float((1.0 - residual_var / target_var.clamp_min(1e-8)).detach().cpu().item())
+                )
+            if return_normalizer is not None and bool(getattr(cfg, "dreamer_return_normalizer", True)):
+                return_normalizer.update(critic_targets)
+                critic_values_for_loss = return_normalizer.normalize(values)
+                critic_targets_for_loss = return_normalizer.normalize(critic_targets.detach())
+            elif bool(getattr(cfg, "dreamer_normalize_critic_targets", False)):
+                critic_target_ref = critic_targets.detach()
+                critic_target_mean = critic_target_ref.mean()
+                critic_target_std = critic_target_ref.std(unbiased=False).clamp_min(1e-6)
+                critic_values_for_loss = (values - critic_target_mean) / critic_target_std
+                critic_targets_for_loss = (critic_targets - critic_target_mean) / critic_target_std
+            else:
+                critic_values_for_loss = values
+                critic_targets_for_loss = critic_targets
+            critic_loss = torch.mean((critic_values_for_loss - critic_targets_for_loss) ** 2) * float(cfg.dreamer_value_coef)
+            critic_losses.append(critic_loss)
+
+            with torch.no_grad():
+                actor_bootstrap = bootstrap_critic(next_z, action=next_action, context=next_context).squeeze(-1)
+            actor_returns = lambda_return(
+                rewards,
+                actor_bootstrap,
                 gamma=critic_return_discount,
                 lambda_=float(cfg.gae_lambda),
             )
-        critic_target_means.append(float(critic_targets.detach().mean().cpu().item()))
-        critic_target_stds.append(
-            float(critic_targets.detach().std(unbiased=False).cpu().item())
-            if int(critic_targets.numel()) > 1 else 0.0
-        )
-        target_var = torch.var(critic_targets.detach(), unbiased=False)
-        if bool(torch.isfinite(target_var).detach().cpu().item()) and float(target_var.detach().cpu().item()) > 1e-8:
-            residual_var = torch.var((critic_targets.detach() - values.detach()), unbiased=False)
-            critic_explained_variances.append(
-                float((1.0 - residual_var / target_var.clamp_min(1e-8)).detach().cpu().item())
+            if return_normalizer is not None and bool(getattr(cfg, "dreamer_return_normalizer", True)):
+                actor_advantages = return_normalizer.normalize(actor_returns) - return_normalizer.normalize(values.detach())
+            else:
+                actor_advantages = actor_returns - values.detach()
+        else:
+            actor_advantages = torch.zeros(
+                (int(rewards.reshape(-1).shape[0]),),
+                device=current_z.device,
+                dtype=current_z.dtype,
             )
-        if return_normalizer is not None and bool(getattr(cfg, "dreamer_return_normalizer", True)):
-            return_normalizer.update(critic_targets)
-            critic_values_for_loss = return_normalizer.normalize(values)
-            critic_targets_for_loss = return_normalizer.normalize(critic_targets.detach())
-        elif bool(getattr(cfg, "dreamer_normalize_critic_targets", False)):
-            critic_target_ref = critic_targets.detach()
-            critic_target_mean = critic_target_ref.mean()
-            critic_target_std = critic_target_ref.std(unbiased=False).clamp_min(1e-6)
-            critic_values_for_loss = (values - critic_target_mean) / critic_target_std
-            critic_targets_for_loss = (critic_targets - critic_target_mean) / critic_target_std
-        else:
-            critic_values_for_loss = values
-            critic_targets_for_loss = critic_targets
-        critic_loss = torch.mean((critic_values_for_loss - critic_targets_for_loss) ** 2) * float(cfg.dreamer_value_coef)
-        critic_losses.append(critic_loss)
-
-        with torch.no_grad():
-            actor_bootstrap = bootstrap_critic(next_z, action=next_action, context=next_context).squeeze(-1)
-        actor_returns = lambda_return(
-            rewards,
-            actor_bootstrap,
-            gamma=critic_return_discount,
-            lambda_=float(cfg.gae_lambda),
-        )
-        if return_normalizer is not None and bool(getattr(cfg, "dreamer_return_normalizer", True)):
-            actor_advantages = return_normalizer.normalize(actor_returns) - return_normalizer.normalize(values.detach())
-        else:
-            actor_advantages = actor_returns - values.detach()
         if bool(getattr(cfg, "dreamer_normalize_actor_advantages", False)):
             actor_advantages = _standardize_with_detached_stats(actor_advantages, center=True)
         if use_vehicle_critic:
@@ -4424,7 +4480,7 @@ def dreamer_update(
         if combined_losses:
             actor_losses.append(torch.stack(combined_losses).mean())
 
-    if not critic_losses:
+    if not critic_losses and not vehicle_critic_losses:
         return {
             "pg_loss": 0.0,
             "value_loss": 0.0,
@@ -4520,13 +4576,23 @@ def dreamer_update(
             "update_id": int(update_id) if update_id is not None else -1,
         }
 
-    critic_optimizer.zero_grad()
-    critic_loss_total = torch.stack(critic_losses).mean()
-    critic_loss_total.backward()
-    nn.utils.clip_grad_norm_(critic.parameters(), 1.0)
-    critic_optimizer.step()
-    if target_critic is not None and float(getattr(cfg, "dreamer_slow_critic_tau", 0.0)) > 0.0:
-        _polyak_update_module(target_critic, critic, tau=float(cfg.dreamer_slow_critic_tau))
+    if critic_losses:
+        critic_optimizer.zero_grad()
+        critic_loss_total = torch.stack(critic_losses).mean()
+        critic_loss_total.backward()
+        nn.utils.clip_grad_norm_(critic.parameters(), 1.0)
+        critic_optimizer.step()
+        if target_critic is not None and float(getattr(cfg, "dreamer_slow_critic_tau", 0.0)) > 0.0:
+            _polyak_update_module(target_critic, critic, tau=float(cfg.dreamer_slow_critic_tau))
+    elif vehicle_critic_losses:
+        critic_loss_total = torch.zeros(
+            (),
+            device=vehicle_critic_losses[0].device,
+            dtype=vehicle_critic_losses[0].dtype,
+        )
+    else:
+        critic_ref = next(critic.parameters())
+        critic_loss_total = torch.zeros((), device=critic_ref.device, dtype=critic_ref.dtype)
 
     if vehicle_critic_losses and vehicle_critic is not None and vehicle_critic_optimizer is not None:
         vehicle_critic_optimizer.zero_grad()
@@ -6165,6 +6231,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="Weight for CAV/action-edge route travel-time cost in differentiable Dreamer reward.")
     p.add_argument("--dreamer_route_cost_reward_weight", type=float, default=0.0,
                    help="Weight for non-leaky candidate-path route cost computed from WM edge travel times.")
+    p.add_argument("--dreamer_route_cost_reward_scope", type=str, default="both",
+                   choices=["both", "global", "global_critic", "step", "vehicle", "vehicle_critic", "per_vehicle"],
+                   help=(
+                       "Where --dreamer_route_cost_reward_weight is applied. Use vehicle_critic "
+                       "for the current per-vehicle actor-critic mainline so route progress "
+                       "trains the vehicle critic without creating a noisy global step-value target."
+                   ))
     p.add_argument("--dreamer_route_cost_reward_mode", type=str, default="progress_fraction",
                    choices=[
                        "progress_fraction", "step_progress", "trip_progress_fraction",
