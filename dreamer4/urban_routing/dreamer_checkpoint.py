@@ -284,6 +284,7 @@ def normalize_stats_history_defaults(stats_history):
         "vehicle_value_loss", "vehicle_critic_target_mean", "vehicle_critic_target_std",
         "vehicle_critic_explained_variance", "vehicle_return_norm_mean", "vehicle_return_norm_std",
         "vehicle_reward_mean", "vehicle_reward_std",
+        "vehicle_route_credit_reward_mean", "vehicle_route_credit_reward_std",
         "vehicle_social_reward_mean", "vehicle_social_reward_std",
         "vehicle_return_discount",
         "critic_target_mean", "critic_target_std", "critic_explained_variance",
