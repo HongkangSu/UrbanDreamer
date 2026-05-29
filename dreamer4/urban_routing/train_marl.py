@@ -55,6 +55,7 @@ try:
     from . import dreamer_reward_readouts as rollout_rewards
     from .dreamer_checkpoint import (
         _restore_dreamer_extra_state,
+        _move_nested_tensors,
         capture_rng_state,
         count_fresh_pending_trajs,
         load_dreamer_checkpoint,
@@ -142,6 +143,7 @@ except ImportError:
     import dreamer_reward_readouts as rollout_rewards
     from dreamer_checkpoint import (
         _restore_dreamer_extra_state,
+        _move_nested_tensors,
         capture_rng_state,
         count_fresh_pending_trajs,
         load_dreamer_checkpoint,
@@ -420,6 +422,14 @@ def _actor_trust_region_accepts(
     else:
         max_route_ok = False
     return bool(kl_ok and argmax_change_ok and max_route_ok)
+
+
+def _actor_anchor_enabled(cfg: Any) -> bool:
+    return (
+        float(getattr(cfg, "dreamer_actor_anchor_kl", 0.0)) > 0.0
+        or float(getattr(cfg, "dreamer_actor_anchor_max_argmax_change_frac", 0.0)) > 0.0
+        or float(getattr(cfg, "dreamer_actor_anchor_max_route_frac", 0.0)) > 0.0
+    )
 
 
 def _dreamer_global_return_discount(cfg: Any) -> float:
@@ -867,6 +877,11 @@ class TrainConfig:
     dreamer_actor_trust_region_lr_shrink: float = 0.5
     dreamer_actor_trust_region_min_samples: int = 128
     dreamer_actor_trust_region_max_samples: int = 4096
+    dreamer_actor_anchor_start_episode: int = -1
+    dreamer_actor_anchor_update_interval: int = 0
+    dreamer_actor_anchor_kl: float = 0.0
+    dreamer_actor_anchor_max_argmax_change_frac: float = 0.0
+    dreamer_actor_anchor_max_route_frac: float = 0.0
     dreamer_critic_lr: float = 0.0  # 0 keeps legacy cfg.lr
     dreamer_actor_objective: str = "discrete_actor_critic"  # direct_return | critic_q | direct_plus_q | discrete_actor_critic
     dreamer_actor_q_weight: float = 1.0
@@ -1041,6 +1056,10 @@ DREAMER_UPDATE_SCALAR_KEYS = (
     "dreamer_actor_trust_region_argmax_change_frac",
     "dreamer_actor_trust_region_argmax_max_route_frac",
     "dreamer_actor_trust_region_top1_prob",
+    "dreamer_actor_anchor_active", "dreamer_actor_anchor_accepted",
+    "dreamer_actor_anchor_kl", "dreamer_actor_anchor_argmax_change_frac",
+    "dreamer_actor_anchor_argmax_max_route_frac", "dreamer_actor_anchor_top1_prob",
+    "dreamer_actor_anchor_sample_count",
     "dreamer_ac_sample_count",
     "dreamer_ac_policy_kl", "dreamer_ac_clip_frac", "dreamer_ac_weight_mean",
     "dreamer_ac_uses_sample_adv", "dreamer_ac_entropy_loss",
@@ -3946,6 +3965,7 @@ def dreamer_update(
     target_vehicle_critic: Optional[CentralizedVehicleValueCritic] = None,
     vehicle_return_normalizer: Optional[DreamerReturnNormalizer] = None,
     actor_gate_state: Optional[Dict[str, Any]] = None,
+    actor_anchor: Optional[VehicleRouteActor] = None,
 ) -> Dict[str, float]:
     actor_losses: List[torch.Tensor] = []
     critic_losses: List[torch.Tensor] = []
@@ -4760,6 +4780,13 @@ def dreamer_update(
             "dreamer_actor_trust_region_argmax_change_frac": 0.0,
             "dreamer_actor_trust_region_argmax_max_route_frac": 0.0,
             "dreamer_actor_trust_region_top1_prob": 0.0,
+            "dreamer_actor_anchor_active": 0.0,
+            "dreamer_actor_anchor_accepted": 0.0,
+            "dreamer_actor_anchor_kl": 0.0,
+            "dreamer_actor_anchor_argmax_change_frac": 0.0,
+            "dreamer_actor_anchor_argmax_max_route_frac": 0.0,
+            "dreamer_actor_anchor_top1_prob": 0.0,
+            "dreamer_actor_anchor_sample_count": 0.0,
             "dreamer_ac_sample_count": 0.0,
             "dreamer_ac_policy_kl": 0.0,
             "dreamer_ac_clip_frac": 0.0,
@@ -4902,6 +4929,13 @@ def dreamer_update(
     actor_trust_region_argmax_change_frac = 0.0
     actor_trust_region_argmax_max_route_frac = 0.0
     actor_trust_region_top1_prob = 0.0
+    actor_anchor_active = 0.0
+    actor_anchor_accepted = 0.0
+    actor_anchor_kl = 0.0
+    actor_anchor_argmax_change_frac = 0.0
+    actor_anchor_argmax_max_route_frac = 0.0
+    actor_anchor_top1_prob = 0.0
+    actor_anchor_sample_count = 0.0
 
     if actor_losses and not actor_gate_skip:
         actor_loss_total = torch.stack(actor_losses).mean()
@@ -4933,8 +4967,30 @@ def dreamer_update(
                 actor_trust_region_sample_count
                 >= float(getattr(cfg, "dreamer_actor_trust_region_min_samples", 128))
             )
+        anchor_snapshot: Dict[str, object] = {"sample_count": 0.0}
+        anchor_enabled = False
+        anchor_start = int(getattr(cfg, "dreamer_actor_anchor_start_episode", -1))
+        if (
+            _actor_anchor_enabled(cfg)
+            and actor_anchor is not None
+            and use_discrete_actor_critic
+            and int(update_episode) >= max(anchor_start, 0)
+        ):
+            actor_anchor.eval()
+            anchor_snapshot = dreamer_pg.discrete_ac_policy_snapshot(
+                actor_anchor,
+                trajectories,
+                temperature=float(getattr(cfg, "dreamer_action_temperature", 1.0)),
+                max_samples=int(getattr(cfg, "dreamer_actor_trust_region_max_samples", 4096)),
+            )
+            actor_anchor_sample_count = float(anchor_snapshot.get("sample_count", 0.0))
+            anchor_enabled = (
+                actor_anchor_sample_count
+                >= float(getattr(cfg, "dreamer_actor_trust_region_min_samples", 128))
+            )
+            actor_anchor_active = 1.0 if anchor_enabled else 0.0
 
-        if trust_region_enabled:
+        if trust_region_enabled or anchor_enabled:
             actor_state_before = copy.deepcopy(actor.state_dict())
             actor_optimizer_state_before = copy.deepcopy(actor_optimizer.state_dict())
             optimizer_lrs_before = [float(group.get("lr", 0.0)) for group in actor_optimizer.param_groups]
@@ -4950,6 +5006,7 @@ def dreamer_update(
             if not np.isfinite(lr_shrink) or lr_shrink <= 0.0 or lr_shrink >= 1.0:
                 lr_shrink = 0.5
             accepted = False
+            last_anchor_accepted = True
             for attempt in range(max_retries + 1):
                 actor.load_state_dict(actor_state_before)
                 actor_optimizer.load_state_dict(actor_optimizer_state_before)
@@ -4962,32 +5019,72 @@ def dreamer_update(
                     if grad is not None:
                         p.grad = grad.to(device=p.device, dtype=p.dtype).clone()
                 actor_optimizer.step()
-                shift_stats = dreamer_pg.discrete_ac_policy_shift_from_snapshot(
-                    actor,
-                    trust_region_snapshot,
-                    temperature=float(getattr(cfg, "dreamer_action_temperature", 1.0)),
-                )
-                actor_trust_region_kl = float(shift_stats.get("kl", 0.0))
-                actor_trust_region_argmax_change_frac = float(
-                    shift_stats.get("argmax_change_frac", 0.0)
-                )
-                actor_trust_region_argmax_max_route_frac = float(
-                    shift_stats.get("argmax_max_route_frac", 0.0)
-                )
-                actor_trust_region_top1_prob = float(shift_stats.get("top1_prob_mean", 0.0))
+                if trust_region_enabled:
+                    shift_stats = dreamer_pg.discrete_ac_policy_shift_from_snapshot(
+                        actor,
+                        trust_region_snapshot,
+                        temperature=float(getattr(cfg, "dreamer_action_temperature", 1.0)),
+                    )
+                    actor_trust_region_kl = float(shift_stats.get("kl", 0.0))
+                    actor_trust_region_argmax_change_frac = float(
+                        shift_stats.get("argmax_change_frac", 0.0)
+                    )
+                    actor_trust_region_argmax_max_route_frac = float(
+                        shift_stats.get("argmax_max_route_frac", 0.0)
+                    )
+                    actor_trust_region_top1_prob = float(shift_stats.get("top1_prob_mean", 0.0))
+                    trust_accepted = _actor_trust_region_accepts(
+                        kl=actor_trust_region_kl,
+                        argmax_change_frac=actor_trust_region_argmax_change_frac,
+                        new_argmax_max_route_frac=actor_trust_region_argmax_max_route_frac,
+                        old_argmax_max_route_frac=float(
+                            trust_region_snapshot.get("old_argmax_max_route_frac", 0.0)
+                        ),
+                        kl_limit=trust_region_kl_limit,
+                        argmax_change_limit=trust_region_argmax_change_limit,
+                        max_route_frac_limit=trust_region_max_route_limit,
+                    )
+                else:
+                    trust_accepted = True
                 actor_trust_region_retries = float(attempt)
-                if _actor_trust_region_accepts(
-                    kl=actor_trust_region_kl,
-                    argmax_change_frac=actor_trust_region_argmax_change_frac,
-                    new_argmax_max_route_frac=actor_trust_region_argmax_max_route_frac,
-                    old_argmax_max_route_frac=float(
-                        trust_region_snapshot.get("old_argmax_max_route_frac", 0.0)
-                    ),
-                    kl_limit=trust_region_kl_limit,
-                    argmax_change_limit=trust_region_argmax_change_limit,
-                    max_route_frac_limit=trust_region_max_route_limit,
-                ):
+                if anchor_enabled:
+                    anchor_shift_stats = dreamer_pg.discrete_ac_policy_shift_from_snapshot(
+                        actor,
+                        anchor_snapshot,
+                        temperature=float(getattr(cfg, "dreamer_action_temperature", 1.0)),
+                    )
+                    actor_anchor_kl = float(anchor_shift_stats.get("kl", 0.0))
+                    actor_anchor_argmax_change_frac = float(
+                        anchor_shift_stats.get("argmax_change_frac", 0.0)
+                    )
+                    actor_anchor_argmax_max_route_frac = float(
+                        anchor_shift_stats.get("argmax_max_route_frac", 0.0)
+                    )
+                    actor_anchor_top1_prob = float(anchor_shift_stats.get("top1_prob_mean", 0.0))
+                    anchor_accepted = _actor_trust_region_accepts(
+                        kl=actor_anchor_kl,
+                        argmax_change_frac=actor_anchor_argmax_change_frac,
+                        new_argmax_max_route_frac=actor_anchor_argmax_max_route_frac,
+                        old_argmax_max_route_frac=float(
+                            anchor_snapshot.get("old_argmax_max_route_frac", 0.0)
+                        ),
+                        kl_limit=float(getattr(cfg, "dreamer_actor_anchor_kl", 0.0)),
+                        argmax_change_limit=float(
+                            getattr(cfg, "dreamer_actor_anchor_max_argmax_change_frac", 0.0)
+                        ),
+                        max_route_frac_limit=float(
+                            getattr(cfg, "dreamer_actor_anchor_max_route_frac", 0.0)
+                        ),
+                    )
+                    last_anchor_accepted = bool(anchor_accepted)
+                    actor_anchor_accepted = 1.0 if anchor_accepted else 0.0
+                else:
+                    actor_anchor_accepted = 1.0
+                    anchor_accepted = True
+                    last_anchor_accepted = True
+                if trust_accepted and anchor_accepted:
                     accepted = True
+                    actor_anchor_accepted = 1.0 if anchor_enabled else actor_anchor_accepted
                     break
             if accepted:
                 actor_trust_region_accepted = 1.0
@@ -5002,7 +5099,10 @@ def dreamer_update(
                     dtype=critic_loss_total.dtype,
                 )
                 skipped_actor_trajs += max(1, len(actor_losses))
-                reason = "actor_trust_region_reject"
+                if anchor_enabled and not last_anchor_accepted:
+                    reason = "actor_anchor_reject"
+                else:
+                    reason = "actor_trust_region_reject"
                 skip_reason_counts[reason] = int(skip_reason_counts.get(reason, 0)) + max(1, len(actor_losses))
         else:
             actor_optimizer.zero_grad()
@@ -5010,6 +5110,7 @@ def dreamer_update(
             nn.utils.clip_grad_norm_(actor.parameters(), 1.0)
             actor_optimizer.step()
             actor_trust_region_accepted = 1.0
+            actor_anchor_accepted = 1.0
     else:
         actor_loss_total = torch.zeros((), device=critic_loss_total.device, dtype=critic_loss_total.dtype)
 
@@ -5130,6 +5231,13 @@ def dreamer_update(
         "dreamer_actor_trust_region_argmax_change_frac": actor_trust_region_argmax_change_frac,
         "dreamer_actor_trust_region_argmax_max_route_frac": actor_trust_region_argmax_max_route_frac,
         "dreamer_actor_trust_region_top1_prob": actor_trust_region_top1_prob,
+        "dreamer_actor_anchor_active": actor_anchor_active,
+        "dreamer_actor_anchor_accepted": actor_anchor_accepted,
+        "dreamer_actor_anchor_kl": actor_anchor_kl,
+        "dreamer_actor_anchor_argmax_change_frac": actor_anchor_argmax_change_frac,
+        "dreamer_actor_anchor_argmax_max_route_frac": actor_anchor_argmax_max_route_frac,
+        "dreamer_actor_anchor_top1_prob": actor_anchor_top1_prob,
+        "dreamer_actor_anchor_sample_count": actor_anchor_sample_count,
         "dreamer_ac_sample_count": float(np.mean(dreamer_ac_sample_counts)) if dreamer_ac_sample_counts else 0.0,
         "dreamer_ac_policy_kl": float(np.mean(dreamer_ac_policy_kls)) if dreamer_ac_policy_kls else 0.0,
         "dreamer_ac_clip_frac": float(np.mean(dreamer_ac_clip_fracs)) if dreamer_ac_clip_fracs else 0.0,
@@ -5442,6 +5550,12 @@ def train(cfg: TrainConfig) -> None:
             target_vehicle_critic.eval()
             for param in target_vehicle_critic.parameters():
                 param.requires_grad_(False)
+    actor_anchor: Optional[VehicleRouteActor] = None
+    if _actor_anchor_enabled(cfg):
+        actor_anchor = copy.deepcopy(actor).to(device)
+        actor_anchor.eval()
+        for param in actor_anchor.parameters():
+            param.requires_grad_(False)
     return_normalizer = DreamerReturnNormalizer(
         decay=float(getattr(cfg, "dreamer_return_normalizer_decay", 0.99)),
         enabled=bool(getattr(cfg, "dreamer_return_normalizer", True)),
@@ -5769,6 +5883,10 @@ def train(cfg: TrainConfig) -> None:
             "skipped_actor_trajs": 0.0,
         })
         actor_gate_state: Dict[str, Any] = {"latched": False}
+        actor_anchor_initialized = bool(
+            actor_anchor is not None
+            and int(getattr(cfg, "dreamer_actor_anchor_start_episode", -1)) < 0
+        )
 
         if cfg.resume_ckpt and os.path.exists(cfg.resume_ckpt):
             resume_state = maybe_resume_dreamer_checkpoint(
@@ -5793,6 +5911,26 @@ def train(cfg: TrainConfig) -> None:
                 update_id = int(resume_state["update_id"])
                 if resume_state.get("restored_rng") is not None:
                     rng = resume_state["restored_rng"]
+                extra_state = dict(resume_state.get("extra_state", {}) or {})
+                actor_anchor_state = extra_state.get("actor_anchor")
+                if actor_anchor is not None and actor_anchor_state is not None:
+                    try:
+                        actor_anchor.load_state_dict(actor_anchor_state)
+                        actor_anchor.to(device)
+                        actor_anchor.eval()
+                        for param in actor_anchor.parameters():
+                            param.requires_grad_(False)
+                        logger.info("Restored actor anchor state from Dreamer checkpoint extra_state.")
+                    except RuntimeError as exc:
+                        logger.warning(
+                            "Failed to restore actor anchor state; using current actor as anchor. Error: %s",
+                            exc,
+                        )
+                        actor_anchor.load_state_dict(actor.state_dict())
+                if actor_anchor is not None:
+                    actor_anchor_initialized = bool(
+                        extra_state.get("actor_anchor_initialized", actor_anchor_state is not None)
+                    )
         if start_episode > 0 and int(cfg.n_total_episodes) <= start_episode:
             logger.warning(
                 "n_total_episodes=%d <= resumed Dreamer episode=%d; interpret as additional episodes "
@@ -5803,10 +5941,32 @@ def train(cfg: TrainConfig) -> None:
             )
             target_episode = start_episode + int(cfg.n_total_episodes)
 
+        def _dreamer_extra_state() -> Dict[str, Any]:
+            extra_state: Dict[str, Any] = {}
+            if bool(cfg.dreamer_preserve_partial_batch_on_exit):
+                extra_state["pending_trajs"] = _move_nested_tensors(pending_trajs, cpu=True)
+            if actor_anchor is not None:
+                extra_state["actor_anchor"] = _move_nested_tensors(actor_anchor.state_dict(), cpu=True)
+                extra_state["actor_anchor_initialized"] = bool(actor_anchor_initialized)
+            extra_state["update_id"] = int(update_id)
+            extra_state.update(capture_rng_state(rng=rng))
+            return extra_state
+
         for episode in range(start_episode, target_episode):
             actor_lr_episode = _scheduled_actor_lr(cfg, actor_base_lr, episode)
             _set_optimizer_lr(actor_optimizer, actor_lr_episode)
             actor.train()
+            if (
+                actor_anchor is not None
+                and not bool(actor_anchor_initialized)
+                and int(episode) >= max(int(getattr(cfg, "dreamer_actor_anchor_start_episode", -1)), 0)
+            ):
+                actor_anchor.load_state_dict(actor.state_dict())
+                actor_anchor.eval()
+                for param in actor_anchor.parameters():
+                    param.requires_grad_(False)
+                actor_anchor_initialized = True
+                logger.info("Initialized actor anchor at episode %d.", int(episode))
             critic.train()
             if target_critic is not None:
                 target_critic.eval()
@@ -6146,8 +6306,19 @@ def train(cfg: TrainConfig) -> None:
                     target_vehicle_critic=target_vehicle_critic,
                     vehicle_return_normalizer=vehicle_return_normalizer,
                     actor_gate_state=actor_gate_state,
+                    actor_anchor=actor_anchor,
                 )
                 _update_wall_sec += _time.perf_counter() - _update_t0
+                anchor_interval = int(getattr(cfg, "dreamer_actor_anchor_update_interval", 0))
+                if (
+                    actor_anchor is not None
+                    and anchor_interval > 0
+                    and int(last_update_stats.get("dreamer_actor_anchor_accepted", 0.0)) > 0
+                    and (update_id + 1) % anchor_interval == 0
+                ):
+                    actor_anchor.load_state_dict(actor.state_dict())
+                    actor_anchor.eval()
+                    actor_anchor_initialized = True
                 pending_trajs.clear()
                 update_id += 1
                 for k in DREAMER_UPDATE_SCALAR_KEYS:
@@ -6168,6 +6339,12 @@ def train(cfg: TrainConfig) -> None:
                     "actor_trust_region_accepted": bool(last_update_stats.get("dreamer_actor_trust_region_accepted", 0.0)),
                     "actor_trust_region_kl": float(last_update_stats.get("dreamer_actor_trust_region_kl", 0.0)),
                     "actor_trust_region_retries": float(last_update_stats.get("dreamer_actor_trust_region_retries", 0.0)),
+                    "actor_anchor_active": bool(last_update_stats.get("dreamer_actor_anchor_active", 0.0)),
+                    "actor_anchor_accepted": bool(last_update_stats.get("dreamer_actor_anchor_accepted", 0.0)),
+                    "actor_anchor_kl": float(last_update_stats.get("dreamer_actor_anchor_kl", 0.0)),
+                    "actor_anchor_argmax_change_frac": float(
+                        last_update_stats.get("dreamer_actor_anchor_argmax_change_frac", 0.0)
+                    ),
                     "skipped_actor_trajs": float(last_update_stats.get("skipped_actor_trajs", 0.0)),
                     "consumed_fresh_traj_count": int(last_update_stats.get("consumed_fresh_traj_count", 0)),
                     "consumed_restored_traj_count": int(last_update_stats.get("consumed_restored_traj_count", 0)),
@@ -6230,6 +6407,10 @@ def train(cfg: TrainConfig) -> None:
                 recent_actor_tr_kl = np.mean(stats_history["dreamer_actor_trust_region_kl"][-cfg.log_every:]) if stats_history["dreamer_actor_trust_region_kl"] else 0.0
                 recent_actor_tr_retries = np.mean(stats_history["dreamer_actor_trust_region_retries"][-cfg.log_every:]) if stats_history["dreamer_actor_trust_region_retries"] else 0.0
                 recent_actor_tr_argmax_change = np.mean(stats_history["dreamer_actor_trust_region_argmax_change_frac"][-cfg.log_every:]) if stats_history["dreamer_actor_trust_region_argmax_change_frac"] else 0.0
+                recent_actor_anchor_active = np.mean(stats_history["dreamer_actor_anchor_active"][-cfg.log_every:]) if stats_history["dreamer_actor_anchor_active"] else 0.0
+                recent_actor_anchor_accept = np.mean(stats_history["dreamer_actor_anchor_accepted"][-cfg.log_every:]) if stats_history["dreamer_actor_anchor_accepted"] else 0.0
+                recent_actor_anchor_kl = np.mean(stats_history["dreamer_actor_anchor_kl"][-cfg.log_every:]) if stats_history["dreamer_actor_anchor_kl"] else 0.0
+                recent_actor_anchor_change = np.mean(stats_history["dreamer_actor_anchor_argmax_change_frac"][-cfg.log_every:]) if stats_history["dreamer_actor_anchor_argmax_change_frac"] else 0.0
                 recent_ac_samples = np.mean(stats_history["dreamer_ac_sample_count"][-cfg.log_every:]) if stats_history["dreamer_ac_sample_count"] else 0.0
                 recent_ac_kl = np.mean(stats_history["dreamer_ac_policy_kl"][-cfg.log_every:]) if stats_history["dreamer_ac_policy_kl"] else 0.0
                 recent_ac_clip = np.mean(stats_history["dreamer_ac_clip_frac"][-cfg.log_every:]) if stats_history["dreamer_ac_clip_frac"] else 0.0
@@ -6298,6 +6479,7 @@ def train(cfg: TrainConfig) -> None:
                     f"ac_policy_argmax={recent_ac_policy_argmax_max:.2f}/r0={recent_ac_policy_argmax_route0:.2f}/non0={recent_ac_policy_argmax_nonzero:.2f} "
                     f"top1={recent_ac_policy_top1:.2f} gate={recent_actor_gate:.1f}/{recent_actor_gate_latched:.1f} "
                     f"trust={recent_actor_tr_accept:.1f}/kl={recent_actor_tr_kl:.4f}/retry={recent_actor_tr_retries:.1f}/chg={recent_actor_tr_argmax_change:.3f} "
+                    f"anchor={recent_actor_anchor_active:.1f}/{recent_actor_anchor_accept:.1f}/kl={recent_actor_anchor_kl:.4f}/chg={recent_actor_anchor_change:.3f} "
                     f"ac_n={recent_ac_samples:.1f} "
                     f"ac_kl/clip/w/sample_adv={recent_ac_kl:.4f}/{recent_ac_clip:.3f}/{recent_ac_weight:.3f}/{recent_ac_sample_adv:.1f} "
                     f"ent_floor={recent_ac_entropy_floor:.4f}/{recent_ac_entropy_target:.3f} "
@@ -6316,13 +6498,7 @@ def train(cfg: TrainConfig) -> None:
                 )
 
             if cfg.checkpoint_every > 0 and (episode + 1) % cfg.checkpoint_every == 0:
-                extra_state = {}
-                if bool(cfg.dreamer_preserve_partial_batch_on_exit):
-                    extra_state = {
-                        "pending_trajs": _move_nested_tensors(pending_trajs, cpu=True),
-                        "update_id": int(update_id),
-                        **capture_rng_state(rng=rng),
-                    }
+                extra_state = _dreamer_extra_state()
                 path = save_dreamer_checkpoint(
                     cfg,
                     actor,
@@ -6357,7 +6533,18 @@ def train(cfg: TrainConfig) -> None:
                 target_vehicle_critic=target_vehicle_critic,
                 vehicle_return_normalizer=vehicle_return_normalizer,
                 actor_gate_state=actor_gate_state,
+                actor_anchor=actor_anchor,
             )
+            anchor_interval = int(getattr(cfg, "dreamer_actor_anchor_update_interval", 0))
+            if (
+                actor_anchor is not None
+                and anchor_interval > 0
+                and int(last_update_stats.get("dreamer_actor_anchor_accepted", 0.0)) > 0
+                and (update_id + 1) % anchor_interval == 0
+            ):
+                actor_anchor.load_state_dict(actor.state_dict())
+                actor_anchor.eval()
+                actor_anchor_initialized = True
             for k in DREAMER_UPDATE_SCALAR_KEYS:
                 stats_history[k].append(last_update_stats.get(k, 0.0))
             stats_history["skipped_actor_trajs"].append(last_update_stats.get("skipped_actor_trajs", 0.0))
@@ -6372,6 +6559,12 @@ def train(cfg: TrainConfig) -> None:
                 "actor_trust_region_accepted": bool(last_update_stats.get("dreamer_actor_trust_region_accepted", 0.0)),
                 "actor_trust_region_kl": float(last_update_stats.get("dreamer_actor_trust_region_kl", 0.0)),
                 "actor_trust_region_retries": float(last_update_stats.get("dreamer_actor_trust_region_retries", 0.0)),
+                "actor_anchor_active": bool(last_update_stats.get("dreamer_actor_anchor_active", 0.0)),
+                "actor_anchor_accepted": bool(last_update_stats.get("dreamer_actor_anchor_accepted", 0.0)),
+                "actor_anchor_kl": float(last_update_stats.get("dreamer_actor_anchor_kl", 0.0)),
+                "actor_anchor_argmax_change_frac": float(
+                    last_update_stats.get("dreamer_actor_anchor_argmax_change_frac", 0.0)
+                ),
                 "skipped_actor_trajs": float(last_update_stats.get("skipped_actor_trajs", 0.0)),
                 "consumed_fresh_traj_count": int(last_update_stats.get("consumed_fresh_traj_count", 0)),
                 "consumed_restored_traj_count": int(last_update_stats.get("consumed_restored_traj_count", 0)),
@@ -6381,13 +6574,7 @@ def train(cfg: TrainConfig) -> None:
                 "skipped_restored_traj_count": int(last_update_stats.get("skipped_restored_traj_count", 0)),
             })
 
-        final_extra_state = {}
-        if bool(cfg.dreamer_preserve_partial_batch_on_exit):
-            final_extra_state = {
-                "pending_trajs": _move_nested_tensors(pending_trajs, cpu=True),
-                "update_id": int(update_id),
-                **capture_rng_state(rng=rng),
-            }
+        final_extra_state = _dreamer_extra_state()
 
         save_dreamer_checkpoint(
             cfg,
@@ -6630,6 +6817,30 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="Minimum AC snapshot samples required before actor trust-region checks run.")
     p.add_argument("--dreamer_actor_trust_region_max_samples", type=int, default=4096,
                    help="Maximum deterministic AC samples used for actor trust-region KL checks.")
+    p.add_argument("--dreamer_actor_anchor_start_episode", type=int, default=-1,
+                   help=(
+                       "Episode at which to start constraining cumulative actor drift against a "
+                       "frozen reference actor. <0 disables the anchor start gate unless another "
+                       "anchor limit is enabled with start treated as episode 0."
+                   ))
+    p.add_argument("--dreamer_actor_anchor_update_interval", type=int, default=0,
+                   help=(
+                       "If >0, refresh the frozen actor anchor every N accepted actor updates. "
+                       "0 keeps the initial/resumed anchor fixed."
+                   ))
+    p.add_argument("--dreamer_actor_anchor_kl", type=float, default=0.0,
+                   help=(
+                       "If >0, reject actor steps whose cumulative full categorical KL from the "
+                       "frozen actor anchor exceeds this value on discrete AC samples. This is a "
+                       "trust-region constraint, not a reward or actor-only route-cost loss."
+                   ))
+    p.add_argument("--dreamer_actor_anchor_max_argmax_change_frac", type=float, default=0.0,
+                   help="If >0, reject actor steps whose argmax differs from the actor anchor on more than this weighted sample fraction.")
+    p.add_argument("--dreamer_actor_anchor_max_route_frac", type=float, default=0.0,
+                   help=(
+                       "If >0, reject actor steps whose post-step deterministic argmax "
+                       "distribution places any route above this fraction relative to the anchor samples."
+                   ))
     p.add_argument("--dreamer_critic_lr", type=float, default=0.0,
                    help="Critic learning rate override for Dreamer CTDE. <=0 uses --lr.")
     p.add_argument("--dreamer_actor_objective", type=str, default="discrete_actor_critic",

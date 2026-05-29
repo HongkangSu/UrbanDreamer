@@ -214,7 +214,7 @@ def _restore_dreamer_extra_state(extra_state, *, device):
     for traj in pending_trajs:
         traj["restored_from_checkpoint"] = True
     update_id = int(extra_state.get("update_id", 0))
-    return pending_trajs, update_id
+    return pending_trajs, update_id, extra_state
 
 
 def count_fresh_pending_trajs(pending_trajs):
@@ -293,6 +293,10 @@ def normalize_stats_history_defaults(stats_history):
         "dreamer_actor_trust_region_argmax_change_frac",
         "dreamer_actor_trust_region_argmax_max_route_frac",
         "dreamer_actor_trust_region_top1_prob",
+        "dreamer_actor_anchor_active", "dreamer_actor_anchor_accepted",
+        "dreamer_actor_anchor_kl", "dreamer_actor_anchor_argmax_change_frac",
+        "dreamer_actor_anchor_argmax_max_route_frac", "dreamer_actor_anchor_top1_prob",
+        "dreamer_actor_anchor_sample_count",
         "dreamer_ac_sample_count",
         "dreamer_ac_policy_kl", "dreamer_ac_clip_frac", "dreamer_ac_weight_mean",
         "dreamer_ac_uses_sample_adv", "dreamer_ac_entropy_loss",
@@ -383,12 +387,13 @@ def maybe_resume_dreamer_checkpoint(
         if reset_actor_optimizer:
             logger.info("Actor optimizer state reset on resume; actor weights were still loaded.")
         stats_history = normalize_stats_history_defaults(stats_history)
-        pending_trajs, update_id = _restore_dreamer_extra_state(extra_state, device=device)
+        pending_trajs, update_id, restored_extra_state = _restore_dreamer_extra_state(extra_state, device=device)
         return {
             "start_episode": int(start_episode),
             "stats_history": stats_history,
             "pending_trajs": pending_trajs,
             "update_id": int(update_id),
+            "extra_state": restored_extra_state,
             "restored_rng": restore_rng_state(extra_state),
         }
     except (RuntimeError, ValueError) as exc:
