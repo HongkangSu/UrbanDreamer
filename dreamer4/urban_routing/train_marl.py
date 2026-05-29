@@ -683,6 +683,7 @@ class TrainConfig:
     dreamer_current_edge_reward_weight: float = 0.0
     dreamer_cav_reward_weight: float = 0.0
     dreamer_route_cost_reward_weight: float = 0.0
+    dreamer_route_cost_reward_mode: str = "progress_fraction"
     dreamer_pred_t_cav_proxy_reward_weight: float = 0.0
     dreamer_route_cost_reward_normalize_regret: bool = False
     dreamer_route_cost_reward_temperature: float = 60.0
@@ -1428,6 +1429,11 @@ def _selected_route_vehicle_rewards_from_cost_matrix(
     selected_idx: torch.Tensor,
     reward_weight: float,
     reward_scale: float,
+    reward_mode: str,
+    step_interval: float,
+    elapsed_time: Optional[torch.Tensor],
+    progress_cap: float,
+    remaining_tt_eps: float,
     normalize_regret: bool,
     temperature: float,
 ) -> torch.Tensor:
@@ -1445,12 +1451,34 @@ def _selected_route_vehicle_rewards_from_cost_matrix(
     selected = selected.clamp(0, max(int(costs.shape[1]) - 1, 0))
     rows = torch.arange(n, device=route_costs.device)
     selected_valid = valid[rows, selected]
-    selected_cost = costs[rows, selected]
-    if bool(normalize_regret):
+    mode_key = str(reward_mode or "progress_fraction").strip().lower()
+    if mode_key in {"progress_fraction", "step_progress", "trip_progress_fraction"}:
+        progress_costs = _route_credit_base_cost_matrix(
+            route_tt_costs=costs,
+            route_valid=valid,
+            mode="progress_fraction",
+            step_interval=float(step_interval),
+            elapsed_time=elapsed_time,
+            remaining_tt_eps=float(remaining_tt_eps),
+            progress_cap=float(progress_cap),
+        )
+        # _route_credit_base_cost_matrix returns negative progress as a cost,
+        # so negating gives a critic-visible reward in [0, progress_cap].
+        reward = -float(reward_weight) * progress_costs[rows, selected] * float(reward_scale)
+    elif bool(normalize_regret):
+        selected_cost = costs[rows, selected]
         large = torch.finfo(costs.dtype).max / 4.0
         min_cost = costs.masked_fill(~valid, large).min(dim=-1).values
         selected_cost = (selected_cost - min_cost) / float(max(temperature, 1e-6))
-    reward = -float(reward_weight) * selected_cost * float(reward_scale)
+        reward = -float(reward_weight) * selected_cost * float(reward_scale)
+    else:
+        if mode_key not in {"", "route_tt", "remaining_tt", "full_path", "legacy"}:
+            raise ValueError(
+                f"Unsupported dreamer_route_cost_reward_mode={reward_mode!r}; "
+                "expected progress_fraction or route_tt"
+            )
+        selected_cost = costs[rows, selected]
+        reward = -float(reward_weight) * selected_cost * float(reward_scale)
     reward = torch.where(selected_valid, reward, torch.zeros_like(reward))
     return torch.nan_to_num(reward, nan=0.0, posinf=0.0, neginf=0.0)
 
@@ -2783,6 +2811,14 @@ def imagined_episode_dynamic_dreamer(
                             selected_idx=selected_route_idx_t_for_update,
                             reward_weight=float(getattr(cfg, "dreamer_route_cost_reward_weight", 0.0)),
                             reward_scale=float(getattr(cfg, "vehicle_reward_scale", 1.0)),
+                            reward_mode=str(getattr(cfg, "dreamer_route_cost_reward_mode", "progress_fraction")),
+                            step_interval=float(getattr(cfg, "step_interval", 30.0)),
+                            elapsed_time=torch.from_numpy(elapsed_time_np).to(
+                                device=vehicle_reward_costs.device,
+                                dtype=vehicle_reward_costs.dtype,
+                            ),
+                            progress_cap=float(getattr(cfg, "dreamer_ac_route_credit_progress_cap", 1.0)),
+                            remaining_tt_eps=float(getattr(cfg, "dreamer_ac_route_credit_remaining_tt_eps", 1.0)),
                             normalize_regret=bool(getattr(cfg, "dreamer_route_cost_reward_normalize_regret", False)),
                             temperature=float(getattr(cfg, "dreamer_route_cost_reward_temperature", 60.0)),
                         )
@@ -5452,6 +5488,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="Weight for CAV/action-edge route travel-time cost in differentiable Dreamer reward.")
     p.add_argument("--dreamer_route_cost_reward_weight", type=float, default=0.0,
                    help="Weight for non-leaky candidate-path route cost computed from WM edge travel times.")
+    p.add_argument("--dreamer_route_cost_reward_mode", type=str, default="progress_fraction",
+                   choices=[
+                       "progress_fraction", "step_progress", "trip_progress_fraction",
+                       "route_tt", "remaining_tt", "full_path", "legacy",
+                   ],
+                   help=(
+                       "Per-vehicle critic route reward readout. progress_fraction rewards "
+                       "min(step_interval, remaining_route_tt)/(elapsed+remaining_route_tt), "
+                       "so final steps that arrive early cannot exceed one step of progress; "
+                       "route_tt/legacy keeps the old negative remaining-route-seconds reward."
+                   ))
     p.add_argument("--dreamer_pred_t_cav_proxy_reward_weight", type=float, default=0.0,
                    help=(
                        "Weight for the pred_t_cav_proxy-style CAV route-plan cost in Dreamer reward. "
