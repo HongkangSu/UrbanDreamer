@@ -1275,14 +1275,16 @@ def _sample_masked_route_actions(
     *,
     temperature: float,
     mode: str = "sample",
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    argmax_mix_prob: float = 0.0,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Select route actions from valid candidates and return hard probs/log-probs.
 
     The hard one-hot route probabilities drive the imagined environment.  The
     selected log-probabilities are used by score-function losses.  ``sample``
     keeps the historical stochastic rollout behavior; ``argmax`` matches
     deterministic SUMO policy execution while still training through the
-    selected action log-probability.
+    selected action log-probability.  ``mixed_argmax`` uses masked argmax on a
+    per-row Bernoulli schedule and samples the remaining rows.
     """
     if logits.dim() != 2:
         raise ValueError(f"logits must be 2D, got {tuple(logits.shape)}")
@@ -1293,7 +1295,9 @@ def _sample_masked_route_actions(
         mode_norm = "sample"
     elif mode_norm in {"deterministic", "greedy", "eval", "auto"}:
         mode_norm = "argmax"
-    if mode_norm not in {"sample", "argmax"}:
+    elif mode_norm in {"mixed", "scheduled", "scheduled_argmax", "annealed_argmax"}:
+        mode_norm = "mixed_argmax"
+    if mode_norm not in {"sample", "argmax", "mixed_argmax"}:
         raise ValueError(f"unsupported route action selection mode={mode!r}")
     large = torch.finfo(logits.dtype).max / 4.0
     valid = route_valid.to(device=logits.device)
@@ -1305,13 +1309,23 @@ def _sample_masked_route_actions(
     dist = torch.distributions.Categorical(logits=masked_logits)
     if mode_norm == "argmax":
         selected = torch.argmax(masked_logits.detach(), dim=-1)
+        used_argmax = agent_has_valid.clone()
+    elif mode_norm == "mixed_argmax":
+        sample_selected = dist.sample()
+        argmax_selected = torch.argmax(masked_logits.detach(), dim=-1)
+        mix_prob = min(max(float(argmax_mix_prob), 0.0), 1.0)
+        used_argmax = (
+            torch.rand(logits.shape[0], device=logits.device, dtype=torch.float32) < mix_prob
+        ) & agent_has_valid
+        selected = torch.where(used_argmax, argmax_selected, sample_selected)
     else:
         selected = dist.sample()
+        used_argmax = torch.zeros_like(agent_has_valid)
     log_probs = dist.log_prob(selected)
     hard_probs = torch.zeros_like(logits)
     hard_probs.scatter_(1, selected.unsqueeze(-1), 1.0)
     log_probs = log_probs.masked_fill(~agent_has_valid, 0.0)
-    return hard_probs, selected, log_probs
+    return hard_probs, selected, log_probs, used_argmax
 
 
 def _masked_route_log_probs(

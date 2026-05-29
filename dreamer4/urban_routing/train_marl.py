@@ -722,7 +722,10 @@ class TrainConfig:
     dreamer_ac_entropy_target: float = 0.0
     dreamer_ac_entropy_target_frac: float = 0.0
     dreamer_ac_entropy_floor_coef: float = 0.0
-    dreamer_ac_rollout_action_mode: str = "sample"  # sample | argmax
+    dreamer_ac_rollout_action_mode: str = "sample"  # sample | argmax | scheduled_argmax
+    dreamer_ac_rollout_argmax_warmup_episodes: int = 0
+    dreamer_ac_rollout_argmax_ramp_episodes: int = 0
+    dreamer_ac_rollout_argmax_final_mix: float = 1.0
     dreamer_ac_route_credit_mode: str = "route_cost"  # route_cost | planned_pressure | marginal_pressure | sequential_marginal | counterfactual_pressure
     dreamer_ac_route_credit_pressure_weight: float = 1.0
     dreamer_ac_route_credit_pressure_mode: str = "clipped_excess_tt_ratio"
@@ -1842,6 +1845,7 @@ def imagined_episode_dynamic_dreamer(
     rollout_policy_override: str = "actor",
     horizon_proxy: Optional[ActionHorizonProxyReward] = None,
     hdv_background_edge: Optional[torch.Tensor] = None,
+    episode_index: Optional[int] = None,
 ) -> Tuple[Dict[str, Any], float, Dict[str, float]]:
     T = min(int(cfg.imagination_horizon), int(cfg.dreamer_actor_horizon))
     episode_steps = int(cfg.episode_steps)
@@ -1965,11 +1969,32 @@ def imagined_episode_dynamic_dreamer(
         ac_rollout_action_mode = "sample"
     elif ac_rollout_action_mode in {"deterministic", "greedy", "eval", "auto"}:
         ac_rollout_action_mode = "argmax"
-    if ac_rollout_action_mode not in {"sample", "argmax"}:
+    elif ac_rollout_action_mode in {"mixed", "scheduled", "scheduled_argmax", "annealed_argmax"}:
+        ac_rollout_action_mode = "scheduled_argmax"
+    if ac_rollout_action_mode not in {"sample", "argmax", "scheduled_argmax"}:
         raise ValueError(
             "Unsupported dreamer_ac_rollout_action_mode="
-            f"{getattr(cfg, 'dreamer_ac_rollout_action_mode', None)!r}; expected sample or argmax"
+            f"{getattr(cfg, 'dreamer_ac_rollout_action_mode', None)!r}; "
+            "expected sample, argmax, or scheduled_argmax"
         )
+    ac_rollout_effective_mode = ac_rollout_action_mode
+    ac_rollout_argmax_mix_prob = 0.0
+    if ac_rollout_action_mode == "scheduled_argmax":
+        ep_for_schedule = max(int(episode_index) if episode_index is not None else 0, 0)
+        warmup = max(int(getattr(cfg, "dreamer_ac_rollout_argmax_warmup_episodes", 0)), 0)
+        ramp = max(int(getattr(cfg, "dreamer_ac_rollout_argmax_ramp_episodes", 0)), 0)
+        final_mix = min(max(float(getattr(cfg, "dreamer_ac_rollout_argmax_final_mix", 1.0)), 0.0), 1.0)
+        if ep_for_schedule < warmup:
+            ac_rollout_argmax_mix_prob = 0.0
+        elif ramp <= 0:
+            ac_rollout_argmax_mix_prob = final_mix
+        else:
+            progress = min(max(float(ep_for_schedule - warmup + 1) / float(ramp), 0.0), 1.0)
+            ac_rollout_argmax_mix_prob = final_mix * progress
+        ac_rollout_effective_mode = "mixed_argmax" if ac_rollout_argmax_mix_prob > 0.0 else "sample"
+    elif ac_rollout_action_mode == "argmax":
+        ac_rollout_argmax_mix_prob = 1.0
+    ac_rollout_argmax_uses: List[float] = []
     route_adv_route_cost_matrix_needed = (
         use_discrete_actor_critic
         and float(getattr(cfg, "dreamer_ac_route_advantage_weight", 0.0)) != 0.0
@@ -2201,12 +2226,15 @@ def imagined_episode_dynamic_dreamer(
                         )
                         and rollout_policy == "actor"
                     ):
-                        action_i, selected_i_t, logprob_i = _sample_masked_route_actions(
+                        action_i, selected_i_t, logprob_i, used_argmax_i = _sample_masked_route_actions(
                             logits_i,
                             valid_i,
                             temperature=float(getattr(cfg, "dreamer_action_temperature", 1.0)),
-                            mode=ac_rollout_action_mode,
+                            mode=ac_rollout_effective_mode,
+                            argmax_mix_prob=ac_rollout_argmax_mix_prob,
                         )
+                        if bool(valid_i.any().detach().cpu().item()):
+                            ac_rollout_argmax_uses.append(float(used_argmax_i.float().mean().detach().cpu().item()))
                     else:
                         action_i = _dreamer_action_route_probs(
                             logits_i,
@@ -2327,15 +2355,20 @@ def imagined_episode_dynamic_dreamer(
             elif use_grpo_policy_gradient:
                 valid_action_mask = _valid_route_mask_from_paths(path_batch, n_routes=K, device=device)
                 valid_action_mask_for_update = valid_action_mask
-                action_route_probs, selected_route_idx_t, selected_log_probs = _sample_masked_route_actions(
+                action_route_probs, selected_route_idx_t, selected_log_probs, used_argmax_t = _sample_masked_route_actions(
                     logits,
                     valid_action_mask,
                     temperature=float(getattr(cfg, "dreamer_action_temperature", 1.0)),
-                    mode=ac_rollout_action_mode,
+                    mode=ac_rollout_effective_mode,
+                    argmax_mix_prob=ac_rollout_argmax_mix_prob,
                 )
                 selected_route_idx_t_for_update = selected_route_idx_t
                 selected_route_idx_for_env = selected_route_idx_t.detach().cpu().numpy().astype(np.int64)
                 valid_selected = valid_action_mask.any(dim=-1)
+                if bool(valid_selected.any().detach().cpu().item()):
+                    ac_rollout_argmax_uses.append(
+                        float(used_argmax_t[valid_selected].float().mean().detach().cpu().item())
+                    )
                 if use_rollout_grpo and bool(valid_selected.any().detach().cpu().item()):
                     rollout_logprob_steps.append(selected_log_probs[valid_selected].mean())
                     rollout_selected_nonzero_fracs.append(
@@ -3477,7 +3510,8 @@ def imagined_episode_dynamic_dreamer(
         "grpo_rollout_vehicle_cost_adv_mean": float(np.mean(rollout_vehicle_cost_adv_means)) if rollout_vehicle_cost_adv_means else 0.0,
         "grpo_rollout_vehicle_cost_adv_std": float(np.mean(rollout_vehicle_cost_adv_stds)) if rollout_vehicle_cost_adv_stds else 0.0,
         "dreamer_base_reward": base_reward_mean,
-        "dreamer_ac_rollout_argmax_frac": 1.0 if ac_rollout_action_mode == "argmax" else 0.0,
+        "dreamer_ac_rollout_argmax_mix_prob": float(ac_rollout_argmax_mix_prob),
+        "dreamer_ac_rollout_argmax_frac": float(np.mean(ac_rollout_argmax_uses)) if ac_rollout_argmax_uses else 0.0,
         "dreamer_ac_sample_count": float(ac_samples["dreamer_ac_selected"].numel()),
         "dreamer_ac_selected_nonzero_frac": (
             float(np.mean(dreamer_ac_selected_nonzero_fracs))
@@ -3584,6 +3618,8 @@ def imagined_episode_dynamic_dreamer(
         "grpo_rollout_vehicle_cost_adv_mean": ep_metrics["grpo_rollout_vehicle_cost_adv_mean"],
         "grpo_rollout_vehicle_cost_adv_std": ep_metrics["grpo_rollout_vehicle_cost_adv_std"],
         "dreamer_base_reward": ep_metrics["dreamer_base_reward"],
+        "dreamer_ac_rollout_argmax_mix_prob": ep_metrics["dreamer_ac_rollout_argmax_mix_prob"],
+        "dreamer_ac_rollout_argmax_frac": ep_metrics["dreamer_ac_rollout_argmax_frac"],
         "dreamer_ac_sample_count": ep_metrics["dreamer_ac_sample_count"],
         "dreamer_ac_selected_nonzero_frac": ep_metrics["dreamer_ac_selected_nonzero_frac"],
         **ac_samples,
@@ -5195,6 +5231,7 @@ def train(cfg: TrainConfig) -> None:
                         fixed_start_step=fixed_start_step,
                         horizon_proxy=horizon_proxy,
                         hdv_background_edge=_hdv_background_edge,
+                        episode_index=episode,
                     )
                 episode_av_pressure = hdv_response.episode_av_pressure_from_action_edges(
                     list(probe_traj.get("action_edges", [])),
@@ -5288,6 +5325,7 @@ def train(cfg: TrainConfig) -> None:
                     fixed_start_step=fixed_start_step,
                     horizon_proxy=horizon_proxy,
                     hdv_background_edge=hdv_background_for_rollout,
+                    episode_index=episode,
                 )
                 _rollout_wall_sec += _time.perf_counter() - _rollout_t0
                 if hdv_response_metrics:
@@ -5331,6 +5369,7 @@ def train(cfg: TrainConfig) -> None:
                         rollout_policy_override=baseline_policy,
                         horizon_proxy=horizon_proxy,
                         hdv_background_edge=_hdv_background_edge,
+                        episode_index=episode,
                     )
                 baseline_cost = float(baseline_traj.get("grpo_rollout_cost", baseline_metrics.get("grpo_rollout_cost", 0.0)))
                 for traj_i in traj_group:
@@ -5382,6 +5421,9 @@ def train(cfg: TrainConfig) -> None:
             stats_history["dreamer_ac_rollout_argmax_frac"].append(
                 ep_metrics.get("dreamer_ac_rollout_argmax_frac", 0.0)
             )
+            stats_history["dreamer_ac_rollout_argmax_mix_prob"].append(
+                ep_metrics.get("dreamer_ac_rollout_argmax_mix_prob", 0.0)
+            )
             stats_history["hdv_response_av_pressure_sum"].append(ep_metrics.get("hdv_response_av_pressure_sum", 0.0))
             stats_history["hdv_response_background_sum"].append(ep_metrics.get("hdv_response_background_sum", 0.0))
             stats_history["hdv_response_background_active_edges"].append(ep_metrics.get("hdv_response_background_active_edges", 0.0))
@@ -5420,6 +5462,9 @@ def train(cfg: TrainConfig) -> None:
                 "dreamer_base_reward": float(ep_metrics.get("dreamer_base_reward", 0.0)),
                 "dreamer_ac_rollout_argmax_frac": float(
                     ep_metrics.get("dreamer_ac_rollout_argmax_frac", 0.0)
+                ),
+                "dreamer_ac_rollout_argmax_mix_prob": float(
+                    ep_metrics.get("dreamer_ac_rollout_argmax_mix_prob", 0.0)
                 ),
                 "dreamer_ac_sample_count": float(ep_metrics.get("dreamer_ac_sample_count", 0.0)),
                 "dreamer_ac_selected_nonzero_frac": float(ep_metrics.get("dreamer_ac_selected_nonzero_frac", 0.0)),
@@ -5524,6 +5569,8 @@ def train(cfg: TrainConfig) -> None:
                 recent_ac_route_adv_std = np.mean(stats_history["dreamer_ac_route_adv_std"][-cfg.log_every:]) if stats_history["dreamer_ac_route_adv_std"] else 0.0
                 recent_ac_combined_adv_mean = np.mean(stats_history["dreamer_ac_combined_adv_mean"][-cfg.log_every:]) if stats_history["dreamer_ac_combined_adv_mean"] else 0.0
                 recent_ac_combined_adv_std = np.mean(stats_history["dreamer_ac_combined_adv_std"][-cfg.log_every:]) if stats_history["dreamer_ac_combined_adv_std"] else 0.0
+                recent_ac_argmax_mix = np.mean(stats_history["dreamer_ac_rollout_argmax_mix_prob"][-cfg.log_every:]) if stats_history["dreamer_ac_rollout_argmax_mix_prob"] else 0.0
+                recent_ac_argmax_frac = np.mean(stats_history["dreamer_ac_rollout_argmax_frac"][-cfg.log_every:]) if stats_history["dreamer_ac_rollout_argmax_frac"] else 0.0
                 recent_ac_nonzero = np.mean(stats_history["dreamer_ac_selected_nonzero_frac"][-cfg.log_every:]) if stats_history["dreamer_ac_selected_nonzero_frac"] else 0.0
                 recent_ac_samples = np.mean(stats_history["dreamer_ac_sample_count"][-cfg.log_every:]) if stats_history["dreamer_ac_sample_count"] else 0.0
                 recent_ac_kl = np.mean(stats_history["dreamer_ac_policy_kl"][-cfg.log_every:]) if stats_history["dreamer_ac_policy_kl"] else 0.0
@@ -5585,6 +5632,7 @@ def train(cfg: TrainConfig) -> None:
                     f"dreamer_ac_adv={recent_ac_adv_mean:.4f}/{recent_ac_adv_std:.4f} "
                     f"route_adv={recent_ac_route_adv_mean:.4f}/{recent_ac_route_adv_std:.4f} "
                     f"combined_adv={recent_ac_combined_adv_mean:.4f}/{recent_ac_combined_adv_std:.4f} "
+                    f"ac_argmax={recent_ac_argmax_frac:.3f}/{recent_ac_argmax_mix:.3f} "
                     f"ac_non0={recent_ac_nonzero:.3f} ac_n={recent_ac_samples:.1f} "
                     f"ac_kl/clip/w/sample_adv={recent_ac_kl:.4f}/{recent_ac_clip:.3f}/{recent_ac_weight:.3f}/{recent_ac_sample_adv:.1f} "
                     f"ent_floor={recent_ac_entropy_floor:.4f}/{recent_ac_entropy_target:.3f} "
@@ -5891,13 +5939,25 @@ def build_arg_parser() -> argparse.ArgumentParser:
                        "falls below the configured entropy target."
                    ))
     p.add_argument("--dreamer_ac_rollout_action_mode", type=str, default="sample",
-                   choices=["sample", "argmax", "stochastic", "sampled", "sampling", "deterministic", "greedy", "eval", "auto"],
+                   choices=[
+                       "sample", "argmax", "scheduled_argmax",
+                       "stochastic", "sampled", "sampling",
+                       "deterministic", "greedy", "eval", "auto",
+                       "mixed", "scheduled", "annealed_argmax",
+                   ],
                    help=(
                        "Route action selection used by discrete actor-critic imagined rollouts. "
                        "sample preserves historical stochastic rollout exploration; argmax matches "
                        "deterministic SUMO eval/deployment while still training through the selected "
-                       "action log-probability."
+                       "action log-probability; scheduled_argmax gradually mixes argmax rows after "
+                       "a configurable warmup/ramp."
                    ))
+    p.add_argument("--dreamer_ac_rollout_argmax_warmup_episodes", type=int, default=0,
+                   help="Number of episodes to keep scheduled_argmax rollout fully stochastic.")
+    p.add_argument("--dreamer_ac_rollout_argmax_ramp_episodes", type=int, default=0,
+                   help="Episodes over which scheduled_argmax linearly ramps toward final argmax mix.")
+    p.add_argument("--dreamer_ac_rollout_argmax_final_mix", type=float, default=1.0,
+                   help="Final per-vehicle argmax probability for scheduled_argmax rollouts.")
     p.add_argument("--dreamer_ac_route_credit_mode", type=str, default="route_cost",
                    choices=[
                        "route_cost", "planned_pressure", "marginal_pressure",

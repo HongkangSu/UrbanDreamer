@@ -276,6 +276,7 @@ def normalize_stats_history_defaults(stats_history):
         "dreamer_ac_adv_min", "dreamer_ac_adv_max",
         "dreamer_ac_route_adv_mean", "dreamer_ac_route_adv_std",
         "dreamer_ac_combined_adv_mean", "dreamer_ac_combined_adv_std",
+        "dreamer_ac_rollout_argmax_mix_prob",
         "dreamer_ac_rollout_argmax_frac",
         "dreamer_ac_selected_nonzero_frac", "dreamer_ac_sample_count",
         "dreamer_ac_policy_kl", "dreamer_ac_clip_frac", "dreamer_ac_weight_mean",
