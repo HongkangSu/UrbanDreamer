@@ -302,6 +302,7 @@ def normalize_stats_history_defaults(stats_history):
         "dreamer_ac_uses_sample_adv", "dreamer_ac_entropy_loss",
         "dreamer_ac_entropy_floor_loss", "dreamer_ac_entropy_target",
         "dreamer_ac_entropy_valid_target_mean",
+        "dreamer_ac_entropy_effective_route_count", "dreamer_ac_entropy_cost_mask_frac",
         "vehicle_value_loss", "vehicle_critic_target_mean", "vehicle_critic_target_std",
         "vehicle_critic_explained_variance", "vehicle_return_norm_mean", "vehicle_return_norm_std",
         "vehicle_reward_mean", "vehicle_reward_std",

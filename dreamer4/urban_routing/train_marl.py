@@ -894,6 +894,8 @@ class TrainConfig:
     dreamer_ac_entropy_target: float = 0.0
     dreamer_ac_entropy_target_frac: float = 0.0
     dreamer_ac_entropy_floor_coef: float = 0.0
+    dreamer_ac_entropy_cost_gap_max: float = -1.0
+    dreamer_ac_entropy_cost_min_routes: int = 1
     dreamer_ac_rollout_action_mode: str = "sample"  # sample | argmax | scheduled_argmax
     dreamer_ac_rollout_argmax_warmup_episodes: int = 0
     dreamer_ac_rollout_argmax_ramp_episodes: int = 0
@@ -1065,6 +1067,7 @@ DREAMER_UPDATE_SCALAR_KEYS = (
     "dreamer_ac_uses_sample_adv", "dreamer_ac_entropy_loss",
     "dreamer_ac_entropy_floor_loss", "dreamer_ac_entropy_target",
     "dreamer_ac_entropy_valid_target_mean",
+    "dreamer_ac_entropy_effective_route_count", "dreamer_ac_entropy_cost_mask_frac",
     "vehicle_value_loss", "vehicle_critic_target_mean", "vehicle_critic_target_std",
     "vehicle_critic_explained_variance", "vehicle_return_norm_mean", "vehicle_return_norm_std",
     "vehicle_reward_mean", "vehicle_reward_std",
@@ -4042,6 +4045,8 @@ def dreamer_update(
     dreamer_ac_entropy_floor_losses: List[float] = []
     dreamer_ac_entropy_targets: List[float] = []
     dreamer_ac_entropy_valid_target_means: List[float] = []
+    dreamer_ac_entropy_effective_route_counts: List[float] = []
+    dreamer_ac_entropy_cost_mask_fracs: List[float] = []
     critic_target_means: List[float] = []
     critic_target_stds: List[float] = []
     critic_explained_variances: List[float] = []
@@ -4467,6 +4472,8 @@ def dreamer_update(
                 entropy_target=float(getattr(cfg, "dreamer_ac_entropy_target", 0.0)),
                 entropy_target_frac=float(getattr(cfg, "dreamer_ac_entropy_target_frac", 0.0)),
                 entropy_floor_coef=float(getattr(cfg, "dreamer_ac_entropy_floor_coef", 0.0)),
+                entropy_cost_gap_max=float(getattr(cfg, "dreamer_ac_entropy_cost_gap_max", -1.0)),
+                entropy_cost_min_routes=int(getattr(cfg, "dreamer_ac_entropy_cost_min_routes", 1)),
             )
             discrete_ac_has_samples = discrete_ac_loss is not None
             dreamer_ac_loss_values.append(float(discrete_ac_stats.get("dreamer_ac_loss", 0.0)))
@@ -4526,6 +4533,12 @@ def dreamer_update(
             dreamer_ac_entropy_targets.append(float(discrete_ac_stats.get("dreamer_ac_entropy_target", 0.0)))
             dreamer_ac_entropy_valid_target_means.append(
                 float(discrete_ac_stats.get("dreamer_ac_entropy_valid_target_mean", 0.0))
+            )
+            dreamer_ac_entropy_effective_route_counts.append(
+                float(discrete_ac_stats.get("dreamer_ac_entropy_effective_route_count", 0.0))
+            )
+            dreamer_ac_entropy_cost_mask_fracs.append(
+                float(discrete_ac_stats.get("dreamer_ac_entropy_cost_mask_frac", 0.0))
             )
         direct_actor_loss = -(actor_advantages.mean() + float(cfg.dreamer_entropy_coef) * entropy)
         actor_loss = direct_actor_loss
@@ -4796,6 +4809,8 @@ def dreamer_update(
             "dreamer_ac_entropy_floor_loss": 0.0,
             "dreamer_ac_entropy_target": 0.0,
             "dreamer_ac_entropy_valid_target_mean": 0.0,
+            "dreamer_ac_entropy_effective_route_count": 0.0,
+            "dreamer_ac_entropy_cost_mask_frac": 0.0,
             "vehicle_value_loss": 0.0,
             "vehicle_critic_target_mean": 0.0,
             "vehicle_critic_target_std": 0.0,
@@ -5257,6 +5272,14 @@ def dreamer_update(
         "dreamer_ac_entropy_valid_target_mean": (
             float(np.mean(dreamer_ac_entropy_valid_target_means))
             if dreamer_ac_entropy_valid_target_means else 0.0
+        ),
+        "dreamer_ac_entropy_effective_route_count": (
+            float(np.mean(dreamer_ac_entropy_effective_route_counts))
+            if dreamer_ac_entropy_effective_route_counts else 0.0
+        ),
+        "dreamer_ac_entropy_cost_mask_frac": (
+            float(np.mean(dreamer_ac_entropy_cost_mask_fracs))
+            if dreamer_ac_entropy_cost_mask_fracs else 0.0
         ),
         "vehicle_value_loss": float(vehicle_critic_loss_total.detach().cpu().item()),
         "vehicle_critic_target_mean": (
@@ -6418,6 +6441,8 @@ def train(cfg: TrainConfig) -> None:
                 recent_ac_sample_adv = np.mean(stats_history["dreamer_ac_uses_sample_adv"][-cfg.log_every:]) if stats_history["dreamer_ac_uses_sample_adv"] else 0.0
                 recent_ac_entropy_floor = np.mean(stats_history["dreamer_ac_entropy_floor_loss"][-cfg.log_every:]) if stats_history["dreamer_ac_entropy_floor_loss"] else 0.0
                 recent_ac_entropy_target = np.mean(stats_history["dreamer_ac_entropy_target"][-cfg.log_every:]) if stats_history["dreamer_ac_entropy_target"] else 0.0
+                recent_ac_entropy_routes = np.mean(stats_history["dreamer_ac_entropy_effective_route_count"][-cfg.log_every:]) if stats_history["dreamer_ac_entropy_effective_route_count"] else 0.0
+                recent_ac_entropy_mask = np.mean(stats_history["dreamer_ac_entropy_cost_mask_frac"][-cfg.log_every:]) if stats_history["dreamer_ac_entropy_cost_mask_frac"] else 0.0
                 recent_vehicle_vf = np.mean(stats_history["vehicle_value_loss"][-cfg.log_every:]) if stats_history["vehicle_value_loss"] else 0.0
                 recent_vehicle_target_std = np.mean(stats_history["vehicle_critic_target_std"][-cfg.log_every:]) if stats_history["vehicle_critic_target_std"] else 0.0
                 recent_vehicle_reward_mean = np.mean(stats_history["vehicle_reward_mean"][-cfg.log_every:]) if stats_history["vehicle_reward_mean"] else 0.0
@@ -6482,7 +6507,7 @@ def train(cfg: TrainConfig) -> None:
                     f"anchor={recent_actor_anchor_active:.1f}/{recent_actor_anchor_accept:.1f}/kl={recent_actor_anchor_kl:.4f}/chg={recent_actor_anchor_change:.3f} "
                     f"ac_n={recent_ac_samples:.1f} "
                     f"ac_kl/clip/w/sample_adv={recent_ac_kl:.4f}/{recent_ac_clip:.3f}/{recent_ac_weight:.3f}/{recent_ac_sample_adv:.1f} "
-                    f"ent_floor={recent_ac_entropy_floor:.4f}/{recent_ac_entropy_target:.3f} "
+                    f"ent_floor={recent_ac_entropy_floor:.4f}/{recent_ac_entropy_target:.3f}/k={recent_ac_entropy_routes:.2f}/mask={recent_ac_entropy_mask:.2f} "
                     f"v_ev={recent_v_ev:.3f} ret_std={recent_ret_std:.3f} | "
                     f"veh_vf={recent_vehicle_vf:.4f} veh_rew={recent_vehicle_reward_mean:.2f}/{recent_vehicle_reward_std:.2f} "
                     f"veh_route_progress={recent_vehicle_route_progress_mean:.2f}/{recent_vehicle_route_progress_std:.2f} "
@@ -6880,6 +6905,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help=(
                        "Quadratic penalty coefficient applied only when selected-sample entropy "
                        "falls below the configured entropy target."
+                   ))
+    p.add_argument("--dreamer_ac_entropy_cost_gap_max", type=float, default=-1.0,
+                   help=(
+                       "If >=0 and route-cost observations are enabled, compute the entropy-floor "
+                       "route count only over candidates whose relative current-cost gap is at most "
+                       "this value. This keeps exploration on near-best candidates without adding "
+                       "a route-cost actor loss."
+                   ))
+    p.add_argument("--dreamer_ac_entropy_cost_min_routes", type=int, default=1,
+                   help=(
+                       "Minimum number of valid candidates kept in the cost-aware entropy-floor "
+                       "target when --dreamer_ac_entropy_cost_gap_max is enabled."
                    ))
     p.add_argument("--dreamer_ac_rollout_action_mode", type=str, default="sample",
                    choices=[

@@ -524,7 +524,70 @@ def _empty_stats() -> Dict[str, float]:
         "dreamer_ac_entropy_floor_loss": 0.0,
         "dreamer_ac_entropy_target": 0.0,
         "dreamer_ac_entropy_valid_target_mean": 0.0,
+        "dreamer_ac_entropy_effective_route_count": 0.0,
+        "dreamer_ac_entropy_cost_mask_frac": 0.0,
     }
+
+
+def _cost_aware_entropy_valid_mask(
+    *,
+    actor,
+    obs: torch.Tensor,
+    valid: torch.Tensor,
+    max_gap: float,
+    min_routes: int,
+) -> torch.Tensor:
+    """Restrict entropy-floor target routes to near-best current-cost candidates.
+
+    The mask is derived from route-cost observation features already available
+    to the actor. It only changes the entropy-floor target; rewards still enter
+    actor updates through critic-derived advantages.
+    """
+    if float(max_gap) < 0.0:
+        return valid
+    if not bool(getattr(actor, "include_route_costs", False)):
+        return valid
+    n_routes = int(getattr(actor, "n_routes", valid.shape[-1]))
+    if n_routes <= 0:
+        return valid
+    route_cost_start_fn = getattr(actor, "_route_cost_start", None)
+    if not callable(route_cost_start_fn):
+        return valid
+    gap_start = int(route_cost_start_fn())
+    gap_end = gap_start + n_routes
+    if gap_start < 0 or int(obs.shape[-1]) < gap_end:
+        return valid
+
+    route_gap = obs[..., gap_start:gap_end].to(device=valid.device, dtype=torch.float32)
+    route_gap = torch.nan_to_num(route_gap, nan=1e6, posinf=1e6, neginf=1e6)
+    k_eff = min(int(route_gap.shape[-1]), int(valid.shape[-1]), n_routes)
+    if k_eff <= 0:
+        return valid
+
+    base_valid = valid.clone()
+    near = base_valid.clone()
+    near[:, :k_eff] = base_valid[:, :k_eff] & (route_gap[:, :k_eff] <= float(max_gap))
+
+    min_keep = max(int(min_routes), 1)
+    if min_keep > 1 and k_eff > 1:
+        large = torch.finfo(route_gap.dtype).max / 4.0
+        masked_gap = route_gap[:, :k_eff].masked_fill(~base_valid[:, :k_eff], large)
+        order = torch.argsort(masked_gap, dim=-1, stable=True)
+        valid_count = base_valid[:, :k_eff].sum(dim=-1)
+        keep_count = torch.minimum(
+            valid_count,
+            torch.full_like(valid_count, min_keep),
+        ).clamp_min(1)
+        rank = torch.arange(k_eff, device=valid.device).unsqueeze(0).expand_as(order)
+        top_keep_sorted = rank < keep_count.unsqueeze(-1)
+        top_keep = torch.zeros_like(base_valid[:, :k_eff])
+        top_keep.scatter_(1, order, top_keep_sorted)
+        near[:, :k_eff] = near[:, :k_eff] | (top_keep & base_valid[:, :k_eff])
+
+    no_near = ~near.any(dim=-1)
+    if bool(no_near.any().detach().cpu().item()):
+        near[no_near] = base_valid[no_near]
+    return near
 
 
 def discrete_actor_critic_policy_loss(
@@ -545,6 +608,8 @@ def discrete_actor_critic_policy_loss(
     entropy_target: float = 0.0,
     entropy_target_frac: float = 0.0,
     entropy_floor_coef: float = 0.0,
+    entropy_cost_gap_max: float = -1.0,
+    entropy_cost_min_routes: int = 1,
 ) -> tuple[Optional[torch.Tensor], Dict[str, float]]:
     """Return score-function actor loss for sampled discrete route actions.
 
@@ -657,10 +722,20 @@ def discrete_actor_critic_policy_loss(
     entropy_loss = (sample_w * entropy_used).sum() / weight_sum
     entropy_floor_loss = torch.zeros((), device=logits.device, dtype=logits.dtype)
     absolute_target_entropy = max(float(entropy_target), 0.0)
+    entropy_valid = valid_n[finite]
+    if float(entropy_cost_gap_max) >= 0.0:
+        entropy_valid = _cost_aware_entropy_valid_mask(
+            actor=actor,
+            obs=obs[:n][finite],
+            valid=entropy_valid,
+            max_gap=float(entropy_cost_gap_max),
+            min_routes=int(entropy_cost_min_routes),
+        )
+    entropy_valid_count = entropy_valid.sum(dim=-1).to(dtype=logits.dtype).clamp_min(1.0)
     frac_target_entropy = torch.zeros_like(entropy_used)
     if float(entropy_target_frac) > 0.0:
         frac = max(float(entropy_target_frac), 0.0)
-        frac_target_entropy = frac * torch.log(valid_count_used)
+        frac_target_entropy = frac * torch.log(entropy_valid_count)
     if absolute_target_entropy > 0.0:
         target_entropy_per_sample = torch.maximum(
             frac_target_entropy,
@@ -750,6 +825,12 @@ def discrete_actor_critic_policy_loss(
             "dreamer_ac_entropy_valid_target_mean": float(
                 frac_target_entropy.detach().mean().cpu().item()
             ) if int(frac_target_entropy.numel()) > 0 else 0.0,
+            "dreamer_ac_entropy_effective_route_count": float(
+                entropy_valid_count.detach().mean().cpu().item()
+            ) if int(entropy_valid_count.numel()) > 0 else 0.0,
+            "dreamer_ac_entropy_cost_mask_frac": float(
+                (entropy_valid_count < valid_count_used).to(dtype=torch.float32).mean().detach().cpu().item()
+            ) if int(entropy_valid_count.numel()) > 0 else 0.0,
         }
     )
     return loss, stats
