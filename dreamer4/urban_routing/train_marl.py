@@ -903,7 +903,10 @@ DREAMER_UPDATE_SCALAR_KEYS = (
     "dreamer_ac_adv_min", "dreamer_ac_adv_max",
     "dreamer_ac_route_adv_mean", "dreamer_ac_route_adv_std",
     "dreamer_ac_combined_adv_mean", "dreamer_ac_combined_adv_std",
-    "dreamer_ac_selected_nonzero_frac", "dreamer_ac_sample_count",
+    "dreamer_ac_selected_nonzero_frac",
+    "dreamer_ac_selected_route0_frac", "dreamer_ac_selected_route1_frac",
+    "dreamer_ac_selected_route2_frac", "dreamer_ac_selected_route3_frac",
+    "dreamer_ac_sample_count",
     "dreamer_ac_policy_kl", "dreamer_ac_clip_frac", "dreamer_ac_weight_mean",
     "dreamer_ac_uses_sample_adv", "dreamer_ac_entropy_loss",
     "dreamer_ac_entropy_floor_loss", "dreamer_ac_entropy_target",
@@ -3581,6 +3584,14 @@ def imagined_episode_dynamic_dreamer(
         obs_dim=int(getattr(actor, "obs_dim", 0)),
         n_routes=K,
     )
+    ac_selected_route_fracs = [0.0, 0.0, 0.0, 0.0]
+    ac_selected_for_diag = ac_samples.get("dreamer_ac_selected")
+    if torch.is_tensor(ac_selected_for_diag) and ac_selected_for_diag.numel() > 0:
+        selected_diag = ac_selected_for_diag.detach()
+        for route_idx in range(min(K, len(ac_selected_route_fracs))):
+            ac_selected_route_fracs[route_idx] = float(
+                (selected_diag == route_idx).float().mean().cpu().item()
+            )
     if grpo_sample_obs_steps:
         grpo_sample_obs_tensor = torch.cat(grpo_sample_obs_steps, dim=0)
         grpo_sample_selected_tensor = torch.cat(grpo_sample_selected_steps, dim=0)
@@ -3656,6 +3667,10 @@ def imagined_episode_dynamic_dreamer(
             float(np.mean(dreamer_ac_selected_nonzero_fracs))
             if dreamer_ac_selected_nonzero_fracs else 0.0
         ),
+        "dreamer_ac_selected_route0_frac": ac_selected_route_fracs[0],
+        "dreamer_ac_selected_route1_frac": ac_selected_route_fracs[1],
+        "dreamer_ac_selected_route2_frac": ac_selected_route_fracs[2],
+        "dreamer_ac_selected_route3_frac": ac_selected_route_fracs[3],
         "vehicle_reward_mean": (
             float(ac_samples["dreamer_ac_vehicle_reward"].detach().mean().cpu().item())
             if ac_samples["dreamer_ac_vehicle_reward"].numel() > 0 else 0.0
@@ -3769,6 +3784,10 @@ def imagined_episode_dynamic_dreamer(
         "dreamer_ac_rollout_argmax_frac": ep_metrics["dreamer_ac_rollout_argmax_frac"],
         "dreamer_ac_sample_count": ep_metrics["dreamer_ac_sample_count"],
         "dreamer_ac_selected_nonzero_frac": ep_metrics["dreamer_ac_selected_nonzero_frac"],
+        "dreamer_ac_selected_route0_frac": ep_metrics["dreamer_ac_selected_route0_frac"],
+        "dreamer_ac_selected_route1_frac": ep_metrics["dreamer_ac_selected_route1_frac"],
+        "dreamer_ac_selected_route2_frac": ep_metrics["dreamer_ac_selected_route2_frac"],
+        "dreamer_ac_selected_route3_frac": ep_metrics["dreamer_ac_selected_route3_frac"],
         **ac_samples,
     }
     rollout_rewards.add_rollout_reward_trajectory_fields(trajectory, ep_metrics)
@@ -3846,6 +3865,10 @@ def dreamer_update(
     dreamer_ac_combined_adv_means: List[float] = []
     dreamer_ac_combined_adv_stds: List[float] = []
     dreamer_ac_selected_nonzero_fracs: List[float] = []
+    dreamer_ac_selected_route0_fracs: List[float] = []
+    dreamer_ac_selected_route1_fracs: List[float] = []
+    dreamer_ac_selected_route2_fracs: List[float] = []
+    dreamer_ac_selected_route3_fracs: List[float] = []
     dreamer_ac_sample_counts: List[float] = []
     dreamer_ac_policy_kls: List[float] = []
     dreamer_ac_clip_fracs: List[float] = []
@@ -4294,6 +4317,18 @@ def dreamer_update(
             dreamer_ac_selected_nonzero_fracs.append(
                 float(discrete_ac_stats.get("dreamer_ac_selected_nonzero_frac", 0.0))
             )
+            dreamer_ac_selected_route0_fracs.append(
+                float(discrete_ac_stats.get("dreamer_ac_selected_route0_frac", 0.0))
+            )
+            dreamer_ac_selected_route1_fracs.append(
+                float(discrete_ac_stats.get("dreamer_ac_selected_route1_frac", 0.0))
+            )
+            dreamer_ac_selected_route2_fracs.append(
+                float(discrete_ac_stats.get("dreamer_ac_selected_route2_frac", 0.0))
+            )
+            dreamer_ac_selected_route3_fracs.append(
+                float(discrete_ac_stats.get("dreamer_ac_selected_route3_frac", 0.0))
+            )
             dreamer_ac_sample_counts.append(float(discrete_ac_stats.get("dreamer_ac_sample_count", 0.0)))
             dreamer_ac_policy_kls.append(float(discrete_ac_stats.get("dreamer_ac_policy_kl", 0.0)))
             dreamer_ac_clip_fracs.append(float(discrete_ac_stats.get("dreamer_ac_clip_frac", 0.0)))
@@ -4532,6 +4567,10 @@ def dreamer_update(
             "dreamer_ac_combined_adv_mean": 0.0,
             "dreamer_ac_combined_adv_std": 0.0,
             "dreamer_ac_selected_nonzero_frac": 0.0,
+            "dreamer_ac_selected_route0_frac": 0.0,
+            "dreamer_ac_selected_route1_frac": 0.0,
+            "dreamer_ac_selected_route2_frac": 0.0,
+            "dreamer_ac_selected_route3_frac": 0.0,
             "dreamer_ac_sample_count": 0.0,
             "dreamer_ac_policy_kl": 0.0,
             "dreamer_ac_clip_frac": 0.0,
@@ -4702,6 +4741,22 @@ def dreamer_update(
         "dreamer_ac_selected_nonzero_frac": (
             float(np.mean(dreamer_ac_selected_nonzero_fracs))
             if dreamer_ac_selected_nonzero_fracs else 0.0
+        ),
+        "dreamer_ac_selected_route0_frac": (
+            float(np.mean(dreamer_ac_selected_route0_fracs))
+            if dreamer_ac_selected_route0_fracs else 0.0
+        ),
+        "dreamer_ac_selected_route1_frac": (
+            float(np.mean(dreamer_ac_selected_route1_fracs))
+            if dreamer_ac_selected_route1_fracs else 0.0
+        ),
+        "dreamer_ac_selected_route2_frac": (
+            float(np.mean(dreamer_ac_selected_route2_fracs))
+            if dreamer_ac_selected_route2_fracs else 0.0
+        ),
+        "dreamer_ac_selected_route3_frac": (
+            float(np.mean(dreamer_ac_selected_route3_fracs))
+            if dreamer_ac_selected_route3_fracs else 0.0
         ),
         "dreamer_ac_sample_count": float(np.mean(dreamer_ac_sample_counts)) if dreamer_ac_sample_counts else 0.0,
         "dreamer_ac_policy_kl": float(np.mean(dreamer_ac_policy_kls)) if dreamer_ac_policy_kls else 0.0,
@@ -5658,6 +5713,10 @@ def train(cfg: TrainConfig) -> None:
                 ),
                 "dreamer_ac_sample_count": float(ep_metrics.get("dreamer_ac_sample_count", 0.0)),
                 "dreamer_ac_selected_nonzero_frac": float(ep_metrics.get("dreamer_ac_selected_nonzero_frac", 0.0)),
+                "dreamer_ac_selected_route0_frac": float(ep_metrics.get("dreamer_ac_selected_route0_frac", 0.0)),
+                "dreamer_ac_selected_route1_frac": float(ep_metrics.get("dreamer_ac_selected_route1_frac", 0.0)),
+                "dreamer_ac_selected_route2_frac": float(ep_metrics.get("dreamer_ac_selected_route2_frac", 0.0)),
+                "dreamer_ac_selected_route3_frac": float(ep_metrics.get("dreamer_ac_selected_route3_frac", 0.0)),
                 "vehicle_reward_mean": float(ep_metrics.get("vehicle_reward_mean", 0.0)),
                 "vehicle_reward_std": float(ep_metrics.get("vehicle_reward_std", 0.0)),
                 "vehicle_route_progress_reward_mean": float(
@@ -5768,6 +5827,10 @@ def train(cfg: TrainConfig) -> None:
                 recent_ac_argmax_mix = np.mean(stats_history["dreamer_ac_rollout_argmax_mix_prob"][-cfg.log_every:]) if stats_history["dreamer_ac_rollout_argmax_mix_prob"] else 0.0
                 recent_ac_argmax_frac = np.mean(stats_history["dreamer_ac_rollout_argmax_frac"][-cfg.log_every:]) if stats_history["dreamer_ac_rollout_argmax_frac"] else 0.0
                 recent_ac_nonzero = np.mean(stats_history["dreamer_ac_selected_nonzero_frac"][-cfg.log_every:]) if stats_history["dreamer_ac_selected_nonzero_frac"] else 0.0
+                recent_ac_route0 = np.mean(stats_history["dreamer_ac_selected_route0_frac"][-cfg.log_every:]) if stats_history["dreamer_ac_selected_route0_frac"] else 0.0
+                recent_ac_route1 = np.mean(stats_history["dreamer_ac_selected_route1_frac"][-cfg.log_every:]) if stats_history["dreamer_ac_selected_route1_frac"] else 0.0
+                recent_ac_route2 = np.mean(stats_history["dreamer_ac_selected_route2_frac"][-cfg.log_every:]) if stats_history["dreamer_ac_selected_route2_frac"] else 0.0
+                recent_ac_route3 = np.mean(stats_history["dreamer_ac_selected_route3_frac"][-cfg.log_every:]) if stats_history["dreamer_ac_selected_route3_frac"] else 0.0
                 recent_ac_samples = np.mean(stats_history["dreamer_ac_sample_count"][-cfg.log_every:]) if stats_history["dreamer_ac_sample_count"] else 0.0
                 recent_ac_kl = np.mean(stats_history["dreamer_ac_policy_kl"][-cfg.log_every:]) if stats_history["dreamer_ac_policy_kl"] else 0.0
                 recent_ac_clip = np.mean(stats_history["dreamer_ac_clip_frac"][-cfg.log_every:]) if stats_history["dreamer_ac_clip_frac"] else 0.0
@@ -5831,7 +5894,9 @@ def train(cfg: TrainConfig) -> None:
                     f"route_adv={recent_ac_route_adv_mean:.4f}/{recent_ac_route_adv_std:.4f} "
                     f"combined_adv={recent_ac_combined_adv_mean:.4f}/{recent_ac_combined_adv_std:.4f} "
                     f"ac_argmax={recent_ac_argmax_frac:.3f}/{recent_ac_argmax_mix:.3f} "
-                    f"ac_non0={recent_ac_nonzero:.3f} ac_n={recent_ac_samples:.1f} "
+                    f"ac_non0={recent_ac_nonzero:.3f} "
+                    f"ac_r={recent_ac_route0:.2f}/{recent_ac_route1:.2f}/{recent_ac_route2:.2f}/{recent_ac_route3:.2f} "
+                    f"ac_n={recent_ac_samples:.1f} "
                     f"ac_kl/clip/w/sample_adv={recent_ac_kl:.4f}/{recent_ac_clip:.3f}/{recent_ac_weight:.3f}/{recent_ac_sample_adv:.1f} "
                     f"ent_floor={recent_ac_entropy_floor:.4f}/{recent_ac_entropy_target:.3f} "
                     f"v_ev={recent_v_ev:.3f} ret_std={recent_ret_std:.3f} | "

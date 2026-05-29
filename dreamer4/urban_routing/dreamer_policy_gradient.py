@@ -334,6 +334,10 @@ def _empty_stats() -> Dict[str, float]:
         "dreamer_ac_combined_adv_mean": 0.0,
         "dreamer_ac_combined_adv_std": 0.0,
         "dreamer_ac_selected_nonzero_frac": 0.0,
+        "dreamer_ac_selected_route0_frac": 0.0,
+        "dreamer_ac_selected_route1_frac": 0.0,
+        "dreamer_ac_selected_route2_frac": 0.0,
+        "dreamer_ac_selected_route3_frac": 0.0,
         "dreamer_ac_sample_count": 0.0,
         "dreamer_ac_policy_kl": 0.0,
         "dreamer_ac_clip_frac": 0.0,
@@ -497,6 +501,7 @@ def discrete_actor_critic_policy_loss(
         entropy_floor_loss = (sample_w * entropy_gap.square()).sum() / weight_sum
     loss = pg_loss - float(entropy_coef) * entropy_loss + float(entropy_floor_coef) * entropy_floor_loss
     stats = _empty_stats()
+    selected_used = selected_n[finite]
     stats.update(
         {
             "dreamer_ac_loss": float(loss.detach().cpu().item()),
@@ -521,7 +526,19 @@ def discrete_actor_critic_policy_loss(
                 else 0.0
             ),
             "dreamer_ac_selected_nonzero_frac": float(
-                (selected_n[finite] != 0).to(dtype=torch.float32).mean().detach().cpu().item()
+                (selected_used != 0).to(dtype=torch.float32).mean().detach().cpu().item()
+            ),
+            "dreamer_ac_selected_route0_frac": float(
+                (selected_used == 0).to(dtype=torch.float32).mean().detach().cpu().item()
+            ),
+            "dreamer_ac_selected_route1_frac": float(
+                (selected_used == 1).to(dtype=torch.float32).mean().detach().cpu().item()
+            ),
+            "dreamer_ac_selected_route2_frac": float(
+                (selected_used == 2).to(dtype=torch.float32).mean().detach().cpu().item()
+            ),
+            "dreamer_ac_selected_route3_frac": float(
+                (selected_used == 3).to(dtype=torch.float32).mean().detach().cpu().item()
             ),
             "dreamer_ac_sample_count": float(int(adv.numel())),
             "dreamer_ac_policy_kl": float(approx_kl.mean().cpu().item()) if int(approx_kl.numel()) > 0 else 0.0,
