@@ -1335,11 +1335,12 @@ def _route_credit_base_cost_matrix(
     """Convert route suffix travel times into the local AC credit base.
 
     The default ``progress_fraction`` mode scores a decision by the fraction of
-    the current trip's elapsed-plus-remaining time budget that can be covered
-    before the next decision: ``-step_interval / (elapsed_time +
-    remaining_route_tt)``.  This keeps the local credit as a per-step trip
-    progress signal instead of over-rewarding short remaining suffixes late in
-    the trip.
+    the current trip's elapsed-plus-remaining time budget that can actually be
+    covered before the next decision: ``-min(step_interval, remaining_route_tt)
+    / (elapsed_time + remaining_route_tt)``.  This keeps the local credit as a
+    per-step trip progress signal without over-rewarding short final suffixes
+    where the vehicle reaches its destination before the full decision interval
+    elapses.
     """
     mode_key = str(mode or "progress_fraction").strip().lower()
     if mode_key in {"", "full_path", "remaining_tt", "route_tt", "legacy"}:
@@ -1383,8 +1384,13 @@ def _route_credit_base_cost_matrix(
                     f"elapsed_time second dimension {elapsed.shape[1]} must be 1 "
                     f"or match route count {route_tt_costs.shape[1]}"
                 )
-        total_trip_tt = (route_tt_costs + elapsed).clamp_min(eps)
-        progress = delta_t / total_trip_tt
+        remaining_tt = route_tt_costs.clamp_min(0.0)
+        total_trip_tt = (remaining_tt + elapsed.clamp_min(0.0)).clamp_min(eps)
+        effective_step = torch.minimum(
+            torch.full_like(total_trip_tt, delta_t),
+            remaining_tt,
+        )
+        progress = effective_step / total_trip_tt
         if cap > 0.0:
             progress = progress.clamp(max=cap)
         return (-progress).masked_fill(~route_valid.to(device=route_tt_costs.device), 0.0)

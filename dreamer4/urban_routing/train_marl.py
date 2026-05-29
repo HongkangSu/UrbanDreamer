@@ -214,6 +214,16 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+ROUTE_COST_RETURN_DISCOUNT = 1.0
+LEGACY_ACTOR_ONLY_LOSS_WEIGHTS = (
+    "dreamer_ac_route_advantage_weight",
+    "dreamer_expected_cost_weight",
+    "dreamer_grpo_route_cost_weight",
+    "dreamer_grpo_rollout_weight",
+    "dreamer_grpo_rollout_vehicle_cost_weight",
+    "dreamer_route_cost_aux_weight",
+)
+
 
 class DreamerReturnNormalizer:
     """EMA return normalizer used to stabilize critic targets and advantages."""
@@ -304,6 +314,65 @@ def _polyak_update_module(target: nn.Module, source: nn.Module, tau: float) -> N
                 target_buffer.data.mul_(1.0 - tau).add_(source_buffer.data, alpha=tau)
             else:
                 target_buffer.copy_(source_buffer)
+
+
+def _dreamer_global_return_discount(cfg: Any) -> float:
+    """Use unit discount only when the scalar reward is route-duration based.
+
+    Route cost and route-progress terms are measured in arrival-time/travel-time
+    units, so their physical total is an undiscounted sum. Other global reward
+    terms are allowed to use cfg.gamma because their semantics may not be total
+    trip duration.
+    """
+    non_route_weights = (
+        "dreamer_all_reward_weight",
+        "dreamer_current_edge_reward_weight",
+        "dreamer_cav_reward_weight",
+        "dreamer_action_congestion_weight",
+        "dreamer_route_balance_weight",
+        "dreamer_route_max_share_weight",
+        "dreamer_horizon_proxy_reward_weight",
+        "dreamer_rollout_cost_reward_weight",
+        "terminal_tall_reward_weight",
+    )
+    has_non_route_reward = any(
+        abs(float(getattr(cfg, name, 0.0))) > 1e-12
+        for name in non_route_weights
+    )
+    has_route_duration_reward = (
+        abs(float(getattr(cfg, "dreamer_route_cost_reward_weight", 0.0))) > 1e-12
+        or abs(float(getattr(cfg, "dreamer_pred_t_cav_proxy_reward_weight", 0.0))) > 1e-12
+        or abs(float(getattr(cfg, "dreamer_remaining_time_progress_weight", 0.0))) > 1e-12
+    )
+    if has_route_duration_reward and not has_non_route_reward:
+        return ROUTE_COST_RETURN_DISCOUNT
+    return float(getattr(cfg, "gamma", 0.99))
+
+
+def _enabled_legacy_actor_only_losses(cfg: Any) -> List[str]:
+    return [
+        name for name in LEGACY_ACTOR_ONLY_LOSS_WEIGHTS
+        if abs(float(getattr(cfg, name, 0.0))) > 1e-12
+    ]
+
+
+def _validate_legacy_actor_only_losses(cfg: Any) -> None:
+    enabled = _enabled_legacy_actor_only_losses(cfg)
+    if not enabled:
+        return
+    if bool(getattr(cfg, "dreamer_allow_legacy_actor_only_losses", False)):
+        logger.warning(
+            "Deprecated actor-only Dreamer losses enabled for legacy reproduction: %s. "
+            "Current training should route reward signals through critics instead.",
+            ", ".join(enabled),
+        )
+        return
+    raise ValueError(
+        "Actor-only Dreamer losses are deprecated and disabled on the current training mainline: "
+        + ", ".join(enabled)
+        + ". Set these weights to 0 and route rewards through a critic, or pass "
+        "--dreamer_allow_legacy_actor_only_losses only when reproducing legacy checkpoints."
+    )
 
 
 def _dreamer_critic_context_vector(
@@ -585,6 +654,7 @@ class TrainConfig:
     dreamer_vehicle_critic_attention_heads: int = 4
     dreamer_vehicle_critic_value_coef: float = 1.0
     dreamer_vehicle_critic_return_normalizer: bool = True
+    dreamer_allow_legacy_actor_only_losses: bool = False
     dreamer_actor_lr: float = 0.0  # 0 keeps legacy cfg.lr
     dreamer_critic_lr: float = 0.0  # 0 keeps legacy cfg.lr
     dreamer_actor_objective: str = "discrete_actor_critic"  # direct_return | critic_q | direct_plus_q | discrete_actor_critic
@@ -1765,6 +1835,13 @@ def imagined_episode_dynamic_dreamer(
         active_counts.append(n_active_av)
         max_active_av = max(max_active_av, n_active_av)
         depart_np = dep.get("depart_edge", np.zeros(n_edges, dtype=np.float32))
+        selected_log_probs = None
+        selected_route_idx_t_for_update = None
+        selected_route_idx_for_env = None
+        route_adv_for_ac = None
+        vehicle_reward_for_ac = None
+        valid_action_mask_for_update = None
+        sampled_obs_t = None
 
         if n_active_av > 0:
             edge_feats_obs = wm.latent_edge_features(z).detach().cpu().numpy().astype(np.float32)
@@ -1977,12 +2054,6 @@ def imagined_episode_dynamic_dreamer(
                 )
                 and rollout_policy == "actor"
             )
-            selected_log_probs = None
-            selected_route_idx_t_for_update = None
-            selected_route_idx_for_env = None
-            route_adv_for_ac = None
-            vehicle_reward_for_ac = None
-            valid_action_mask_for_update = None
             if sequential_action_route_probs is not None and rollout_policy == "actor":
                 action_route_probs = sequential_action_route_probs
                 if sequential_selected_route_idx_t is not None:
@@ -3242,6 +3313,8 @@ def dreamer_update(
         and vehicle_critic is not None
         and vehicle_critic_optimizer is not None
     )
+    critic_return_discount = _dreamer_global_return_discount(cfg)
+    vehicle_return_discount = ROUTE_COST_RETURN_DISCOUNT
 
     for traj in trajectories:
         traj_id = int(traj.get("traj_id", -1))
@@ -3293,7 +3366,7 @@ def dreamer_update(
             critic_targets = lambda_return(
                 rewards.detach(),
                 next_values,
-                gamma=1.0,
+                gamma=critic_return_discount,
                 lambda_=float(cfg.gae_lambda),
             )
         critic_target_means.append(float(critic_targets.detach().mean().cpu().item()))
@@ -3328,7 +3401,7 @@ def dreamer_update(
         actor_returns = lambda_return(
             rewards,
             actor_bootstrap,
-            gamma=1.0,
+            gamma=critic_return_discount,
             lambda_=float(cfg.gae_lambda),
         )
         if return_normalizer is not None and bool(getattr(cfg, "dreamer_return_normalizer", True)):
@@ -3419,7 +3492,7 @@ def dreamer_update(
                                 vehicle_targets[ordered_idx] = lambda_return(
                                     rewards_i,
                                     next_i,
-                                    gamma=1.0,
+                                    gamma=vehicle_return_discount,
                                     lambda_=float(cfg.gae_lambda),
                                 )
                         vehicle_critic_target_means.append(float(vehicle_targets.detach().mean().cpu().item()))
@@ -3836,11 +3909,11 @@ def dreamer_update(
             "vehicle_return_norm_std": 1.0,
             "vehicle_reward_mean": 0.0,
             "vehicle_reward_std": 0.0,
-            "vehicle_return_discount": 1.0,
+            "vehicle_return_discount": float(vehicle_return_discount),
             "critic_target_mean": 0.0,
             "critic_target_std": 0.0,
             "critic_explained_variance": 0.0,
-            "critic_return_discount": 1.0,
+            "critic_return_discount": float(critic_return_discount),
             "return_norm_mean": 0.0,
             "return_norm_std": 1.0,
             "skipped_actor_trajs": float(skipped_actor_trajs),
@@ -4002,13 +4075,13 @@ def dreamer_update(
         ),
         "vehicle_reward_mean": float(np.mean(vehicle_reward_means)) if vehicle_reward_means else 0.0,
         "vehicle_reward_std": float(np.mean(vehicle_reward_stds)) if vehicle_reward_stds else 0.0,
-        "vehicle_return_discount": 1.0,
+        "vehicle_return_discount": float(vehicle_return_discount),
         "critic_target_mean": float(np.mean(critic_target_means)) if critic_target_means else 0.0,
         "critic_target_std": float(np.mean(critic_target_stds)) if critic_target_stds else 0.0,
         "critic_explained_variance": (
             float(np.mean(critic_explained_variances)) if critic_explained_variances else 0.0
         ),
-        "critic_return_discount": 1.0,
+        "critic_return_discount": float(critic_return_discount),
         "return_norm_mean": (
             float(return_normalizer.mean.detach().cpu().item()) if return_normalizer is not None else 0.0
         ),
@@ -4075,6 +4148,7 @@ def train(cfg: TrainConfig) -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
         force=True,
     )
+    _validate_legacy_actor_only_losses(cfg)
 
     device = torch.device(cfg.device if torch.cuda.is_available() else "cpu")
     logger.info(
@@ -4276,8 +4350,9 @@ def train(cfg: TrainConfig) -> None:
         if vehicle_critic is not None
         else None
     )
+    critic_return_discount = _dreamer_global_return_discount(cfg)
     logger.info(
-        "Dreamer CTDE mainline active: actor_obs_dim=%d n_routes=%d d_spatial=%d batch_eps=%d actor_h=%d critic_variant=%s critic_aggregation=%s critic_context_dim=%d slow_critic_tau=%.4f return_norm=%s actor_lr=%.2e critic_lr=%.2e vehicle_critic=%s vehicle_critic_context_dim=%d vehicle_critic_lr=%.2e vehicle_discount=1.0",
+        "Dreamer CTDE mainline active: actor_obs_dim=%d n_routes=%d d_spatial=%d batch_eps=%d actor_h=%d critic_variant=%s critic_aggregation=%s critic_context_dim=%d slow_critic_tau=%.4f return_norm=%s actor_lr=%.2e critic_lr=%.2e vehicle_critic=%s vehicle_critic_context_dim=%d vehicle_critic_lr=%.2e critic_discount=%.4f vehicle_discount=%.4f",
         obs_dim,
         int(cfg.n_routes),
         int(wm.d_spatial),
@@ -4293,6 +4368,8 @@ def train(cfg: TrainConfig) -> None:
         str(vehicle_critic is not None),
         int(getattr(vehicle_critic, "context_dim", 0)) if vehicle_critic is not None else 0,
         vehicle_critic_lr,
+        float(critic_return_discount),
+        float(ROUTE_COST_RETURN_DISCOUNT),
     )
 
     horizon_proxy: Optional[ActionHorizonProxyReward] = None
@@ -5270,6 +5347,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dreamer_vehicle_critic_return_normalizer",
                    action=argparse.BooleanOptionalAction, default=True,
                    help="Use a separate EMA normalizer for per-vehicle critic targets and advantages.")
+    p.add_argument("--dreamer_allow_legacy_actor_only_losses", action="store_true",
+                   help=(
+                       "Allow deprecated actor-only losses for reproducing legacy checkpoints. "
+                       "Current training should keep this off and route reward signals through critics."
+                   ))
     p.add_argument("--dreamer_actor_lr", type=float, default=0.0,
                    help="Actor learning rate override for Dreamer CTDE. <=0 uses --lr.")
     p.add_argument("--dreamer_critic_lr", type=float, default=0.0,
@@ -5292,7 +5374,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dreamer_ac_step_advantage_weight", type=float, default=1.0,
                    help="Weight for step-level Dreamer lambda-return advantage in discrete_actor_critic.")
     p.add_argument("--dreamer_ac_route_advantage_weight", type=float, default=0.0,
-                   help="Weight for per-vehicle selected-route cost advantage in discrete_actor_critic. This is an actor-only shaping term; keep 0.0 for pure critic-visible reward training.")
+                   help=(
+                       "Deprecated actor-only selected-route cost advantage. Keep 0.0; "
+                       "requires --dreamer_allow_legacy_actor_only_losses for legacy reproduction."
+                   ))
     p.add_argument("--dreamer_ac_route_credit_mode", type=str, default="route_cost",
                    choices=[
                        "route_cost", "planned_pressure", "marginal_pressure",
@@ -5397,7 +5482,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
                        "travel-time excess over free-flow."
                    ))
     p.add_argument("--dreamer_expected_cost_weight", type=float, default=0.0,
-                   help="Actor-only expected-cost loss weight for minimizing sum_k pi_k C_k without CE/distillation targets.")
+                   help=(
+                       "Deprecated actor-only expected-cost loss weight. Keep 0.0; "
+                       "requires --dreamer_allow_legacy_actor_only_losses for legacy reproduction."
+                   ))
     p.add_argument("--dreamer_expected_cost_temperature", type=float, default=60.0,
                    help="Seconds scale for the actor expected-cost loss; costs are normalized as regret / temperature.")
     p.add_argument("--dreamer_expected_cost_planned_av_pressure_weight", type=float, default=0.0,
@@ -5481,8 +5569,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="Fleet route-slot share cap used by --dreamer_expected_cost_route_share_penalty_weight.")
     p.add_argument("--dreamer_grpo_route_cost_weight", type=float, default=0.0,
                    help=(
-                       "Actor-only per-vehicle GRPO route-cost loss weight. Each vehicle's candidate "
-                       "routes form a group, with advantage = group mean cost - candidate cost."
+                       "Deprecated actor-only per-vehicle GRPO route-cost loss weight. Keep 0.0; "
+                       "requires --dreamer_allow_legacy_actor_only_losses for legacy reproduction."
                    ))
     p.add_argument("--dreamer_grpo_planned_av_pressure_weight", type=float, default=0.0,
                    help="Seconds penalty for same-tick planned AV edge-pressure overlap added to GRPO route costs.")
@@ -5555,8 +5643,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    ))
     p.add_argument("--dreamer_grpo_rollout_weight", type=float, default=0.0,
                    help=(
-                       "Critic-free stochastic rollout GRPO weight. Sample joint vehicle route actions, "
-                       "score whole imagined rollouts with Dreamer reward, and update by batch-relative advantage."
+                       "Deprecated critic-free stochastic rollout GRPO weight. Keep 0.0; "
+                       "requires --dreamer_allow_legacy_actor_only_losses for legacy reproduction."
                    ))
     p.add_argument("--dreamer_grpo_rollout_normalize_advantages", action=argparse.BooleanOptionalAction, default=True,
                    help="Normalize rollout GRPO advantages across the imagined rollout group/batch.")
@@ -5578,8 +5666,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    ))
     p.add_argument("--dreamer_grpo_rollout_vehicle_cost_weight", type=float, default=0.0,
                    help=(
-                       "Optional per-vehicle score-function loss inside imagined rollouts. Uses WM-decoded "
-                       "next-step route costs to give each sampled vehicle route its own relative advantage."
+                       "Deprecated actor-only per-vehicle score-function loss inside imagined rollouts. "
+                       "Keep 0.0; requires --dreamer_allow_legacy_actor_only_losses for legacy reproduction."
                    ))
     p.add_argument("--dreamer_grpo_rollout_vehicle_planned_av_pressure_weight", type=float, default=0.0,
                    help=(
@@ -5641,7 +5729,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dreamer_route_max_share_cap", type=float, default=1.0,
                    help="Allowed fleet-level max route share before --dreamer_route_max_share_weight applies.")
     p.add_argument("--dreamer_route_cost_aux_weight", type=float, default=0.0,
-                   help="Auxiliary actor-logit supervision weight toward soft shortest candidate routes from current WM/BPR route costs.")
+                   help=(
+                       "Deprecated actor-only route-cost auxiliary supervision weight. Keep 0.0; "
+                       "requires --dreamer_allow_legacy_actor_only_losses for legacy reproduction."
+                   ))
     p.add_argument("--dreamer_route_cost_aux_balance", action="store_true",
                    help="Balance route-cost auxiliary samples by the current best-route class to avoid route0-majority collapse.")
     p.add_argument("--dreamer_route_cost_aux_hard_target", action="store_true",
@@ -5769,6 +5860,10 @@ def main() -> None:
     if not d.get("projector_ckpt") or not d.get("edge_registry"):
         p.error("--projector_ckpt and --edge_registry are required")
     cfg = TrainConfig(**d)
+    try:
+        _validate_legacy_actor_only_losses(cfg)
+    except ValueError as exc:
+        p.error(str(exc))
     train(cfg)
 
 
