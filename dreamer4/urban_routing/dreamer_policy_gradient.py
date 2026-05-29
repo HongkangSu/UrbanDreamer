@@ -258,6 +258,10 @@ def _empty_stats() -> Dict[str, float]:
         "dreamer_ac_clip_frac": 0.0,
         "dreamer_ac_weight_mean": 0.0,
         "dreamer_ac_uses_sample_adv": 0.0,
+        "dreamer_ac_entropy_loss": 0.0,
+        "dreamer_ac_entropy_floor_loss": 0.0,
+        "dreamer_ac_entropy_target": 0.0,
+        "dreamer_ac_entropy_valid_target_mean": 0.0,
     }
 
 
@@ -276,6 +280,9 @@ def discrete_actor_critic_policy_loss(
     sample_weight: Optional[torch.Tensor] = None,
     ppo_clip_ratio: float = 0.0,
     normalize_combined_advantage: bool = False,
+    entropy_target: float = 0.0,
+    entropy_target_frac: float = 0.0,
+    entropy_floor_coef: float = 0.0,
 ) -> tuple[Optional[torch.Tensor], Dict[str, float]]:
     """Return score-function actor loss for sampled discrete route actions.
 
@@ -367,6 +374,7 @@ def discrete_actor_critic_policy_loss(
 
     selected_logp = selected_logp[finite]
     entropy_used = entropy_per_sample[finite]
+    valid_count_used = valid_n[finite].sum(dim=-1).to(dtype=logits.dtype).clamp_min(1.0)
     adv = adv[finite]
     route_adv = route_adv[finite]
     combined_adv = combined_adv[finite]
@@ -385,7 +393,28 @@ def discrete_actor_critic_policy_loss(
         approx_kl = torch.zeros_like(selected_logp)
         clip_frac = torch.zeros_like(selected_logp)
     entropy_loss = (sample_w * entropy_used).sum() / weight_sum
-    loss = pg_loss - float(entropy_coef) * entropy_loss
+    entropy_floor_loss = torch.zeros((), device=logits.device, dtype=logits.dtype)
+    absolute_target_entropy = max(float(entropy_target), 0.0)
+    frac_target_entropy = torch.zeros_like(entropy_used)
+    if float(entropy_target_frac) > 0.0:
+        frac = max(float(entropy_target_frac), 0.0)
+        frac_target_entropy = frac * torch.log(valid_count_used)
+    if absolute_target_entropy > 0.0:
+        target_entropy_per_sample = torch.maximum(
+            frac_target_entropy,
+            torch.full_like(frac_target_entropy, absolute_target_entropy),
+        )
+    else:
+        target_entropy_per_sample = frac_target_entropy
+    target_entropy = (
+        (sample_w * target_entropy_per_sample).sum() / weight_sum
+        if int(target_entropy_per_sample.numel()) > 0
+        else torch.zeros((), device=logits.device, dtype=logits.dtype)
+    )
+    if float(entropy_floor_coef) > 0.0:
+        entropy_gap = torch.relu(target_entropy_per_sample - entropy_used)
+        entropy_floor_loss = (sample_w * entropy_gap.square()).sum() / weight_sum
+    loss = pg_loss - float(entropy_coef) * entropy_loss + float(entropy_floor_coef) * entropy_floor_loss
     stats = _empty_stats()
     stats.update(
         {
@@ -418,6 +447,12 @@ def discrete_actor_critic_policy_loss(
             "dreamer_ac_clip_frac": float(clip_frac.mean().cpu().item()) if int(clip_frac.numel()) > 0 else 0.0,
             "dreamer_ac_weight_mean": float(sample_w.mean().detach().cpu().item()) if int(sample_w.numel()) > 0 else 0.0,
             "dreamer_ac_uses_sample_adv": 1.0 if use_sample_advantage else 0.0,
+            "dreamer_ac_entropy_loss": float(entropy_loss.detach().cpu().item()),
+            "dreamer_ac_entropy_floor_loss": float(entropy_floor_loss.detach().cpu().item()),
+            "dreamer_ac_entropy_target": float(target_entropy.detach().cpu().item()),
+            "dreamer_ac_entropy_valid_target_mean": float(
+                frac_target_entropy.detach().mean().cpu().item()
+            ) if int(frac_target_entropy.numel()) > 0 else 0.0,
         }
     )
     return loss, stats
