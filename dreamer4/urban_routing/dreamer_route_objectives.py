@@ -659,6 +659,7 @@ def _counterfactual_fleet_pressure_cost_matrix(
     n_routes: int,
     edge_weights: Optional[torch.Tensor] = None,
     normalize_by_path_length: bool = False,
+    pressure_scale: str = "mean",
     detach_pressure: bool = True,
 ) -> Optional[torch.Tensor]:
     """Return COMA-style route costs aligned with fleet pressure reward.
@@ -733,23 +734,37 @@ def _counterfactual_fleet_pressure_cost_matrix(
     if bool(normalize_by_path_length):
         route_masks = route_masks / valid_counts.clamp_min(1.0).unsqueeze(-1)
 
+    scale_key = str(pressure_scale or "mean").strip().lower()
+    if scale_key in {"", "mean", "avg", "average", "per_vehicle"}:
+        pressure_denominator = float(max(n_agents, 1))
+    elif scale_key in {"sum", "total", "system", "system_total", "fleet_total"}:
+        pressure_denominator = 1.0
+    else:
+        raise ValueError(
+            f"Unsupported counterfactual pressure scale {pressure_scale!r}; "
+            "expected mean or system_total"
+        )
+
     agent_expected_pressure = torch.einsum("ik,ike->ie", probs, route_masks)
-    fleet_pressure = agent_expected_pressure.sum(dim=0) / float(max(n_agents, 1))
+    fleet_pressure = agent_expected_pressure.sum(dim=0) / pressure_denominator
     if bool(detach_pressure):
         fleet_pressure = fleet_pressure.detach()
         agent_expected_pressure = agent_expected_pressure.detach()
 
     costs = torch.zeros((n_agents, k_eff), device=device, dtype=dtype)
     for i in range(n_agents):
-        other_pressure = fleet_pressure - agent_expected_pressure[i] / float(max(n_agents, 1))
+        other_pressure = fleet_pressure - agent_expected_pressure[i] / pressure_denominator
         other_pressure = other_pressure.clamp_min(0.0)
         for k in range(k_eff):
             if not bool(valid[i, k].detach().cpu().item()):
                 continue
-            cf_pressure = other_pressure + route_masks[i, k] / float(max(n_agents, 1))
-            pressure_sum = cf_pressure.sum().clamp_min(1e-8)
-            pressure_dist = cf_pressure / pressure_sum
-            costs[i, k] = torch.sum(pressure_dist * edge_cost)
+            cf_pressure = other_pressure + route_masks[i, k] / pressure_denominator
+            if scale_key in {"sum", "total", "system", "system_total", "fleet_total"}:
+                costs[i, k] = torch.sum(cf_pressure * edge_cost)
+            else:
+                pressure_sum = cf_pressure.sum().clamp_min(1e-8)
+                pressure_dist = cf_pressure / pressure_sum
+                costs[i, k] = torch.sum(pressure_dist * edge_cost)
     return costs.masked_fill(~valid, 0.0)
 
 

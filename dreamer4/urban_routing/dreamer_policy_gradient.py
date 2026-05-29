@@ -74,6 +74,8 @@ def append_discrete_actor_critic_samples(
     vehicle_id_steps: Optional[List[torch.Tensor]] = None,
     vehicle_reward: Optional[torch.Tensor] = None,
     vehicle_reward_steps: Optional[List[torch.Tensor]] = None,
+    vehicle_route_progress_reward: Optional[torch.Tensor] = None,
+    vehicle_route_progress_reward_steps: Optional[List[torch.Tensor]] = None,
     vehicle_route_credit_reward: Optional[torch.Tensor] = None,
     vehicle_route_credit_reward_steps: Optional[List[torch.Tensor]] = None,
     vehicle_social_reward: Optional[torch.Tensor] = None,
@@ -162,6 +164,22 @@ def append_discrete_actor_critic_samples(
             vehicle_reward_steps.append(
                 torch.zeros((int(obs_used.shape[0]),), device=obs_used.device, dtype=obs_used.dtype)
             )
+    if vehicle_route_progress_reward_steps is not None:
+        if torch.is_tensor(vehicle_route_progress_reward) and vehicle_route_progress_reward.numel() > 0:
+            progress_reward_n = vehicle_route_progress_reward.reshape(-1)[:n].to(
+                device=obs_n.device,
+                dtype=obs_n.dtype,
+            )
+            if int(progress_reward_n.numel()) == n:
+                vehicle_route_progress_reward_steps.append(progress_reward_n[usable].detach())
+            else:
+                vehicle_route_progress_reward_steps.append(
+                    torch.zeros((int(obs_used.shape[0]),), device=obs_used.device, dtype=obs_used.dtype)
+                )
+        else:
+            vehicle_route_progress_reward_steps.append(
+                torch.zeros((int(obs_used.shape[0]),), device=obs_used.device, dtype=obs_used.dtype)
+            )
     if vehicle_route_credit_reward_steps is not None:
         if torch.is_tensor(vehicle_route_credit_reward) and vehicle_route_credit_reward.numel() > 0:
             route_credit_reward_n = vehicle_route_credit_reward.reshape(-1)[:n].to(
@@ -216,6 +234,7 @@ def pack_discrete_actor_critic_samples(
     sample_weight_steps: Optional[List[torch.Tensor]] = None,
     vehicle_id_steps: Optional[List[torch.Tensor]] = None,
     vehicle_reward_steps: Optional[List[torch.Tensor]] = None,
+    vehicle_route_progress_reward_steps: Optional[List[torch.Tensor]] = None,
     vehicle_route_credit_reward_steps: Optional[List[torch.Tensor]] = None,
     vehicle_social_reward_steps: Optional[List[torch.Tensor]] = None,
     device: torch.device,
@@ -250,6 +269,14 @@ def pack_discrete_actor_critic_samples(
             vehicle_reward_cat = torch.cat(vehicle_reward_steps, dim=0).to(device=device, dtype=dtype)
             if int(vehicle_reward_cat.numel()) == int(selected.numel()):
                 vehicle_reward = vehicle_reward_cat
+        vehicle_route_progress_reward = torch.zeros((int(selected.numel()),), device=device, dtype=dtype)
+        if vehicle_route_progress_reward_steps:
+            progress_reward_cat = torch.cat(vehicle_route_progress_reward_steps, dim=0).to(
+                device=device,
+                dtype=dtype,
+            )
+            if int(progress_reward_cat.numel()) == int(selected.numel()):
+                vehicle_route_progress_reward = progress_reward_cat
         vehicle_route_credit_reward = torch.zeros((int(selected.numel()),), device=device, dtype=dtype)
         if vehicle_route_credit_reward_steps:
             route_credit_reward_cat = torch.cat(vehicle_route_credit_reward_steps, dim=0).to(
@@ -273,6 +300,7 @@ def pack_discrete_actor_critic_samples(
             "dreamer_ac_sample_weight": sample_weight,
             "dreamer_ac_vehicle_id": vehicle_id,
             "dreamer_ac_vehicle_reward": vehicle_reward,
+            "dreamer_ac_vehicle_route_progress_reward": vehicle_route_progress_reward,
             "dreamer_ac_vehicle_route_credit_reward": vehicle_route_credit_reward,
             "dreamer_ac_vehicle_social_reward": vehicle_social_reward,
             "dreamer_ac_sample_adv": torch.zeros((0,), device=device, dtype=dtype),
@@ -287,6 +315,7 @@ def pack_discrete_actor_critic_samples(
         "dreamer_ac_sample_weight": torch.zeros((0,), device=device, dtype=dtype),
         "dreamer_ac_vehicle_id": torch.zeros((0,), device=device, dtype=torch.long),
         "dreamer_ac_vehicle_reward": torch.zeros((0,), device=device, dtype=dtype),
+        "dreamer_ac_vehicle_route_progress_reward": torch.zeros((0,), device=device, dtype=dtype),
         "dreamer_ac_vehicle_route_credit_reward": torch.zeros((0,), device=device, dtype=dtype),
         "dreamer_ac_vehicle_social_reward": torch.zeros((0,), device=device, dtype=dtype),
         "dreamer_ac_sample_adv": torch.zeros((0,), device=device, dtype=dtype),

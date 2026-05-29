@@ -752,10 +752,14 @@ class TrainConfig:
     dreamer_route_cost_reward_planned_av_pressure_mode: str = "overlap"
     dreamer_vehicle_route_credit_reward_weight: float = 0.0
     dreamer_vehicle_route_credit_reward_discount: float = 0.99
+    dreamer_vehicle_route_credit_reward_transform: str = "negative_cost"
+    dreamer_vehicle_route_credit_reward_normalize: bool = False
+    dreamer_vehicle_route_credit_reward_temperature: float = 1.0
     dreamer_vehicle_route_credit_mode: str = "counterfactual_pressure"
     dreamer_vehicle_route_credit_pressure_weight: float = 1.0
     dreamer_vehicle_route_credit_pressure_mode: str = "clipped_excess_tt_ratio"
     dreamer_vehicle_route_credit_pressure_reference: str = "soft"
+    dreamer_vehicle_route_credit_pressure_scale: str = "mean"
     dreamer_vehicle_route_credit_normalize_by_path_length: bool = False
     dreamer_vehicle_route_credit_base_cost_mode: str = "none"
     dreamer_vehicle_route_credit_include_base_cost: bool = False
@@ -872,6 +876,7 @@ DREAMER_UPDATE_SCALAR_KEYS = (
     "vehicle_value_loss", "vehicle_critic_target_mean", "vehicle_critic_target_std",
     "vehicle_critic_explained_variance", "vehicle_return_norm_mean", "vehicle_return_norm_std",
     "vehicle_reward_mean", "vehicle_reward_std",
+    "vehicle_route_progress_reward_mean", "vehicle_route_progress_reward_std",
     "vehicle_route_credit_reward_mean", "vehicle_route_credit_reward_std",
     "vehicle_social_reward_mean", "vehicle_social_reward_std",
     "vehicle_return_discount",
@@ -1569,6 +1574,9 @@ def _selected_route_credit_vehicle_rewards_from_cost_matrix(
     selected_idx: torch.Tensor,
     reward_weight: float,
     reward_scale: float,
+    reward_transform: str = "negative_cost",
+    normalize: bool = False,
+    temperature: float = 1.0,
 ) -> torch.Tensor:
     """Convert selected route-credit costs into critic-visible rewards."""
     n = min(
@@ -1584,7 +1592,53 @@ def _selected_route_credit_vehicle_rewards_from_cost_matrix(
     selected = selected.clamp(0, max(int(costs.shape[1]) - 1, 0))
     rows = torch.arange(n, device=route_credit_costs.device)
     selected_valid = valid[rows, selected]
-    reward = -float(reward_weight) * costs[rows, selected] * float(reward_scale)
+    selected_cost = costs[rows, selected]
+    transform_key = str(reward_transform or "negative_cost").strip().lower()
+    if transform_key in {"", "negative_cost", "cost", "legacy", "absolute_cost"}:
+        score = -selected_cost
+    elif transform_key in {"relative_mean", "mean", "mean_baseline", "advantage"}:
+        valid_f = valid.to(dtype=costs.dtype)
+        valid_count = valid_f.sum(dim=-1, keepdim=True).clamp_min(1.0)
+        cost_mean = (costs.masked_fill(~valid, 0.0) * valid_f).sum(dim=-1, keepdim=True) / valid_count
+        score = cost_mean.squeeze(-1) - selected_cost
+        if bool(normalize):
+            centered = (costs - cost_mean).masked_fill(~valid, 0.0)
+            cost_std = torch.sqrt(
+                (centered.square() * valid_f).sum(dim=-1) / valid_count.squeeze(-1)
+            ).clamp_min(1e-6)
+            score = score / cost_std
+        else:
+            score = score / float(max(temperature, 1e-6))
+    elif transform_key in {"relative_min", "min_regret", "best_regret"}:
+        large = torch.finfo(costs.dtype).max / 4.0
+        min_cost = costs.masked_fill(~valid, large).min(dim=-1).values
+        score = min_cost - selected_cost
+        if bool(normalize):
+            valid_f = valid.to(dtype=costs.dtype)
+            valid_count = valid_f.sum(dim=-1, keepdim=True).clamp_min(1.0)
+            cost_mean = (costs.masked_fill(~valid, 0.0) * valid_f).sum(dim=-1, keepdim=True) / valid_count
+            centered = (costs - cost_mean).masked_fill(~valid, 0.0)
+            cost_std = torch.sqrt(
+                (centered.square() * valid_f).sum(dim=-1) / valid_count.squeeze(-1)
+            ).clamp_min(1e-6)
+            score = score / cost_std
+        else:
+            score = score / float(max(temperature, 1e-6))
+    elif transform_key in {"zscore", "relative_zscore", "standardized_mean"}:
+        valid_f = valid.to(dtype=costs.dtype)
+        valid_count = valid_f.sum(dim=-1, keepdim=True).clamp_min(1.0)
+        cost_mean = (costs.masked_fill(~valid, 0.0) * valid_f).sum(dim=-1, keepdim=True) / valid_count
+        centered = (costs - cost_mean).masked_fill(~valid, 0.0)
+        cost_std = torch.sqrt(
+            (centered.square() * valid_f).sum(dim=-1) / valid_count.squeeze(-1)
+        ).clamp_min(1e-6)
+        score = (cost_mean.squeeze(-1) - selected_cost) / cost_std
+    else:
+        raise ValueError(
+            f"Unsupported route-credit reward transform {reward_transform!r}; "
+            "expected negative_cost, relative_mean, relative_min, or zscore"
+        )
+    reward = float(reward_weight) * score * float(reward_scale)
     reward = torch.where(selected_valid, reward, torch.zeros_like(reward))
     return torch.nan_to_num(reward, nan=0.0, posinf=0.0, neginf=0.0)
 
@@ -1702,6 +1756,7 @@ def _route_credit_cost_matrix(
     pressure_weight: float,
     pressure_mode: str,
     pressure_reference: str,
+    pressure_scale: str,
     normalize_by_path_length: bool,
     include_base_cost: bool = True,
     detach_pressure: bool = True,
@@ -1737,6 +1792,7 @@ def _route_credit_cost_matrix(
             n_routes=n_routes,
             edge_weights=edge_weights,
             normalize_by_path_length=bool(normalize_by_path_length),
+            pressure_scale=str(pressure_scale),
             detach_pressure=bool(detach_pressure),
         )
     elif mode_key in {"marginal_pressure", "marginal_av_pressure", "externality"}:
@@ -1924,6 +1980,7 @@ def imagined_episode_dynamic_dreamer(
     dreamer_ac_sample_weight_steps: List[torch.Tensor] = []
     dreamer_ac_vehicle_id_steps: List[torch.Tensor] = []
     dreamer_ac_vehicle_reward_steps: List[torch.Tensor] = []
+    dreamer_ac_vehicle_route_progress_reward_steps: List[torch.Tensor] = []
     dreamer_ac_vehicle_route_credit_reward_steps: List[torch.Tensor] = []
     dreamer_ac_vehicle_social_reward_steps: List[torch.Tensor] = []
     dreamer_ac_selected_nonzero_fracs: List[float] = []
@@ -2069,6 +2126,7 @@ def imagined_episode_dynamic_dreamer(
         selected_route_idx_for_env = None
         route_adv_for_ac = None
         vehicle_reward_for_ac = None
+        vehicle_route_progress_reward_for_ac = None
         vehicle_route_credit_reward_for_ac = None
         vehicle_social_reward_for_ac = None
         valid_action_mask_for_update = None
@@ -2775,6 +2833,7 @@ def imagined_episode_dynamic_dreamer(
                             pressure_reference=str(
                                 getattr(cfg, "dreamer_ac_route_credit_pressure_reference", "soft")
                             ),
+                            pressure_scale="mean",
                             normalize_by_path_length=bool(
                                 getattr(cfg, "dreamer_ac_route_credit_normalize_by_path_length", False)
                             ),
@@ -3022,7 +3081,7 @@ def imagined_episode_dynamic_dreamer(
                         vehicle_reward_parts: List[torch.Tensor] = []
                         route_reward_weight = float(getattr(cfg, "dreamer_route_cost_reward_weight", 0.0))
                         if route_reward_weight != 0.0:
-                            vehicle_reward_parts.append(
+                            vehicle_route_progress_reward_for_ac = (
                                 _selected_route_vehicle_rewards_from_cost_matrix(
                                     route_costs=vehicle_reward_costs,
                                     route_valid=vehicle_reward_valid,
@@ -3041,6 +3100,7 @@ def imagined_episode_dynamic_dreamer(
                                     temperature=float(getattr(cfg, "dreamer_route_cost_reward_temperature", 60.0)),
                                 )
                             )
+                            vehicle_reward_parts.append(vehicle_route_progress_reward_for_ac)
                         route_credit_reward_weight = float(
                             getattr(cfg, "dreamer_vehicle_route_credit_reward_weight", 0.0)
                         )
@@ -3111,6 +3171,13 @@ def imagined_episode_dynamic_dreamer(
                                         getattr(cfg, "dreamer_ac_route_credit_pressure_reference", "soft"),
                                     )
                                 ),
+                                pressure_scale=str(
+                                    getattr(
+                                        cfg,
+                                        "dreamer_vehicle_route_credit_pressure_scale",
+                                        "mean",
+                                    )
+                                ),
                                 normalize_by_path_length=bool(
                                     getattr(
                                         cfg,
@@ -3138,6 +3205,27 @@ def imagined_episode_dynamic_dreamer(
                                     selected_idx=selected_route_idx_t_for_update,
                                     reward_weight=route_credit_reward_weight,
                                     reward_scale=float(getattr(cfg, "vehicle_reward_scale", 1.0)),
+                                    reward_transform=str(
+                                        getattr(
+                                            cfg,
+                                            "dreamer_vehicle_route_credit_reward_transform",
+                                            "negative_cost",
+                                        )
+                                    ),
+                                    normalize=bool(
+                                        getattr(
+                                            cfg,
+                                            "dreamer_vehicle_route_credit_reward_normalize",
+                                            False,
+                                        )
+                                    ),
+                                    temperature=float(
+                                        getattr(
+                                            cfg,
+                                            "dreamer_vehicle_route_credit_reward_temperature",
+                                            1.0,
+                                        )
+                                    ),
                                 )
                             )
                             vehicle_reward_parts.append(vehicle_route_credit_reward_for_ac)
@@ -3207,6 +3295,7 @@ def imagined_episode_dynamic_dreamer(
                 sample_weight_steps=dreamer_ac_sample_weight_steps,
                 vehicle_id_steps=dreamer_ac_vehicle_id_steps,
                 vehicle_reward_steps=dreamer_ac_vehicle_reward_steps,
+                vehicle_route_progress_reward_steps=dreamer_ac_vehicle_route_progress_reward_steps,
                 vehicle_route_credit_reward_steps=dreamer_ac_vehicle_route_credit_reward_steps,
                 vehicle_social_reward_steps=dreamer_ac_vehicle_social_reward_steps,
                 selected_nonzero_fracs=dreamer_ac_selected_nonzero_fracs,
@@ -3219,6 +3308,7 @@ def imagined_episode_dynamic_dreamer(
                 sample_weight=ac_sample_weight,
                 vehicle_id=vehicle_id_t,
                 vehicle_reward=vehicle_reward_for_ac,
+                vehicle_route_progress_reward=vehicle_route_progress_reward_for_ac,
                 vehicle_route_credit_reward=vehicle_route_credit_reward_for_ac,
                 vehicle_social_reward=vehicle_social_reward_for_ac,
             )
@@ -3435,6 +3525,7 @@ def imagined_episode_dynamic_dreamer(
         sample_weight_steps=dreamer_ac_sample_weight_steps,
         vehicle_id_steps=dreamer_ac_vehicle_id_steps,
         vehicle_reward_steps=dreamer_ac_vehicle_reward_steps,
+        vehicle_route_progress_reward_steps=dreamer_ac_vehicle_route_progress_reward_steps,
         vehicle_route_credit_reward_steps=dreamer_ac_vehicle_route_credit_reward_steps,
         vehicle_social_reward_steps=dreamer_ac_vehicle_social_reward_steps,
         device=device,
@@ -3524,6 +3615,14 @@ def imagined_episode_dynamic_dreamer(
         "vehicle_reward_std": (
             float(ac_samples["dreamer_ac_vehicle_reward"].detach().std(unbiased=False).cpu().item())
             if ac_samples["dreamer_ac_vehicle_reward"].numel() > 1 else 0.0
+        ),
+        "vehicle_route_progress_reward_mean": (
+            float(ac_samples["dreamer_ac_vehicle_route_progress_reward"].detach().mean().cpu().item())
+            if ac_samples["dreamer_ac_vehicle_route_progress_reward"].numel() > 0 else 0.0
+        ),
+        "vehicle_route_progress_reward_std": (
+            float(ac_samples["dreamer_ac_vehicle_route_progress_reward"].detach().std(unbiased=False).cpu().item())
+            if ac_samples["dreamer_ac_vehicle_route_progress_reward"].numel() > 1 else 0.0
         ),
         "vehicle_route_credit_reward_mean": (
             float(ac_samples["dreamer_ac_vehicle_route_credit_reward"].detach().mean().cpu().item())
@@ -3716,6 +3815,8 @@ def dreamer_update(
     vehicle_critic_explained_variances: List[float] = []
     vehicle_reward_means: List[float] = []
     vehicle_reward_stds: List[float] = []
+    vehicle_route_progress_reward_means: List[float] = []
+    vehicle_route_progress_reward_stds: List[float] = []
     vehicle_route_credit_reward_means: List[float] = []
     vehicle_route_credit_reward_stds: List[float] = []
     vehicle_social_reward_means: List[float] = []
@@ -3934,6 +4035,19 @@ def dreamer_update(
                             float(reward_used.detach().std(unbiased=False).cpu().item())
                             if int(reward_used.numel()) > 1 else 0.0
                         )
+                        vehicle_route_progress_reward = traj.get("dreamer_ac_vehicle_route_progress_reward")
+                        if torch.is_tensor(vehicle_route_progress_reward) and vehicle_route_progress_reward.numel() > 0:
+                            progress_used = vehicle_route_progress_reward.reshape(-1)[:n_vehicle_samples].to(
+                                device=vehicle_obs_n.device,
+                                dtype=vehicle_obs_n.dtype,
+                            )[finite_vehicle]
+                            vehicle_route_progress_reward_means.append(
+                                float(progress_used.detach().mean().cpu().item())
+                            )
+                            vehicle_route_progress_reward_stds.append(
+                                float(progress_used.detach().std(unbiased=False).cpu().item())
+                                if int(progress_used.numel()) > 1 else 0.0
+                            )
                         vehicle_route_credit_reward = traj.get("dreamer_ac_vehicle_route_credit_reward")
                         if torch.is_tensor(vehicle_route_credit_reward) and vehicle_route_credit_reward.numel() > 0:
                             route_credit_used = vehicle_route_credit_reward.reshape(-1)[:n_vehicle_samples].to(
@@ -4379,6 +4493,8 @@ def dreamer_update(
             "vehicle_return_norm_std": 1.0,
             "vehicle_reward_mean": 0.0,
             "vehicle_reward_std": 0.0,
+            "vehicle_route_progress_reward_mean": 0.0,
+            "vehicle_route_progress_reward_std": 0.0,
             "vehicle_route_credit_reward_mean": 0.0,
             "vehicle_route_credit_reward_std": 0.0,
             "vehicle_social_reward_mean": 0.0,
@@ -4562,6 +4678,14 @@ def dreamer_update(
         ),
         "vehicle_reward_mean": float(np.mean(vehicle_reward_means)) if vehicle_reward_means else 0.0,
         "vehicle_reward_std": float(np.mean(vehicle_reward_stds)) if vehicle_reward_stds else 0.0,
+        "vehicle_route_progress_reward_mean": (
+            float(np.mean(vehicle_route_progress_reward_means))
+            if vehicle_route_progress_reward_means else 0.0
+        ),
+        "vehicle_route_progress_reward_std": (
+            float(np.mean(vehicle_route_progress_reward_stds))
+            if vehicle_route_progress_reward_stds else 0.0
+        ),
         "vehicle_route_credit_reward_mean": (
             float(np.mean(vehicle_route_credit_reward_means))
             if vehicle_route_credit_reward_means else 0.0
@@ -5470,6 +5594,12 @@ def train(cfg: TrainConfig) -> None:
                 "dreamer_ac_selected_nonzero_frac": float(ep_metrics.get("dreamer_ac_selected_nonzero_frac", 0.0)),
                 "vehicle_reward_mean": float(ep_metrics.get("vehicle_reward_mean", 0.0)),
                 "vehicle_reward_std": float(ep_metrics.get("vehicle_reward_std", 0.0)),
+                "vehicle_route_progress_reward_mean": float(
+                    ep_metrics.get("vehicle_route_progress_reward_mean", 0.0)
+                ),
+                "vehicle_route_progress_reward_std": float(
+                    ep_metrics.get("vehicle_route_progress_reward_std", 0.0)
+                ),
                 "vehicle_route_credit_reward_mean": float(
                     ep_metrics.get("vehicle_route_credit_reward_mean", 0.0)
                 ),
@@ -5583,6 +5713,8 @@ def train(cfg: TrainConfig) -> None:
                 recent_vehicle_target_std = np.mean(stats_history["vehicle_critic_target_std"][-cfg.log_every:]) if stats_history["vehicle_critic_target_std"] else 0.0
                 recent_vehicle_reward_mean = np.mean(stats_history["vehicle_reward_mean"][-cfg.log_every:]) if stats_history["vehicle_reward_mean"] else 0.0
                 recent_vehicle_reward_std = np.mean(stats_history["vehicle_reward_std"][-cfg.log_every:]) if stats_history["vehicle_reward_std"] else 0.0
+                recent_vehicle_route_progress_mean = np.mean(stats_history["vehicle_route_progress_reward_mean"][-cfg.log_every:]) if stats_history["vehicle_route_progress_reward_mean"] else 0.0
+                recent_vehicle_route_progress_std = np.mean(stats_history["vehicle_route_progress_reward_std"][-cfg.log_every:]) if stats_history["vehicle_route_progress_reward_std"] else 0.0
                 recent_vehicle_route_credit_mean = np.mean(stats_history["vehicle_route_credit_reward_mean"][-cfg.log_every:]) if stats_history["vehicle_route_credit_reward_mean"] else 0.0
                 recent_vehicle_route_credit_std = np.mean(stats_history["vehicle_route_credit_reward_std"][-cfg.log_every:]) if stats_history["vehicle_route_credit_reward_std"] else 0.0
                 recent_vehicle_social_mean = np.mean(stats_history["vehicle_social_reward_mean"][-cfg.log_every:]) if stats_history["vehicle_social_reward_mean"] else 0.0
@@ -5638,6 +5770,7 @@ def train(cfg: TrainConfig) -> None:
                     f"ent_floor={recent_ac_entropy_floor:.4f}/{recent_ac_entropy_target:.3f} "
                     f"v_ev={recent_v_ev:.3f} ret_std={recent_ret_std:.3f} | "
                     f"veh_vf={recent_vehicle_vf:.4f} veh_rew={recent_vehicle_reward_mean:.2f}/{recent_vehicle_reward_std:.2f} "
+                    f"veh_route_progress={recent_vehicle_route_progress_mean:.2f}/{recent_vehicle_route_progress_std:.2f} "
                     f"veh_route_credit={recent_vehicle_route_credit_mean:.2f}/{recent_vehicle_route_credit_std:.2f} "
                     f"veh_social={recent_vehicle_social_mean:.2f}/{recent_vehicle_social_std:.2f} "
                     f"veh_tgt_std={recent_vehicle_target_std:.2f} veh_ret_std={recent_vehicle_ret_std:.2f} | "
@@ -6083,6 +6216,27 @@ def build_arg_parser() -> argparse.ArgumentParser:
                        "Per-vehicle critic discount for pure non-progress route-credit ablations. "
                        "If a progress-fraction route credit base is enabled, discount remains 1.0."
                    ))
+    p.add_argument("--dreamer_vehicle_route_credit_reward_transform", type=str, default="negative_cost",
+                   choices=[
+                       "negative_cost", "cost", "legacy", "absolute_cost",
+                       "relative_mean", "mean", "mean_baseline", "advantage",
+                       "relative_min", "min_regret", "best_regret",
+                       "zscore", "relative_zscore", "standardized_mean",
+                   ],
+                   help=(
+                       "How critic-routed selected route-credit costs become per-vehicle rewards. "
+                       "negative_cost keeps the old absolute-cost target; relative_mean/zscore "
+                       "use same-vehicle candidate baselines so the vehicle critic sees "
+                       "action-discriminative credit without any actor-only loss."
+                   ))
+    p.add_argument("--dreamer_vehicle_route_credit_reward_normalize",
+                   action=argparse.BooleanOptionalAction, default=False,
+                   help=(
+                       "Normalize relative critic-routed route-credit rewards by per-vehicle "
+                       "candidate cost std before they enter the vehicle critic target."
+                   ))
+    p.add_argument("--dreamer_vehicle_route_credit_reward_temperature", type=float, default=1.0,
+                   help="Scale divisor for non-normalized relative route-credit rewards.")
     p.add_argument("--dreamer_vehicle_route_credit_mode", type=str, default="counterfactual_pressure",
                    choices=[
                        "route_cost", "planned_pressure", "marginal_pressure",
@@ -6105,6 +6259,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dreamer_vehicle_route_credit_pressure_reference", type=str, default="soft",
                    choices=["soft", "argmax", "sequential_argmax"],
                    help="Fleet baseline for critic-routed marginal route-credit modes.")
+    p.add_argument("--dreamer_vehicle_route_credit_pressure_scale", type=str, default="mean",
+                   choices=["mean", "avg", "average", "per_vehicle", "sum", "total", "system", "system_total", "fleet_total"],
+                   help=(
+                       "Scale for critic-routed counterfactual pressure costs. mean preserves the "
+                       "old per-vehicle-average pressure; system_total removes the active-agent "
+                       "normalization so each vehicle critic sees system-level externality scale."
+                   ))
     p.add_argument("--dreamer_vehicle_route_credit_normalize_by_path_length",
                    action=argparse.BooleanOptionalAction, default=False,
                    help="Normalize critic-routed pressure route credit by candidate path edge count.")
