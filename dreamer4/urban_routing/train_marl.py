@@ -348,6 +348,28 @@ def _dreamer_global_return_discount(cfg: Any) -> float:
     return float(getattr(cfg, "gamma", 0.99))
 
 
+def _vehicle_critic_reward_enabled(cfg: Any) -> bool:
+    return (
+        abs(float(getattr(cfg, "dreamer_route_cost_reward_weight", 0.0))) > 1e-12
+        or abs(float(getattr(cfg, "dreamer_vehicle_social_reward_weight", 0.0))) > 1e-12
+    )
+
+
+def _dreamer_vehicle_return_discount(cfg: Any) -> float:
+    """Discount for the per-vehicle critic target.
+
+    Route progress/cost reward keeps unit discount because it represents total
+    trip-duration progress.  Pure social reward ablations may use a conventional
+    discounted return.  Mixed route+social runs intentionally keep the unit
+    discount so the route-duration term retains its physical meaning.
+    """
+    if abs(float(getattr(cfg, "dreamer_route_cost_reward_weight", 0.0))) > 1e-12:
+        return ROUTE_COST_RETURN_DISCOUNT
+    if abs(float(getattr(cfg, "dreamer_vehicle_social_reward_weight", 0.0))) > 1e-12:
+        return float(getattr(cfg, "dreamer_vehicle_social_reward_discount", getattr(cfg, "gamma", 0.99)))
+    return ROUTE_COST_RETURN_DISCOUNT
+
+
 def _enabled_legacy_actor_only_losses(cfg: Any) -> List[str]:
     return [
         name for name in LEGACY_ACTOR_ONLY_LOSS_WEIGHTS
@@ -691,6 +713,10 @@ class TrainConfig:
     dreamer_route_cost_reward_temperature: float = 60.0
     dreamer_route_cost_reward_planned_av_pressure_weight: float = 0.0
     dreamer_route_cost_reward_planned_av_pressure_mode: str = "overlap"
+    dreamer_vehicle_social_reward_weight: float = 0.0
+    dreamer_vehicle_social_reward_source: str = "excess_all_tt"
+    dreamer_vehicle_social_reward_distribution: str = "per_vehicle"
+    dreamer_vehicle_social_reward_discount: float = 0.99
     dreamer_grpo_route_cost_weight: float = 0.0
     dreamer_grpo_planned_av_pressure_weight: float = 0.0
     dreamer_grpo_planned_av_pressure_mode: str = "overlap"
@@ -799,7 +825,9 @@ DREAMER_UPDATE_SCALAR_KEYS = (
     "dreamer_ac_entropy_valid_target_mean",
     "vehicle_value_loss", "vehicle_critic_target_mean", "vehicle_critic_target_std",
     "vehicle_critic_explained_variance", "vehicle_return_norm_mean", "vehicle_return_norm_std",
-    "vehicle_reward_mean", "vehicle_reward_std", "vehicle_return_discount",
+    "vehicle_reward_mean", "vehicle_reward_std",
+    "vehicle_social_reward_mean", "vehicle_social_reward_std",
+    "vehicle_return_discount",
     "critic_target_mean", "critic_target_std", "critic_explained_variance",
     "critic_return_discount",
     "return_norm_mean", "return_norm_std",
@@ -1487,6 +1515,65 @@ def _selected_route_vehicle_rewards_from_cost_matrix(
     return torch.nan_to_num(reward, nan=0.0, posinf=0.0, neginf=0.0)
 
 
+def _vehicle_social_reward_from_decoded(
+    *,
+    wm: UrbanWorldModel,
+    decoded: torch.Tensor,
+    edge_tt: torch.Tensor,
+    selected_idx: torch.Tensor,
+    valid_action_mask: torch.Tensor,
+    reward_weight: float,
+    reward_scale: float,
+    source: str,
+    distribution: str,
+    n_active_av: int,
+) -> torch.Tensor:
+    """Broadcast critic-mediated global/social WM reward to vehicle samples."""
+    n = min(
+        int(selected_idx.reshape(-1).shape[0]),
+        int(valid_action_mask.shape[0]),
+    )
+    if n <= 0 or float(reward_weight) == 0.0:
+        return torch.zeros((max(n, 0),), device=edge_tt.device, dtype=edge_tt.dtype)
+    valid_vehicle = valid_action_mask[:n].to(device=edge_tt.device).any(dim=-1)
+    source_key = str(source or "excess_all_tt").strip().lower()
+    capacities = wm.bpr.capacities.to(device=edge_tt.device, dtype=edge_tt.dtype)
+    v_total = torch.relu(decoded[:, 2].to(device=edge_tt.device, dtype=edge_tt.dtype)) * capacities
+    n_veh = v_total.sum().clamp_min(1.0)
+    all_tt = torch.sum(v_total * edge_tt.to(device=edge_tt.device, dtype=edge_tt.dtype)) / n_veh
+    if source_key in {"all_tt", "mean_tt", "global_tt", "system_tt"}:
+        social_cost = all_tt
+    elif source_key in {"excess_all_tt", "delay", "mean_delay", "excess_tt"}:
+        free_flow = _free_flow_edge_tt_tensor(wm, device=edge_tt.device, dtype=edge_tt.dtype)
+        social_cost = torch.sum(v_total * (edge_tt - free_flow).clamp_min(0.0)) / n_veh
+    elif source_key in {"total_tt", "system_total_tt"}:
+        social_cost = torch.sum(v_total * edge_tt.to(device=edge_tt.device, dtype=edge_tt.dtype))
+    elif source_key in {"total_excess_tt", "system_delay", "total_delay"}:
+        free_flow = _free_flow_edge_tt_tensor(wm, device=edge_tt.device, dtype=edge_tt.dtype)
+        social_cost = torch.sum(v_total * (edge_tt - free_flow).clamp_min(0.0))
+    else:
+        raise ValueError(
+            f"Unsupported dreamer_vehicle_social_reward_source={source!r}; "
+            "expected all_tt, excess_all_tt, total_tt, or total_excess_tt"
+        )
+    distribution_key = str(distribution or "per_vehicle").strip().lower()
+    if distribution_key in {"per_vehicle", "broadcast", "each"}:
+        denom = 1.0
+    elif distribution_key in {"active_av", "active_vehicle", "active_av_mean"}:
+        denom = float(max(int(n_active_av), 1))
+    elif distribution_key in {"valid_vehicle", "valid_av", "valid_agent"}:
+        denom = float(max(int(valid_vehicle.detach().sum().cpu().item()), 1))
+    else:
+        raise ValueError(
+            f"Unsupported dreamer_vehicle_social_reward_distribution={distribution!r}; "
+            "expected per_vehicle, active_av, or valid_vehicle"
+        )
+    reward_scalar = -float(reward_weight) * social_cost * float(reward_scale) / denom
+    reward = torch.full((n,), 0.0, device=edge_tt.device, dtype=edge_tt.dtype)
+    reward = torch.where(valid_vehicle, reward_scalar.expand_as(reward), reward)
+    return torch.nan_to_num(reward, nan=0.0, posinf=0.0, neginf=0.0)
+
+
 def _planned_av_pressure_edge_weights_from_latent(
     *,
     wm: UrbanWorldModel,
@@ -1762,6 +1849,7 @@ def imagined_episode_dynamic_dreamer(
     dreamer_ac_sample_weight_steps: List[torch.Tensor] = []
     dreamer_ac_vehicle_id_steps: List[torch.Tensor] = []
     dreamer_ac_vehicle_reward_steps: List[torch.Tensor] = []
+    dreamer_ac_vehicle_social_reward_steps: List[torch.Tensor] = []
     dreamer_ac_selected_nonzero_fracs: List[float] = []
     critic_contexts: List[torch.Tensor] = []
     rollout_reward_stats_steps: List[Dict[str, float]] = []
@@ -1805,7 +1893,7 @@ def imagined_episode_dynamic_dreamer(
     vehicle_critic_reward_needed = (
         use_discrete_actor_critic
         and bool(getattr(cfg, "dreamer_vehicle_critic", True))
-        and float(getattr(cfg, "dreamer_route_cost_reward_weight", 0.0)) != 0.0
+        and _vehicle_critic_reward_enabled(cfg)
     )
     direct_reward_requires_dynamics_grad = any(
         float(getattr(cfg, name, 0.0)) != 0.0
@@ -1872,6 +1960,7 @@ def imagined_episode_dynamic_dreamer(
         selected_route_idx_for_env = None
         route_adv_for_ac = None
         vehicle_reward_for_ac = None
+        vehicle_social_reward_for_ac = None
         valid_action_mask_for_update = None
         sampled_obs_t = None
 
@@ -2809,23 +2898,68 @@ def imagined_episode_dynamic_dreamer(
                                         dtype=vehicle_reward_costs.dtype,
                                     )
                                 )
-                        vehicle_reward_for_ac = _selected_route_vehicle_rewards_from_cost_matrix(
-                            route_costs=vehicle_reward_costs,
-                            route_valid=vehicle_reward_valid,
-                            selected_idx=selected_route_idx_t_for_update,
-                            reward_weight=float(getattr(cfg, "dreamer_route_cost_reward_weight", 0.0)),
-                            reward_scale=float(getattr(cfg, "vehicle_reward_scale", 1.0)),
-                            reward_mode=str(getattr(cfg, "dreamer_route_cost_reward_mode", "progress_fraction")),
-                            step_interval=float(getattr(cfg, "step_interval", 30.0)),
-                            elapsed_time=torch.from_numpy(elapsed_time_np).to(
-                                device=vehicle_reward_costs.device,
-                                dtype=vehicle_reward_costs.dtype,
-                            ),
-                            progress_cap=float(getattr(cfg, "dreamer_ac_route_credit_progress_cap", 1.0)),
-                            remaining_tt_eps=float(getattr(cfg, "dreamer_ac_route_credit_remaining_tt_eps", 1.0)),
-                            normalize_regret=bool(getattr(cfg, "dreamer_route_cost_reward_normalize_regret", False)),
-                            temperature=float(getattr(cfg, "dreamer_route_cost_reward_temperature", 60.0)),
+                        vehicle_reward_parts: List[torch.Tensor] = []
+                        route_reward_weight = float(getattr(cfg, "dreamer_route_cost_reward_weight", 0.0))
+                        if route_reward_weight != 0.0:
+                            vehicle_reward_parts.append(
+                                _selected_route_vehicle_rewards_from_cost_matrix(
+                                    route_costs=vehicle_reward_costs,
+                                    route_valid=vehicle_reward_valid,
+                                    selected_idx=selected_route_idx_t_for_update,
+                                    reward_weight=route_reward_weight,
+                                    reward_scale=float(getattr(cfg, "vehicle_reward_scale", 1.0)),
+                                    reward_mode=str(getattr(cfg, "dreamer_route_cost_reward_mode", "progress_fraction")),
+                                    step_interval=float(getattr(cfg, "step_interval", 30.0)),
+                                    elapsed_time=torch.from_numpy(elapsed_time_np).to(
+                                        device=vehicle_reward_costs.device,
+                                        dtype=vehicle_reward_costs.dtype,
+                                    ),
+                                    progress_cap=float(getattr(cfg, "dreamer_ac_route_credit_progress_cap", 1.0)),
+                                    remaining_tt_eps=float(getattr(cfg, "dreamer_ac_route_credit_remaining_tt_eps", 1.0)),
+                                    normalize_regret=bool(getattr(cfg, "dreamer_route_cost_reward_normalize_regret", False)),
+                                    temperature=float(getattr(cfg, "dreamer_route_cost_reward_temperature", 60.0)),
+                                )
+                            )
+                        social_reward_weight = float(
+                            getattr(cfg, "dreamer_vehicle_social_reward_weight", 0.0)
                         )
+                        if social_reward_weight != 0.0:
+                            vehicle_social_reward_for_ac = _vehicle_social_reward_from_decoded(
+                                wm=wm,
+                                decoded=edge_dyn_next_for_vehicle_reward,
+                                edge_tt=edge_tt_next_for_vehicle_reward,
+                                selected_idx=selected_route_idx_t_for_update,
+                                valid_action_mask=valid_action_mask_for_update,
+                                reward_weight=social_reward_weight,
+                                reward_scale=float(getattr(cfg, "vehicle_reward_scale", 1.0)),
+                                source=str(
+                                    getattr(
+                                        cfg,
+                                        "dreamer_vehicle_social_reward_source",
+                                        "excess_all_tt",
+                                    )
+                                ),
+                                distribution=str(
+                                    getattr(
+                                        cfg,
+                                        "dreamer_vehicle_social_reward_distribution",
+                                        "per_vehicle",
+                                    )
+                                ),
+                                n_active_av=n_active_av,
+                            )
+                            vehicle_reward_parts.append(vehicle_social_reward_for_ac)
+                        if vehicle_reward_parts:
+                            vehicle_reward_for_ac = torch.stack(
+                                [
+                                    part.to(
+                                        device=vehicle_reward_costs.device,
+                                        dtype=vehicle_reward_costs.dtype,
+                                    )
+                                    for part in vehicle_reward_parts
+                                ],
+                                dim=0,
+                            ).sum(dim=0)
             ac_sample_weight = None
             if bool(getattr(cfg, "dreamer_ac_weight_by_active_agents", True)):
                 n_weight = int(selected_route_idx_t_for_update.reshape(-1).shape[0])
@@ -2852,6 +2986,7 @@ def imagined_episode_dynamic_dreamer(
                 sample_weight_steps=dreamer_ac_sample_weight_steps,
                 vehicle_id_steps=dreamer_ac_vehicle_id_steps,
                 vehicle_reward_steps=dreamer_ac_vehicle_reward_steps,
+                vehicle_social_reward_steps=dreamer_ac_vehicle_social_reward_steps,
                 selected_nonzero_fracs=dreamer_ac_selected_nonzero_fracs,
                 obs=sampled_obs_t,
                 selected_idx=selected_route_idx_t_for_update,
@@ -2862,6 +2997,7 @@ def imagined_episode_dynamic_dreamer(
                 sample_weight=ac_sample_weight,
                 vehicle_id=vehicle_id_t,
                 vehicle_reward=vehicle_reward_for_ac,
+                vehicle_social_reward=vehicle_social_reward_for_ac,
             )
         reward_requires_grad = bool(reward_t.requires_grad)
         if reward_requires_grad:
@@ -3076,6 +3212,7 @@ def imagined_episode_dynamic_dreamer(
         sample_weight_steps=dreamer_ac_sample_weight_steps,
         vehicle_id_steps=dreamer_ac_vehicle_id_steps,
         vehicle_reward_steps=dreamer_ac_vehicle_reward_steps,
+        vehicle_social_reward_steps=dreamer_ac_vehicle_social_reward_steps,
         device=device,
         dtype=z.dtype,
         obs_dim=int(getattr(actor, "obs_dim", 0)),
@@ -3161,6 +3298,14 @@ def imagined_episode_dynamic_dreamer(
         "vehicle_reward_std": (
             float(ac_samples["dreamer_ac_vehicle_reward"].detach().std(unbiased=False).cpu().item())
             if ac_samples["dreamer_ac_vehicle_reward"].numel() > 1 else 0.0
+        ),
+        "vehicle_social_reward_mean": (
+            float(ac_samples["dreamer_ac_vehicle_social_reward"].detach().mean().cpu().item())
+            if ac_samples["dreamer_ac_vehicle_social_reward"].numel() > 0 else 0.0
+        ),
+        "vehicle_social_reward_std": (
+            float(ac_samples["dreamer_ac_vehicle_social_reward"].detach().std(unbiased=False).cpu().item())
+            if ac_samples["dreamer_ac_vehicle_social_reward"].numel() > 1 else 0.0
         ),
         "hdv_background_sum": float(hdv_background_edge.detach().sum().cpu().item()) if hdv_background_edge is not None else 0.0,
         "hdv_background_weight": float(getattr(cfg, "dreamer_hdv_background_weight", 0.0)) if hdv_background_edge is not None else 0.0,
@@ -3335,6 +3480,8 @@ def dreamer_update(
     vehicle_critic_explained_variances: List[float] = []
     vehicle_reward_means: List[float] = []
     vehicle_reward_stds: List[float] = []
+    vehicle_social_reward_means: List[float] = []
+    vehicle_social_reward_stds: List[float] = []
     skipped_actor_trajs = 0
     skip_reason_counts: Dict[str, int] = {}
     skipped_traj_ids: List[int] = []
@@ -3358,7 +3505,7 @@ def dreamer_update(
         and vehicle_critic_optimizer is not None
     )
     critic_return_discount = _dreamer_global_return_discount(cfg)
-    vehicle_return_discount = ROUTE_COST_RETURN_DISCOUNT
+    vehicle_return_discount = _dreamer_vehicle_return_discount(cfg)
 
     for traj in trajectories:
         traj_id = int(traj.get("traj_id", -1))
@@ -3549,6 +3696,19 @@ def dreamer_update(
                             float(reward_used.detach().std(unbiased=False).cpu().item())
                             if int(reward_used.numel()) > 1 else 0.0
                         )
+                        vehicle_social_reward = traj.get("dreamer_ac_vehicle_social_reward")
+                        if torch.is_tensor(vehicle_social_reward) and vehicle_social_reward.numel() > 0:
+                            social_used = vehicle_social_reward.reshape(-1)[:n_vehicle_samples].to(
+                                device=vehicle_obs_n.device,
+                                dtype=vehicle_obs_n.dtype,
+                            )[finite_vehicle]
+                            vehicle_social_reward_means.append(
+                                float(social_used.detach().mean().cpu().item())
+                            )
+                            vehicle_social_reward_stds.append(
+                                float(social_used.detach().std(unbiased=False).cpu().item())
+                                if int(social_used.numel()) > 1 else 0.0
+                            )
                         vehicle_target_var = torch.var(vehicle_targets.detach(), unbiased=False)
                         if (
                             bool(torch.isfinite(vehicle_target_var).detach().cpu().item())
@@ -3968,6 +4128,8 @@ def dreamer_update(
             "vehicle_return_norm_std": 1.0,
             "vehicle_reward_mean": 0.0,
             "vehicle_reward_std": 0.0,
+            "vehicle_social_reward_mean": 0.0,
+            "vehicle_social_reward_std": 0.0,
             "vehicle_return_discount": float(vehicle_return_discount),
             "critic_target_mean": 0.0,
             "critic_target_std": 0.0,
@@ -4147,6 +4309,12 @@ def dreamer_update(
         ),
         "vehicle_reward_mean": float(np.mean(vehicle_reward_means)) if vehicle_reward_means else 0.0,
         "vehicle_reward_std": float(np.mean(vehicle_reward_stds)) if vehicle_reward_stds else 0.0,
+        "vehicle_social_reward_mean": (
+            float(np.mean(vehicle_social_reward_means)) if vehicle_social_reward_means else 0.0
+        ),
+        "vehicle_social_reward_std": (
+            float(np.mean(vehicle_social_reward_stds)) if vehicle_social_reward_stds else 0.0
+        ),
         "vehicle_return_discount": float(vehicle_return_discount),
         "critic_target_mean": float(np.mean(critic_target_means)) if critic_target_means else 0.0,
         "critic_target_std": float(np.mean(critic_target_stds)) if critic_target_stds else 0.0,
@@ -5024,6 +5192,10 @@ def train(cfg: TrainConfig) -> None:
                 "dreamer_base_reward": float(ep_metrics.get("dreamer_base_reward", 0.0)),
                 "dreamer_ac_sample_count": float(ep_metrics.get("dreamer_ac_sample_count", 0.0)),
                 "dreamer_ac_selected_nonzero_frac": float(ep_metrics.get("dreamer_ac_selected_nonzero_frac", 0.0)),
+                "vehicle_reward_mean": float(ep_metrics.get("vehicle_reward_mean", 0.0)),
+                "vehicle_reward_std": float(ep_metrics.get("vehicle_reward_std", 0.0)),
+                "vehicle_social_reward_mean": float(ep_metrics.get("vehicle_social_reward_mean", 0.0)),
+                "vehicle_social_reward_std": float(ep_metrics.get("vehicle_social_reward_std", 0.0)),
                 "dreamer_ac_entropy_loss": float(ep_metrics.get("dreamer_ac_entropy_loss", 0.0)),
                 "dreamer_ac_entropy_floor_loss": float(ep_metrics.get("dreamer_ac_entropy_floor_loss", 0.0)),
                 "dreamer_ac_entropy_target": float(ep_metrics.get("dreamer_ac_entropy_target", 0.0)),
@@ -5127,6 +5299,8 @@ def train(cfg: TrainConfig) -> None:
                 recent_vehicle_target_std = np.mean(stats_history["vehicle_critic_target_std"][-cfg.log_every:]) if stats_history["vehicle_critic_target_std"] else 0.0
                 recent_vehicle_reward_mean = np.mean(stats_history["vehicle_reward_mean"][-cfg.log_every:]) if stats_history["vehicle_reward_mean"] else 0.0
                 recent_vehicle_reward_std = np.mean(stats_history["vehicle_reward_std"][-cfg.log_every:]) if stats_history["vehicle_reward_std"] else 0.0
+                recent_vehicle_social_mean = np.mean(stats_history["vehicle_social_reward_mean"][-cfg.log_every:]) if stats_history["vehicle_social_reward_mean"] else 0.0
+                recent_vehicle_social_std = np.mean(stats_history["vehicle_social_reward_std"][-cfg.log_every:]) if stats_history["vehicle_social_reward_std"] else 0.0
                 recent_vehicle_ret_std = np.mean(stats_history["vehicle_return_norm_std"][-cfg.log_every:]) if stats_history["vehicle_return_norm_std"] else 1.0
                 recent_v_ev = np.mean(stats_history["critic_explained_variance"][-cfg.log_every:]) if stats_history["critic_explained_variance"] else 0.0
                 recent_ret_std = np.mean(stats_history["return_norm_std"][-cfg.log_every:]) if stats_history["return_norm_std"] else 1.0
@@ -5177,6 +5351,7 @@ def train(cfg: TrainConfig) -> None:
                     f"ent_floor={recent_ac_entropy_floor:.4f}/{recent_ac_entropy_target:.3f} "
                     f"v_ev={recent_v_ev:.3f} ret_std={recent_ret_std:.3f} | "
                     f"veh_vf={recent_vehicle_vf:.4f} veh_rew={recent_vehicle_reward_mean:.2f}/{recent_vehicle_reward_std:.2f} "
+                    f"veh_social={recent_vehicle_social_mean:.2f}/{recent_vehicle_social_std:.2f} "
                     f"veh_tgt_std={recent_vehicle_target_std:.2f} veh_ret_std={recent_vehicle_ret_std:.2f} | "
                     f"hdv_resp_bg={recent_hdv_response_bg:.4f} | "
                     f"timing(ep={episode_wall_sec:.2f}s rollout={_rollout_wall_sec:.2f}s hdv={_hdv_response_wall_sec:.2f}s baseline={_baseline_wall_sec:.2f}s update={_update_wall_sec:.2f}s group={rollout_group_size}) | "
@@ -5588,6 +5763,37 @@ def build_arg_parser() -> argparse.ArgumentParser:
                        "How to weight planned AV pressure in route-cost reward. overlap is pure "
                        "planned path overlap; excess_tt_ratio weights pressure by WM decoded "
                        "travel-time excess over free-flow."
+                   ))
+    p.add_argument("--dreamer_vehicle_social_reward_weight", type=float, default=0.0,
+                   help=(
+                       "Critic-mediated per-vehicle social reward weight. This broadcasts a WM "
+                       "global congestion/travel-time readout into dreamer_ac_vehicle_reward, so "
+                       "it affects the actor only through the per-vehicle critic advantage."
+                   ))
+    p.add_argument("--dreamer_vehicle_social_reward_source", type=str, default="excess_all_tt",
+                   choices=[
+                       "all_tt", "mean_tt", "global_tt", "system_tt",
+                       "excess_all_tt", "delay", "mean_delay", "excess_tt",
+                       "total_tt", "system_total_tt",
+                       "total_excess_tt", "system_delay", "total_delay",
+                   ],
+                   help=(
+                       "WM decoded social-cost readout for --dreamer_vehicle_social_reward_weight. "
+                       "excess_all_tt is mean vehicle delay over free-flow; all_tt is mean travel "
+                       "time; total_* variants use system totals and should normally be paired "
+                       "with active_av/valid_vehicle distribution."
+                   ))
+    p.add_argument("--dreamer_vehicle_social_reward_distribution", type=str, default="per_vehicle",
+                   choices=["per_vehicle", "broadcast", "each", "active_av", "active_vehicle", "active_av_mean", "valid_vehicle", "valid_av", "valid_agent"],
+                   help=(
+                       "How the scalar social reward is assigned to active vehicle samples. "
+                       "per_vehicle broadcasts the same team reward; active_av/valid_vehicle "
+                       "divide by a vehicle count to keep the sum near the scalar global reward."
+                   ))
+    p.add_argument("--dreamer_vehicle_social_reward_discount", type=float, default=0.99,
+                   help=(
+                       "Per-vehicle critic discount used only for pure social-reward ablations. "
+                       "If route-cost/progress reward is enabled, vehicle return discount remains 1.0."
                    ))
     p.add_argument("--dreamer_expected_cost_weight", type=float, default=0.0,
                    help=(

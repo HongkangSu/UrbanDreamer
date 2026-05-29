@@ -74,6 +74,8 @@ def append_discrete_actor_critic_samples(
     vehicle_id_steps: Optional[List[torch.Tensor]] = None,
     vehicle_reward: Optional[torch.Tensor] = None,
     vehicle_reward_steps: Optional[List[torch.Tensor]] = None,
+    vehicle_social_reward: Optional[torch.Tensor] = None,
+    vehicle_social_reward_steps: Optional[List[torch.Tensor]] = None,
 ) -> int:
     """Append valid per-vehicle sampled route decisions for actor-critic loss."""
     if obs is None or selected_idx is None or route_valid is None:
@@ -158,6 +160,19 @@ def append_discrete_actor_critic_samples(
             vehicle_reward_steps.append(
                 torch.zeros((int(obs_used.shape[0]),), device=obs_used.device, dtype=obs_used.dtype)
             )
+    if vehicle_social_reward_steps is not None:
+        if torch.is_tensor(vehicle_social_reward) and vehicle_social_reward.numel() > 0:
+            social_reward_n = vehicle_social_reward.reshape(-1)[:n].to(device=obs_n.device, dtype=obs_n.dtype)
+            if int(social_reward_n.numel()) == n:
+                vehicle_social_reward_steps.append(social_reward_n[usable].detach())
+            else:
+                vehicle_social_reward_steps.append(
+                    torch.zeros((int(obs_used.shape[0]),), device=obs_used.device, dtype=obs_used.dtype)
+                )
+        else:
+            vehicle_social_reward_steps.append(
+                torch.zeros((int(obs_used.shape[0]),), device=obs_used.device, dtype=obs_used.dtype)
+            )
     step_index_steps.append(
         torch.full(
             (int(obs_used.shape[0]),),
@@ -183,6 +198,7 @@ def pack_discrete_actor_critic_samples(
     sample_weight_steps: Optional[List[torch.Tensor]] = None,
     vehicle_id_steps: Optional[List[torch.Tensor]] = None,
     vehicle_reward_steps: Optional[List[torch.Tensor]] = None,
+    vehicle_social_reward_steps: Optional[List[torch.Tensor]] = None,
     device: torch.device,
     dtype: torch.dtype,
     obs_dim: int,
@@ -215,6 +231,11 @@ def pack_discrete_actor_critic_samples(
             vehicle_reward_cat = torch.cat(vehicle_reward_steps, dim=0).to(device=device, dtype=dtype)
             if int(vehicle_reward_cat.numel()) == int(selected.numel()):
                 vehicle_reward = vehicle_reward_cat
+        vehicle_social_reward = torch.zeros((int(selected.numel()),), device=device, dtype=dtype)
+        if vehicle_social_reward_steps:
+            social_reward_cat = torch.cat(vehicle_social_reward_steps, dim=0).to(device=device, dtype=dtype)
+            if int(social_reward_cat.numel()) == int(selected.numel()):
+                vehicle_social_reward = social_reward_cat
         return {
             "dreamer_ac_obs": torch.cat(obs_steps, dim=0),
             "dreamer_ac_selected": selected,
@@ -225,6 +246,7 @@ def pack_discrete_actor_critic_samples(
             "dreamer_ac_sample_weight": sample_weight,
             "dreamer_ac_vehicle_id": vehicle_id,
             "dreamer_ac_vehicle_reward": vehicle_reward,
+            "dreamer_ac_vehicle_social_reward": vehicle_social_reward,
             "dreamer_ac_sample_adv": torch.zeros((0,), device=device, dtype=dtype),
         }
     return {
@@ -237,6 +259,7 @@ def pack_discrete_actor_critic_samples(
         "dreamer_ac_sample_weight": torch.zeros((0,), device=device, dtype=dtype),
         "dreamer_ac_vehicle_id": torch.zeros((0,), device=device, dtype=torch.long),
         "dreamer_ac_vehicle_reward": torch.zeros((0,), device=device, dtype=dtype),
+        "dreamer_ac_vehicle_social_reward": torch.zeros((0,), device=device, dtype=dtype),
         "dreamer_ac_sample_adv": torch.zeros((0,), device=device, dtype=dtype),
     }
 
