@@ -53,6 +53,176 @@ def _masked_log_probs(
     return torch.log_softmax(masked_logits, dim=-1)
 
 
+def _policy_distribution_stats(log_probs: torch.Tensor, sample_weight: torch.Tensor) -> Dict[str, float]:
+    if int(log_probs.numel()) <= 0:
+        return {
+            "top1_prob_mean": 0.0,
+            "argmax_nonzero_frac": 0.0,
+            "argmax_route0_frac": 0.0,
+            "argmax_route1_frac": 0.0,
+            "argmax_route2_frac": 0.0,
+            "argmax_route3_frac": 0.0,
+            "argmax_max_route_frac": 0.0,
+        }
+    probs = torch.exp(log_probs.detach())
+    argmax = torch.argmax(log_probs.detach(), dim=-1)
+    if torch.is_tensor(sample_weight) and int(sample_weight.numel()) == int(argmax.numel()):
+        weights = sample_weight.detach().to(device=log_probs.device, dtype=log_probs.dtype).clamp_min(0.0)
+    else:
+        weights = torch.ones((int(argmax.numel()),), device=log_probs.device, dtype=log_probs.dtype)
+    weight_sum = weights.sum().clamp_min(1e-6)
+    route_fracs: List[float] = []
+    for route_idx in range(4):
+        if int(log_probs.shape[1]) > route_idx:
+            frac = ((argmax == route_idx).to(dtype=weights.dtype) * weights).sum() / weight_sum
+            route_fracs.append(float(frac.detach().cpu().item()))
+        else:
+            route_fracs.append(0.0)
+    top1 = (probs.max(dim=-1).values * weights).sum() / weight_sum
+    nonzero = ((argmax != 0).to(dtype=weights.dtype) * weights).sum() / weight_sum
+    return {
+        "top1_prob_mean": float(top1.detach().cpu().item()),
+        "argmax_nonzero_frac": float(nonzero.detach().cpu().item()),
+        "argmax_route0_frac": route_fracs[0],
+        "argmax_route1_frac": route_fracs[1],
+        "argmax_route2_frac": route_fracs[2],
+        "argmax_route3_frac": route_fracs[3],
+        "argmax_max_route_frac": max(route_fracs),
+    }
+
+
+def discrete_ac_policy_snapshot(
+    actor,
+    trajectories: List[Dict[str, object]],
+    *,
+    temperature: float,
+    max_samples: int = 4096,
+) -> Dict[str, object]:
+    """Capture the current actor distribution on packed discrete AC samples."""
+    obs_parts: List[torch.Tensor] = []
+    valid_parts: List[torch.Tensor] = []
+    weight_parts: List[torch.Tensor] = []
+    for traj in trajectories:
+        obs = traj.get("dreamer_ac_obs")
+        valid = traj.get("dreamer_ac_valid")
+        if not (torch.is_tensor(obs) and torch.is_tensor(valid) and obs.numel() > 0 and valid.numel() > 0):
+            continue
+        n = min(int(obs.shape[0]), int(valid.shape[0]))
+        if n <= 0:
+            continue
+        obs_parts.append(obs[:n].detach())
+        valid_parts.append(valid[:n].detach())
+        sample_weight = traj.get("dreamer_ac_sample_weight")
+        if torch.is_tensor(sample_weight) and sample_weight.numel() > 0:
+            weight_n = sample_weight.reshape(-1)[:n].detach()
+            if int(weight_n.numel()) == n:
+                weight_parts.append(weight_n.to(device=obs.device, dtype=obs.dtype).clamp_min(0.0))
+            else:
+                weight_parts.append(torch.ones((n,), device=obs.device, dtype=obs.dtype))
+        else:
+            weight_parts.append(torch.ones((n,), device=obs.device, dtype=obs.dtype))
+    if not obs_parts:
+        return {"sample_count": 0.0}
+
+    obs_cat = torch.cat(obs_parts, dim=0)
+    valid_cat = torch.cat(valid_parts, dim=0).to(device=obs_cat.device)
+    weight_cat = torch.cat(weight_parts, dim=0).to(device=obs_cat.device, dtype=obs_cat.dtype)
+    n_total = int(obs_cat.shape[0])
+    max_n = int(max_samples)
+    if max_n > 0 and n_total > max_n:
+        # Deterministic stride keeps the diagnostic representative without
+        # introducing another RNG source into the training loop.
+        idx = torch.linspace(0, n_total - 1, steps=max_n, device=obs_cat.device).round().to(dtype=torch.long)
+        obs_cat = obs_cat.index_select(0, idx)
+        valid_cat = valid_cat.index_select(0, idx)
+        weight_cat = weight_cat.index_select(0, idx)
+
+    with torch.no_grad():
+        logits = actor.forward_logits(obs_cat)
+        log_probs = _masked_log_probs(logits, valid_cat, temperature=float(temperature)).detach()
+    stats = _policy_distribution_stats(log_probs, weight_cat)
+    return {
+        "obs": obs_cat.detach(),
+        "valid": valid_cat.detach(),
+        "sample_weight": weight_cat.detach(),
+        "old_log_probs": log_probs,
+        "old_argmax": torch.argmax(log_probs, dim=-1).detach(),
+        "sample_count": float(int(obs_cat.shape[0])),
+        "old_top1_prob_mean": stats["top1_prob_mean"],
+        "old_argmax_nonzero_frac": stats["argmax_nonzero_frac"],
+        "old_argmax_route0_frac": stats["argmax_route0_frac"],
+        "old_argmax_route1_frac": stats["argmax_route1_frac"],
+        "old_argmax_route2_frac": stats["argmax_route2_frac"],
+        "old_argmax_route3_frac": stats["argmax_route3_frac"],
+        "old_argmax_max_route_frac": stats["argmax_max_route_frac"],
+    }
+
+
+def discrete_ac_policy_shift_from_snapshot(
+    actor,
+    snapshot: Dict[str, object],
+    *,
+    temperature: float,
+) -> Dict[str, float]:
+    """Measure post-update policy drift from a pre-update AC snapshot."""
+    obs = snapshot.get("obs")
+    valid = snapshot.get("valid")
+    old_log_probs = snapshot.get("old_log_probs")
+    sample_weight = snapshot.get("sample_weight")
+    old_argmax = snapshot.get("old_argmax")
+    if not (
+        torch.is_tensor(obs)
+        and torch.is_tensor(valid)
+        and torch.is_tensor(old_log_probs)
+        and obs.numel() > 0
+        and valid.numel() > 0
+        and old_log_probs.numel() > 0
+    ):
+        return {
+            "sample_count": 0.0,
+            "kl": 0.0,
+            "argmax_change_frac": 0.0,
+            "top1_prob_mean": 0.0,
+            "argmax_nonzero_frac": 0.0,
+            "argmax_route0_frac": 0.0,
+            "argmax_route1_frac": 0.0,
+            "argmax_route2_frac": 0.0,
+            "argmax_route3_frac": 0.0,
+            "argmax_max_route_frac": 0.0,
+        }
+    with torch.no_grad():
+        logits = actor.forward_logits(obs)
+        new_log_probs = _masked_log_probs(logits, valid.to(device=logits.device), temperature=float(temperature)).detach()
+        old_lp = old_log_probs.to(device=new_log_probs.device, dtype=new_log_probs.dtype)
+        old_probs = torch.exp(old_lp)
+        if torch.is_tensor(sample_weight) and int(sample_weight.numel()) == int(new_log_probs.shape[0]):
+            weights = sample_weight.to(device=new_log_probs.device, dtype=new_log_probs.dtype).clamp_min(0.0)
+        else:
+            weights = torch.ones((int(new_log_probs.shape[0]),), device=new_log_probs.device, dtype=new_log_probs.dtype)
+        kl_per = (old_probs * (old_lp - new_log_probs)).sum(dim=-1)
+        finite = torch.isfinite(kl_per) & torch.isfinite(weights)
+        if bool(finite.any().detach().cpu().item()):
+            weight_sum = weights[finite].sum().clamp_min(1e-6)
+            kl = (kl_per[finite] * weights[finite]).sum() / weight_sum
+        else:
+            kl = torch.zeros((), device=new_log_probs.device, dtype=new_log_probs.dtype)
+        new_argmax = torch.argmax(new_log_probs, dim=-1)
+        if torch.is_tensor(old_argmax) and int(old_argmax.numel()) == int(new_argmax.numel()):
+            old_argmax_n = old_argmax.to(device=new_argmax.device)
+            argmax_change = ((new_argmax != old_argmax_n).to(dtype=weights.dtype) * weights).sum() / weights.sum().clamp_min(1e-6)
+        else:
+            argmax_change = torch.zeros((), device=new_log_probs.device, dtype=new_log_probs.dtype)
+    stats = _policy_distribution_stats(new_log_probs, weights)
+    stats.update(
+        {
+            "sample_count": float(int(new_log_probs.shape[0])),
+            "kl": float(kl.detach().cpu().item()),
+            "argmax_change_frac": float(argmax_change.detach().cpu().item()),
+        }
+    )
+    return stats
+
+
 def append_discrete_actor_critic_samples(
     *,
     obs_steps: List[torch.Tensor],
@@ -338,6 +508,13 @@ def _empty_stats() -> Dict[str, float]:
         "dreamer_ac_selected_route1_frac": 0.0,
         "dreamer_ac_selected_route2_frac": 0.0,
         "dreamer_ac_selected_route3_frac": 0.0,
+        "dreamer_ac_policy_argmax_nonzero_frac": 0.0,
+        "dreamer_ac_policy_argmax_route0_frac": 0.0,
+        "dreamer_ac_policy_argmax_route1_frac": 0.0,
+        "dreamer_ac_policy_argmax_route2_frac": 0.0,
+        "dreamer_ac_policy_argmax_route3_frac": 0.0,
+        "dreamer_ac_policy_argmax_max_route_frac": 0.0,
+        "dreamer_ac_policy_top1_prob_mean": 0.0,
         "dreamer_ac_sample_count": 0.0,
         "dreamer_ac_policy_kl": 0.0,
         "dreamer_ac_clip_frac": 0.0,
@@ -502,6 +679,17 @@ def discrete_actor_critic_policy_loss(
     loss = pg_loss - float(entropy_coef) * entropy_loss + float(entropy_floor_coef) * entropy_floor_loss
     stats = _empty_stats()
     selected_used = selected_n[finite]
+    log_probs_used = log_probs[finite]
+    probs_used = probs[finite]
+    policy_argmax_used = torch.argmax(log_probs_used.detach(), dim=-1)
+    policy_top1_prob = probs_used.detach().max(dim=-1).values
+    policy_argmax_route_fracs = []
+    for route_idx in range(4):
+        if int(log_probs_used.shape[1]) > route_idx:
+            frac = (policy_argmax_used == route_idx).to(dtype=torch.float32).mean()
+            policy_argmax_route_fracs.append(float(frac.detach().cpu().item()))
+        else:
+            policy_argmax_route_fracs.append(0.0)
     stats.update(
         {
             "dreamer_ac_loss": float(loss.detach().cpu().item()),
@@ -539,6 +727,17 @@ def discrete_actor_critic_policy_loss(
             ),
             "dreamer_ac_selected_route3_frac": float(
                 (selected_used == 3).to(dtype=torch.float32).mean().detach().cpu().item()
+            ),
+            "dreamer_ac_policy_argmax_nonzero_frac": float(
+                (policy_argmax_used != 0).to(dtype=torch.float32).mean().detach().cpu().item()
+            ),
+            "dreamer_ac_policy_argmax_route0_frac": policy_argmax_route_fracs[0],
+            "dreamer_ac_policy_argmax_route1_frac": policy_argmax_route_fracs[1],
+            "dreamer_ac_policy_argmax_route2_frac": policy_argmax_route_fracs[2],
+            "dreamer_ac_policy_argmax_route3_frac": policy_argmax_route_fracs[3],
+            "dreamer_ac_policy_argmax_max_route_frac": max(policy_argmax_route_fracs),
+            "dreamer_ac_policy_top1_prob_mean": float(
+                policy_top1_prob.mean().detach().cpu().item()
             ),
             "dreamer_ac_sample_count": float(int(adv.numel())),
             "dreamer_ac_policy_kl": float(approx_kl.mean().cpu().item()) if int(approx_kl.numel()) > 0 else 0.0,
