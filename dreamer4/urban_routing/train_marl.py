@@ -315,6 +315,27 @@ def _polyak_update_module(target: nn.Module, source: nn.Module, tau: float) -> N
                 target_buffer.copy_(source_buffer)
 
 
+def _scheduled_actor_lr(cfg: Any, base_lr: float, episode: int) -> float:
+    start = int(getattr(cfg, "dreamer_actor_lr_decay_start_episode", -1))
+    final_scale = max(float(getattr(cfg, "dreamer_actor_lr_final_scale", 1.0)), 0.0)
+    if start < 0 or final_scale == 1.0:
+        return float(base_lr)
+    end = int(getattr(cfg, "dreamer_actor_lr_decay_end_episode", start))
+    if int(episode) < start:
+        scale = 1.0
+    elif end <= start:
+        scale = final_scale
+    else:
+        progress = min(max((float(episode) - float(start)) / float(end - start), 0.0), 1.0)
+        scale = 1.0 + (final_scale - 1.0) * progress
+    return max(float(base_lr) * float(scale), 0.0)
+
+
+def _set_optimizer_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:
+    for group in optimizer.param_groups:
+        group["lr"] = float(lr)
+
+
 def _dreamer_global_return_discount(cfg: Any) -> float:
     """Use unit discount only when the scalar reward is route-duration based.
 
@@ -744,6 +765,9 @@ class TrainConfig:
     dreamer_vehicle_critic_return_normalizer: bool = True
     dreamer_allow_legacy_actor_only_losses: bool = False
     dreamer_actor_lr: float = 0.0  # 0 keeps legacy cfg.lr
+    dreamer_actor_lr_decay_start_episode: int = -1
+    dreamer_actor_lr_decay_end_episode: int = -1
+    dreamer_actor_lr_final_scale: float = 1.0
     dreamer_critic_lr: float = 0.0  # 0 keeps legacy cfg.lr
     dreamer_actor_objective: str = "discrete_actor_critic"  # direct_return | critic_q | direct_plus_q | discrete_actor_critic
     dreamer_actor_q_weight: float = 1.0
@@ -5084,6 +5108,7 @@ def train(cfg: TrainConfig) -> None:
     policy = actor
     actor_lr = float(cfg.dreamer_actor_lr) if float(getattr(cfg, "dreamer_actor_lr", 0.0)) > 0.0 else float(cfg.lr)
     critic_lr = float(cfg.dreamer_critic_lr) if float(getattr(cfg, "dreamer_critic_lr", 0.0)) > 0.0 else float(cfg.lr)
+    actor_base_lr = float(actor_lr)
     vehicle_critic_lr = (
         float(cfg.dreamer_vehicle_critic_lr)
         if float(getattr(cfg, "dreamer_vehicle_critic_lr", 0.0)) > 0.0
@@ -5098,7 +5123,7 @@ def train(cfg: TrainConfig) -> None:
     )
     critic_return_discount = _dreamer_global_return_discount(cfg)
     logger.info(
-        "Dreamer CTDE mainline active: actor_obs_dim=%d n_routes=%d d_spatial=%d batch_eps=%d actor_h=%d critic_variant=%s critic_aggregation=%s critic_context_dim=%d slow_critic_tau=%.4f return_norm=%s actor_lr=%.2e critic_lr=%.2e vehicle_critic=%s vehicle_critic_context_dim=%d vehicle_critic_lr=%.2e critic_discount=%.4f vehicle_discount=%.4f",
+        "Dreamer CTDE mainline active: actor_obs_dim=%d n_routes=%d d_spatial=%d batch_eps=%d actor_h=%d critic_variant=%s critic_aggregation=%s critic_context_dim=%d slow_critic_tau=%.4f return_norm=%s actor_lr=%.2e actor_lr_decay=%d->%d@%.3f critic_lr=%.2e vehicle_critic=%s vehicle_critic_context_dim=%d vehicle_critic_lr=%.2e critic_discount=%.4f vehicle_discount=%.4f",
         obs_dim,
         int(cfg.n_routes),
         int(wm.d_spatial),
@@ -5110,6 +5135,9 @@ def train(cfg: TrainConfig) -> None:
         float(getattr(cfg, "dreamer_slow_critic_tau", 0.0)) if target_critic is not None else 0.0,
         str(bool(getattr(cfg, "dreamer_return_normalizer", True))),
         actor_lr,
+        int(getattr(cfg, "dreamer_actor_lr_decay_start_episode", -1)),
+        int(getattr(cfg, "dreamer_actor_lr_decay_end_episode", -1)),
+        float(getattr(cfg, "dreamer_actor_lr_final_scale", 1.0)),
         critic_lr,
         str(vehicle_critic is not None),
         int(getattr(vehicle_critic, "context_dim", 0)) if vehicle_critic is not None else 0,
@@ -5427,6 +5455,8 @@ def train(cfg: TrainConfig) -> None:
             target_episode = start_episode + int(cfg.n_total_episodes)
 
         for episode in range(start_episode, target_episode):
+            actor_lr_episode = _scheduled_actor_lr(cfg, actor_base_lr, episode)
+            _set_optimizer_lr(actor_optimizer, actor_lr_episode)
             actor.train()
             critic.train()
             if target_critic is not None:
@@ -6162,6 +6192,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    ))
     p.add_argument("--dreamer_actor_lr", type=float, default=0.0,
                    help="Actor learning rate override for Dreamer CTDE. <=0 uses --lr.")
+    p.add_argument("--dreamer_actor_lr_decay_start_episode", type=int, default=-1,
+                   help="Episode index where actor LR starts linearly decaying. <0 disables decay.")
+    p.add_argument("--dreamer_actor_lr_decay_end_episode", type=int, default=-1,
+                   help="Episode index where actor LR reaches --dreamer_actor_lr_final_scale * base LR.")
+    p.add_argument("--dreamer_actor_lr_final_scale", type=float, default=1.0,
+                   help="Final actor LR scale after decay. 0 freezes actor updates while critics can continue.")
     p.add_argument("--dreamer_critic_lr", type=float, default=0.0,
                    help="Critic learning rate override for Dreamer CTDE. <=0 uses --lr.")
     p.add_argument("--dreamer_actor_objective", type=str, default="discrete_actor_critic",
