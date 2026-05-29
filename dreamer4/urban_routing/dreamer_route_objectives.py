@@ -1274,17 +1274,27 @@ def _sample_masked_route_actions(
     route_valid: torch.Tensor,
     *,
     temperature: float,
+    mode: str = "sample",
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Sample route actions from valid candidates and return hard probs/log-probs.
+    """Select route actions from valid candidates and return hard probs/log-probs.
 
     The hard one-hot route probabilities drive the imagined environment.  The
-    selected log-probabilities are used by rollout-level GRPO, keeping the
-    training signal stochastic instead of differentiating through argmax.
+    selected log-probabilities are used by score-function losses.  ``sample``
+    keeps the historical stochastic rollout behavior; ``argmax`` matches
+    deterministic SUMO policy execution while still training through the
+    selected action log-probability.
     """
     if logits.dim() != 2:
         raise ValueError(f"logits must be 2D, got {tuple(logits.shape)}")
     if route_valid.shape != logits.shape:
         raise ValueError(f"route_valid shape {tuple(route_valid.shape)} must match logits {tuple(logits.shape)}")
+    mode_norm = str(mode or "sample").strip().lower()
+    if mode_norm in {"stochastic", "sampled", "sampling"}:
+        mode_norm = "sample"
+    elif mode_norm in {"deterministic", "greedy", "eval", "auto"}:
+        mode_norm = "argmax"
+    if mode_norm not in {"sample", "argmax"}:
+        raise ValueError(f"unsupported route action selection mode={mode!r}")
     large = torch.finfo(logits.dtype).max / 4.0
     valid = route_valid.to(device=logits.device)
     agent_has_valid = valid.any(dim=-1)
@@ -1293,7 +1303,10 @@ def _sample_masked_route_actions(
         safe_valid[~agent_has_valid, 0] = True
     masked_logits = (logits / float(max(temperature, 1e-6))).masked_fill(~safe_valid, -large)
     dist = torch.distributions.Categorical(logits=masked_logits)
-    selected = dist.sample()
+    if mode_norm == "argmax":
+        selected = torch.argmax(masked_logits.detach(), dim=-1)
+    else:
+        selected = dist.sample()
     log_probs = dist.log_prob(selected)
     hard_probs = torch.zeros_like(logits)
     hard_probs.scatter_(1, selected.unsqueeze(-1), 1.0)

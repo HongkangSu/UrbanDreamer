@@ -722,6 +722,7 @@ class TrainConfig:
     dreamer_ac_entropy_target: float = 0.0
     dreamer_ac_entropy_target_frac: float = 0.0
     dreamer_ac_entropy_floor_coef: float = 0.0
+    dreamer_ac_rollout_action_mode: str = "sample"  # sample | argmax
     dreamer_ac_route_credit_mode: str = "route_cost"  # route_cost | planned_pressure | marginal_pressure | sequential_marginal | counterfactual_pressure
     dreamer_ac_route_credit_pressure_weight: float = 1.0
     dreamer_ac_route_credit_pressure_mode: str = "clipped_excess_tt_ratio"
@@ -1957,6 +1958,18 @@ def imagined_episode_dynamic_dreamer(
     path_batch_for_reward: Optional[List[List[List[int]]]]
     rollout_policy = str(rollout_policy_override or "actor").strip().lower()
     use_discrete_actor_critic = bool(dreamer_pg.uses_discrete_actor_critic(cfg) and rollout_policy == "actor")
+    ac_rollout_action_mode = str(
+        getattr(cfg, "dreamer_ac_rollout_action_mode", "sample") or "sample"
+    ).strip().lower()
+    if ac_rollout_action_mode in {"stochastic", "sampled", "sampling"}:
+        ac_rollout_action_mode = "sample"
+    elif ac_rollout_action_mode in {"deterministic", "greedy", "eval", "auto"}:
+        ac_rollout_action_mode = "argmax"
+    if ac_rollout_action_mode not in {"sample", "argmax"}:
+        raise ValueError(
+            "Unsupported dreamer_ac_rollout_action_mode="
+            f"{getattr(cfg, 'dreamer_ac_rollout_action_mode', None)!r}; expected sample or argmax"
+        )
     route_adv_route_cost_matrix_needed = (
         use_discrete_actor_critic
         and float(getattr(cfg, "dreamer_ac_route_advantage_weight", 0.0)) != 0.0
@@ -2192,6 +2205,7 @@ def imagined_episode_dynamic_dreamer(
                             logits_i,
                             valid_i,
                             temperature=float(getattr(cfg, "dreamer_action_temperature", 1.0)),
+                            mode=ac_rollout_action_mode,
                         )
                     else:
                         action_i = _dreamer_action_route_probs(
@@ -2317,6 +2331,7 @@ def imagined_episode_dynamic_dreamer(
                     logits,
                     valid_action_mask,
                     temperature=float(getattr(cfg, "dreamer_action_temperature", 1.0)),
+                    mode=ac_rollout_action_mode,
                 )
                 selected_route_idx_t_for_update = selected_route_idx_t
                 selected_route_idx_for_env = selected_route_idx_t.detach().cpu().numpy().astype(np.int64)
@@ -3462,6 +3477,7 @@ def imagined_episode_dynamic_dreamer(
         "grpo_rollout_vehicle_cost_adv_mean": float(np.mean(rollout_vehicle_cost_adv_means)) if rollout_vehicle_cost_adv_means else 0.0,
         "grpo_rollout_vehicle_cost_adv_std": float(np.mean(rollout_vehicle_cost_adv_stds)) if rollout_vehicle_cost_adv_stds else 0.0,
         "dreamer_base_reward": base_reward_mean,
+        "dreamer_ac_rollout_argmax_frac": 1.0 if ac_rollout_action_mode == "argmax" else 0.0,
         "dreamer_ac_sample_count": float(ac_samples["dreamer_ac_selected"].numel()),
         "dreamer_ac_selected_nonzero_frac": (
             float(np.mean(dreamer_ac_selected_nonzero_fracs))
@@ -5363,6 +5379,9 @@ def train(cfg: TrainConfig) -> None:
             stats_history["n_actor_steps"].append(ep_metrics.get("n_actor_steps", 0.0))
             stats_history["reward_grad_steps"].append(ep_metrics.get("reward_grad_steps", 0.0))
             stats_history["entropy_grad_steps"].append(ep_metrics.get("entropy_grad_steps", 0.0))
+            stats_history["dreamer_ac_rollout_argmax_frac"].append(
+                ep_metrics.get("dreamer_ac_rollout_argmax_frac", 0.0)
+            )
             stats_history["hdv_response_av_pressure_sum"].append(ep_metrics.get("hdv_response_av_pressure_sum", 0.0))
             stats_history["hdv_response_background_sum"].append(ep_metrics.get("hdv_response_background_sum", 0.0))
             stats_history["hdv_response_background_active_edges"].append(ep_metrics.get("hdv_response_background_active_edges", 0.0))
@@ -5399,6 +5418,9 @@ def train(cfg: TrainConfig) -> None:
                 "grpo_rollout_logprob": float(ep_metrics.get("grpo_rollout_logprob", 0.0)),
                 "grpo_rollout_selected_nonzero_frac": float(ep_metrics.get("grpo_rollout_selected_nonzero_frac", 0.0)),
                 "dreamer_base_reward": float(ep_metrics.get("dreamer_base_reward", 0.0)),
+                "dreamer_ac_rollout_argmax_frac": float(
+                    ep_metrics.get("dreamer_ac_rollout_argmax_frac", 0.0)
+                ),
                 "dreamer_ac_sample_count": float(ep_metrics.get("dreamer_ac_sample_count", 0.0)),
                 "dreamer_ac_selected_nonzero_frac": float(ep_metrics.get("dreamer_ac_selected_nonzero_frac", 0.0)),
                 "vehicle_reward_mean": float(ep_metrics.get("vehicle_reward_mean", 0.0)),
@@ -5867,6 +5889,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help=(
                        "Quadratic penalty coefficient applied only when selected-sample entropy "
                        "falls below the configured entropy target."
+                   ))
+    p.add_argument("--dreamer_ac_rollout_action_mode", type=str, default="sample",
+                   choices=["sample", "argmax", "stochastic", "sampled", "sampling", "deterministic", "greedy", "eval", "auto"],
+                   help=(
+                       "Route action selection used by discrete actor-critic imagined rollouts. "
+                       "sample preserves historical stochastic rollout exploration; argmax matches "
+                       "deterministic SUMO eval/deployment while still training through the selected "
+                       "action log-probability."
                    ))
     p.add_argument("--dreamer_ac_route_credit_mode", type=str, default="route_cost",
                    choices=[
