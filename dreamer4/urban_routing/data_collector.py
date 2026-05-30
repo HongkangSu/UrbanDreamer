@@ -2115,7 +2115,9 @@ class DataCollector:
             decision_ticks = list(range(max_steps))
 
         current_tick = 0
+        total_agents = int(getattr(self, "_num_agents", 0) or 0)
         for decision_idx, t in enumerate(decision_ticks):
+            episode_complete = False
             steps_to_boundary = max(int(t) - int(current_tick), 0)
             if steps_to_boundary > 0:
                 arrival_events = self.connector.advance_steps(steps_to_boundary)
@@ -2126,6 +2128,9 @@ class DataCollector:
                     arrival_events=arrival_events,
                 )
                 state = self.connector.get_traffic_state()
+                if total_agents > 0 and len(self._last_ep_travel_times) >= total_agents:
+                    episode_complete = True
+                    break
 
             frame_t = self._collect_flow(state)
 
@@ -2182,6 +2187,8 @@ class DataCollector:
                 arrival_events=arrival_events,
             )
             state = self.connector.get_traffic_state()
+            if total_agents > 0 and len(self._last_ep_travel_times) >= total_agents:
+                episode_complete = True
 
             reward = self.connector._calculate_reward(state)
 
@@ -2194,15 +2201,18 @@ class DataCollector:
             ep_departs.append(decision_depart)
             ep_contexts.append(decision_context)
 
+            if episode_complete:
+                break
             if self.connector.is_done() or (len(state.get("vehicles", {})) == 0 and current_tick > 10):
                 break
 
-        state, current_tick = self._drain_episode_to_completion(
-            state=state,
-            current_tick=int(current_tick),
-            veh_depart=veh_depart,
-            veh_travel_times=veh_travel_times,
-        )
+        if total_agents <= 0 or len(self._last_ep_travel_times) < total_agents:
+            state, current_tick = self._drain_episode_to_completion(
+                state=state,
+                current_tick=int(current_tick),
+                veh_depart=veh_depart,
+                veh_travel_times=veh_travel_times,
+            )
 
         if self._use_routerl_hdv_blackbox and hasattr(self.connector, "apply_routerl_hdv_learning"):
             try:
