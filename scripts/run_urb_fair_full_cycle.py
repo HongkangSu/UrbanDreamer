@@ -637,8 +637,6 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
         str(args.marl_log_every),
         "--checkpoint_every",
         str(args.marl_checkpoint_every),
-        "--eval_every",
-        "0",
         "--device",
         args.device,
     ]
