@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "[deprecated] tmp/run_current_to_dest_seed_sweep_after_wm_20260528.sh uses the old decoded-speed candidate/eval path." >&2
+echo "[deprecated] Use the current full-cycle scripts with free-flow candidate generation and vehicle-critic route rewards instead." >&2
+exit 2
+
 export WANDB_MODE=offline
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 
@@ -80,6 +84,8 @@ for seed in ${SEEDS}; do
     --dreamer_ac_route_advantage_temperature 60.0 \
     --dreamer_grpo_route_cost_weight "${GRPO_ROUTE_WEIGHT}" \
     --dreamer_grpo_rollout_weight "${GRPO_ROLLOUT_WEIGHT}" \
+    --dreamer_grpo_rollout_cost_source "${GRPO_ROLLOUT_COST_SOURCE:-pressure_cav}" \
+    --dreamer_grpo_rollout_t_cav_weight "${GRPO_ROLLOUT_T_CAV_WEIGHT:-1.0}" \
     --dreamer_grpo_rollout_group_size "${GRPO_GROUP_SIZE}" \
     --dreamer_grpo_policy_clip_ratio "${GRPO_CLIP_RATIO:-0.2}" \
     --dreamer_grpo_policy_kl_coef "${GRPO_KL_COEF:-0.0}" \

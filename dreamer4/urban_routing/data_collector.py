@@ -329,7 +329,7 @@ class DataCollector:
             av_candidate_source: "current_to_dest" re-searches routes from the
                                  current edge to the destination at each
                                  decision; "od_suffix" trims pre-generated OD
-                                 routes.
+                                 routes and is deprecated legacy behavior.
             safe_reroute_min_remaining_m: Minimum distance remaining on the
                                  current lane before allowing a reroute whose
                                  next edge is reachable only from another lane
@@ -1211,7 +1211,7 @@ class DataCollector:
 
         Route indices are selected fresh each step.  By default candidates are
         searched from the vehicle's current edge to its destination; od_suffix
-        preserves the legacy pre-generated OD-route suffix behavior.
+        preserves deprecated legacy pre-generated OD-route suffix behavior.
 
         Returns {veh_id: route_edge_list}.
         """
@@ -2373,7 +2373,7 @@ def main():
                         help="Number of decision/recording steps per episode (SUMO still runs at native tick resolution).")
     parser.add_argument("--av_candidate_source", type=str, default="current_to_dest",
                         choices=["current_to_dest", "od_suffix"],
-                        help="AV dynamic candidate source: current edge to destination search, or legacy OD route suffixes.")
+                        help="AV dynamic candidate source: current edge to destination search, or deprecated legacy OD route suffixes.")
     parser.add_argument("--safe_reroute_min_remaining_m", type=float, default=35.0,
                         help="Minimum lane distance remaining for reroutes that require a lane change. Set <0 to disable.")
     parser.add_argument("--completion_drain_steps", type=int, default=0,

@@ -130,9 +130,9 @@ def test_vehicle_fleet_pressure_obs_features_use_selected_prefix_context():
     np.testing.assert_allclose(features[1, 2:], np.asarray([1.0, 2.0 / 3.0]), atol=1e-6)
 
 
-def test_wm_candidate_edge_cost_source_auto_preserves_ranking_source():
+def test_wm_candidate_edge_cost_source_auto_uses_freeflow_candidate_paths():
     cfg = TrainConfig(wm_edge_cost_source="route_head")
-    assert resolve_wm_candidate_edge_cost_source(cfg) == "route_head"
+    assert resolve_wm_candidate_edge_cost_source(cfg) == "freeflow"
     assert uses_explicit_dynamic_candidate_edge_cost_source(cfg) is False
 
 

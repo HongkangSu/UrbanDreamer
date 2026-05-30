@@ -157,7 +157,9 @@ class PolicyGuidedCollectorEval(DataCollector):
         **collector_kwargs,
     ):
         collector_kwargs.setdefault("loaded_hdv_state", loaded_hdv_state)
-        collector_kwargs.setdefault("av_candidate_source", av_candidate_source)
+        eval_candidate_source = str(av_candidate_source or "current_shortest_wm").strip().lower()
+        base_candidate_source = "od_suffix" if eval_candidate_source == "od_suffix" else "current_to_dest"
+        collector_kwargs.setdefault("av_candidate_source", base_candidate_source)
         super().__init__(**collector_kwargs)
         self._wm_eval = wm
         self._policy_eval = policy
@@ -203,13 +205,14 @@ class PolicyGuidedCollectorEval(DataCollector):
             raise ValueError(
                 f"Unsupported av_policy_share_cap_fallback_source={av_policy_share_cap_fallback_source!r}"
             )
-        self._av_candidate_source = str(av_candidate_source or "current_shortest_wm").strip().lower()
-        if self._av_candidate_source not in {"od_suffix", "current_shortest_live", "current_shortest_wm"}:
+        self._av_candidate_source = eval_candidate_source
+        if self._av_candidate_source not in {"od_suffix", "current_shortest_live", "current_shortest_wm", "current_shortest_freeflow"}:
             raise ValueError(f"Unsupported av_candidate_source={av_candidate_source!r}")
         self._av_candidate_path_penalty_factor = max(float(av_candidate_path_penalty_factor), 1.0)
         edge_registry = getattr(self, "_edge_registry", None)
         self._av_candidate_adj_list = _build_edge_adj_list(
-            getattr(edge_registry, "adjacency", None)
+            getattr(edge_registry, "adjacency", None),
+            getattr(edge_registry, "passenger_allowed", None),
         )
         self._av_route_cost_policy = str(av_route_cost_policy or "none").strip().lower()
         if self._av_route_cost_policy not in {"none", "freeflow_greedy", "wm_current_bpr", "live_current_tt", "wm_live_blend"}:
@@ -238,8 +241,10 @@ class PolicyGuidedCollectorEval(DataCollector):
             raise ValueError(f"Unsupported wm_edge_cost_source={wm_edge_cost_source!r}")
         self._wm_candidate_edge_cost_source = str(wm_candidate_edge_cost_source or "auto").strip().lower()
         if self._wm_candidate_edge_cost_source == "auto":
-            self._wm_candidate_edge_cost_source = self._wm_edge_cost_source
-        if self._wm_candidate_edge_cost_source not in {"bpr_volume", "decoded_speed", "route_head"}:
+            self._wm_candidate_edge_cost_source = "freeflow"
+        if self._wm_candidate_edge_cost_source in {"free_flow", "free-flow", "ff"}:
+            self._wm_candidate_edge_cost_source = "freeflow"
+        if self._wm_candidate_edge_cost_source not in {"freeflow", "bpr_volume", "decoded_speed", "route_head"}:
             raise ValueError(f"Unsupported wm_candidate_edge_cost_source={wm_candidate_edge_cost_source!r}")
         self._wm_decoded_speed_min_ratio = max(float(wm_decoded_speed_min_ratio), 1e-4)
         self._wm_decoded_speed_max_ratio = max(
@@ -593,18 +598,22 @@ class PolicyGuidedCollectorEval(DataCollector):
 
         edge_to_idx = getattr(self._edge_registry, "_edge_to_idx", {})
         wm_edge_cost = self._wm_current_edge_tt(z_obs)
-        wm_candidate_edge_cost = (
-            wm_edge_cost
-            if self._wm_candidate_edge_cost_source == self._wm_edge_cost_source
-            else self._wm_current_edge_tt(z_obs, edge_cost_source=self._wm_candidate_edge_cost_source)
-        )
         live_edge_cost = self._live_current_edge_tt(state)
         freeflow_edge_cost = self._freeflow_edge_tt()
+        wm_candidate_edge_cost = None
+        if self._wm_candidate_edge_cost_source == "freeflow":
+            wm_candidate_edge_cost = freeflow_edge_cost
+        elif self._wm_candidate_edge_cost_source == self._wm_edge_cost_source:
+            wm_candidate_edge_cost = wm_edge_cost
+        else:
+            wm_candidate_edge_cost = self._wm_current_edge_tt(z_obs, edge_cost_source=self._wm_candidate_edge_cost_source)
         candidate_edge_cost: Optional[np.ndarray] = None
         if self._av_candidate_source == "current_shortest_wm":
             candidate_edge_cost = wm_candidate_edge_cost
         elif self._av_candidate_source == "current_shortest_live":
             candidate_edge_cost = live_edge_cost
+        elif self._av_candidate_source == "current_shortest_freeflow":
+            candidate_edge_cost = freeflow_edge_cost
         path_batch: List[List[List[int]]] = []
         route_batch: List[List[List[str]]] = []
         active_ids: List[str] = []
@@ -632,6 +641,8 @@ class PolicyGuidedCollectorEval(DataCollector):
                     candidate_fallback_count += 1
             if not candidates:
                 candidates = self._candidate_route_suffixes(veh_id, current_edge)
+            if candidates:
+                candidates = self._filter_safe_reroute_candidates(veh_id, current_edge, candidates)
             if not candidates:
                 continue
 

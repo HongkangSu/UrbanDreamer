@@ -19,7 +19,7 @@ env CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-1}" WANDB_MODE=offline MPLCONF
   "--incident-edge=${INCIDENT_EDGE:--18951224#4}" \
   --incident-start "${INCIDENT_START:-500}" \
   --incident-end "${INCIDENT_END:-1500}" \
-  --incident-speed "${INCIDENT_SPEED:-1.0}" \
+  --incident-speed "${INCIDENT_SPEED:-3.0}" \
   --output-root "data/${TAG}" \
   --logs-root "logs/${TAG}" \
   --results-root "results/${TAG}" \

@@ -459,12 +459,12 @@ def parse_args():
     p.add_argument("--dynamic_routing", action="store_true", default=False,
                    help="Re-route active AV vehicles at each SUMO timestep using policy probabilities.")
     p.add_argument("--av_candidate_source", type=str, default="current_shortest_wm",
-                   choices=["od_suffix", "current_shortest_live", "current_shortest_wm"],
+                   choices=["od_suffix", "current_shortest_live", "current_shortest_wm", "current_shortest_freeflow"],
                    help=(
-                       "Candidate route source for dynamic AV decisions. 'od_suffix' preserves the "
-                       "precomputed OD-route suffix behavior; 'current_shortest_live' and "
-                       "'current_shortest_wm' regenerate K diverse current-edge-to-destination "
-                       "routes from live SUMO edge travel times or WM/BPR edge travel times."
+                       "Candidate route source for dynamic AV decisions. 'od_suffix' is deprecated "
+                       "legacy precomputed OD-route suffix behavior; 'current_shortest_live' and "
+                       "'current_shortest_wm'/'current_shortest_freeflow' regenerate K diverse "
+                       "current-edge-to-destination routes from live SUMO, explicit WM, or free-flow edge travel times."
                    ))
     p.add_argument("--av_policy_route_selection", type=str, default="auto",
                    choices=["auto", "argmax", "sample", "quota"],
@@ -558,8 +558,8 @@ def parse_args():
                    help="Policy observation source. auto uses policy checkpoint cfg when available.")
     p.add_argument("--wm_edge_cost_source", choices=["bpr_volume", "decoded_speed", "route_head"], default="decoded_speed",
                    help="Source for WM-derived edge travel times in current_shortest_wm and WM route-cost policy.")
-    p.add_argument("--wm_candidate_edge_cost_source", choices=["auto", "bpr_volume", "decoded_speed", "route_head"], default="auto",
-                   help="WM edge cost source used only to generate current_shortest_wm candidate paths. auto reuses --wm_edge_cost_source.")
+    p.add_argument("--wm_candidate_edge_cost_source", choices=["auto", "freeflow", "bpr_volume", "decoded_speed", "route_head"], default="auto",
+                   help="Edge cost source used only to generate current_shortest_wm candidate paths. auto/freeflow uses registry free-flow times; WM sources are explicit ablations.")
     p.add_argument("--wm_decoded_speed_min_ratio", type=float, default=0.05,
                    help="Minimum decoded speed/speed_limit ratio when --wm_edge_cost_source=decoded_speed.")
     p.add_argument("--wm_decoded_speed_max_ratio", type=float, default=1.50,

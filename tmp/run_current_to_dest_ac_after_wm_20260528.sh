@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "[deprecated] tmp/run_current_to_dest_ac_after_wm_20260528.sh uses the old decoded-speed candidate/eval path." >&2
+echo "[deprecated] Use the current full-cycle scripts with free-flow candidate generation and vehicle-critic route rewards instead." >&2
+exit 2
+
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export WANDB_MODE=offline
 

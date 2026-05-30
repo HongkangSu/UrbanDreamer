@@ -394,11 +394,10 @@ def _od_suffix_path_batch(
                 suffixes.append(list(fallback) if fallback else [])
         while len(suffixes) < k_eff:
             suffixes.append(list(fallback) if fallback else [])
-        first_valid = next((list(route) for route in suffixes if route), [])
-        if not first_valid:
+        if not any(suffixes):
             batch.append([[cur] for _ in range(k_eff)])
             continue
-        batch.append([list(route) if route else list(first_valid) for route in suffixes[:k_eff]])
+        batch.append([list(route) for route in suffixes[:k_eff]])
     return batch
 
 

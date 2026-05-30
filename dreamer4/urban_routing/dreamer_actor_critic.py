@@ -331,11 +331,13 @@ class CentralizedVehicleValueCritic(nn.Module):
         n_hidden_layers: int = 2,
         architecture: str = "self_attention",
         n_attention_heads: int = 4,
+        output_dim: int = 1,
     ):
         super().__init__()
         self.obs_dim = int(obs_dim)
         self.context_dim = int(max(context_dim, 0))
         self.hidden_dim = int(hidden_dim)
+        self.output_dim = int(max(output_dim, 1))
         self.architecture = str(architecture or "self_attention").strip().lower()
         if self.architecture in {"attention", "transformer"}:
             self.architecture = "self_attention"
@@ -366,7 +368,7 @@ class CentralizedVehicleValueCritic(nn.Module):
             self.token_norm = None
             self.vehicle_attention = None
             self.output_norm = None
-        self.value_head = nn.Linear(self.hidden_dim, 1)
+        self.value_head = nn.Linear(self.hidden_dim, self.output_dim)
 
         for m in self.modules():
             if isinstance(m, nn.Linear):
@@ -406,7 +408,7 @@ class CentralizedVehicleValueCritic(nn.Module):
             raise ValueError(f"expected obs shape (N, {self.obs_dim}), got {tuple(obs.shape)}")
         batch_size = int(obs.shape[0])
         if batch_size <= 0:
-            return torch.zeros((0, 1), device=obs.device, dtype=obs.dtype)
+            return torch.zeros((0, self.output_dim), device=obs.device, dtype=obs.dtype)
 
         critic_in = obs
         if self.context_dim > 0:

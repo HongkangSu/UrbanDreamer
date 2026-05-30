@@ -28,6 +28,9 @@ def save_dreamer_checkpoint(
     vehicle_critic_optimizer=None,
     target_vehicle_critic=None,
     vehicle_return_normalizer=None,
+    vehicle_route_q_critic=None,
+    vehicle_route_q_optimizer=None,
+    target_vehicle_route_q_critic=None,
 ) -> str:
     Path(cfg.checkpoint_dir).mkdir(parents=True, exist_ok=True)
     obj = {
@@ -54,6 +57,12 @@ def save_dreamer_checkpoint(
         obj["target_vehicle_critic"] = target_vehicle_critic.state_dict()
     if vehicle_return_normalizer is not None:
         obj["vehicle_return_normalizer"] = vehicle_return_normalizer.state_dict()
+    if vehicle_route_q_critic is not None:
+        obj["vehicle_route_q_critic"] = vehicle_route_q_critic.state_dict()
+    if vehicle_route_q_optimizer is not None:
+        obj["vehicle_route_q_optimizer"] = vehicle_route_q_optimizer.state_dict()
+    if target_vehicle_route_q_critic is not None:
+        obj["target_vehicle_route_q_critic"] = target_vehicle_route_q_critic.state_dict()
     path = os.path.join(cfg.checkpoint_dir, f"checkpoint_ep{episode:05d}.pt")
     torch.save(obj, path)
     torch.save(obj, os.path.join(cfg.checkpoint_dir, "latest.pt"))
@@ -111,6 +120,9 @@ def load_dreamer_checkpoint(
     vehicle_critic_optimizer=None,
     target_vehicle_critic=None,
     vehicle_return_normalizer=None,
+    vehicle_route_q_critic=None,
+    vehicle_route_q_optimizer=None,
+    target_vehicle_route_q_critic=None,
 ):
     ckpt = torch.load(path, map_location="cpu", weights_only=False)
     actor_state = ckpt.get("actor", ckpt.get("policy"))
@@ -164,6 +176,34 @@ def load_dreamer_checkpoint(
         target_vehicle_critic.eval()
     if vehicle_return_normalizer is not None and "vehicle_return_normalizer" in ckpt:
         vehicle_return_normalizer.load_state_dict(ckpt.get("vehicle_return_normalizer"))
+    vehicle_route_q_migrated = False
+    if vehicle_route_q_critic is not None:
+        route_q_state = ckpt.get("vehicle_route_q_critic")
+        if route_q_state is not None:
+            vehicle_route_q_migrated = _load_state_dict_with_input_padding(
+                vehicle_route_q_critic,
+                route_q_state,
+                module_name="vehicle_route_q_critic",
+            )
+    if target_vehicle_route_q_critic is not None:
+        target_route_q_state = ckpt.get("target_vehicle_route_q_critic", ckpt.get("vehicle_route_q_critic"))
+        target_route_q_migrated = False
+        if target_route_q_state is not None:
+            target_route_q_migrated = _load_state_dict_with_input_padding(
+                target_vehicle_route_q_critic,
+                target_route_q_state,
+                module_name="target_vehicle_route_q_critic",
+            )
+        if (
+            target_route_q_migrated
+            and vehicle_route_q_critic is not None
+            and ckpt.get("vehicle_route_q_critic") is not None
+        ):
+            target_vehicle_route_q_critic.load_state_dict(vehicle_route_q_critic.state_dict())
+            logger.info("Initialized migrated target_vehicle_route_q_critic from the live route-Q critic state.")
+        for param in target_vehicle_route_q_critic.parameters():
+            param.requires_grad_(False)
+        target_vehicle_route_q_critic.eval()
     if actor_optimizer is not None and "actor_optimizer" in ckpt and not reset_actor_optimizer:
         actor_optimizer.load_state_dict(ckpt["actor_optimizer"])
     if critic_optimizer is not None and "critic_optimizer" in ckpt and not critic_migrated:
@@ -185,6 +225,20 @@ def load_dreamer_checkpoint(
     ):
         logger.info(
             "Skipped vehicle critic optimizer state because input weights were migrated to a wider shape."
+        )
+    if (
+        vehicle_route_q_optimizer is not None
+        and "vehicle_route_q_optimizer" in ckpt
+        and not vehicle_route_q_migrated
+    ):
+        vehicle_route_q_optimizer.load_state_dict(ckpt["vehicle_route_q_optimizer"])
+    elif (
+        vehicle_route_q_optimizer is not None
+        and "vehicle_route_q_optimizer" in ckpt
+        and vehicle_route_q_migrated
+    ):
+        logger.info(
+            "Skipped vehicle route-Q optimizer state because input weights were migrated to a wider shape."
         )
     return ckpt.get("episode", 0), ckpt.get("stats", {}), dict(ckpt.get("extra_state", {}) or {})
 
@@ -329,6 +383,9 @@ def normalize_stats_history_defaults(stats_history):
         "vehicle_route_progress_reward_mean", "vehicle_route_progress_reward_std",
         "vehicle_route_credit_reward_mean", "vehicle_route_credit_reward_std",
         "vehicle_route_credit_gate_frac", "vehicle_route_credit_selected_gate_frac",
+        "vehicle_route_q_loss", "vehicle_route_q_target_mean", "vehicle_route_q_target_std",
+        "vehicle_route_q_actor_loss", "vehicle_route_q_adv_mean", "vehicle_route_q_adv_std",
+        "vehicle_route_q_explained_variance",
         "vehicle_social_reward_mean", "vehicle_social_reward_std",
         "vehicle_return_discount",
         "critic_target_mean", "critic_target_std", "critic_explained_variance",
@@ -362,6 +419,9 @@ def maybe_resume_dreamer_checkpoint(
     vehicle_critic_optimizer=None,
     target_vehicle_critic=None,
     vehicle_return_normalizer=None,
+    vehicle_route_q_critic=None,
+    vehicle_route_q_optimizer=None,
+    target_vehicle_route_q_critic=None,
     load_checkpoint_fn: Optional[Callable[..., tuple[Any, Any, Any]]] = None,
 ):
     if not resume_ckpt or not os.path.exists(resume_ckpt):
@@ -382,11 +442,24 @@ def maybe_resume_dreamer_checkpoint(
     vehicle_return_normalizer_state_before = (
         copy.deepcopy(vehicle_return_normalizer.state_dict()) if vehicle_return_normalizer is not None else None
     )
+    vehicle_route_q_state_before = (
+        copy.deepcopy(vehicle_route_q_critic.state_dict()) if vehicle_route_q_critic is not None else None
+    )
+    target_vehicle_route_q_state_before = (
+        copy.deepcopy(target_vehicle_route_q_critic.state_dict())
+        if target_vehicle_route_q_critic is not None
+        else None
+    )
     actor_opt_state_before = copy.deepcopy(actor_optimizer.state_dict()) if actor_optimizer is not None else None
     critic_opt_state_before = copy.deepcopy(critic_optimizer.state_dict()) if critic_optimizer is not None else None
     vehicle_critic_opt_state_before = (
         copy.deepcopy(vehicle_critic_optimizer.state_dict())
         if vehicle_critic_optimizer is not None
+        else None
+    )
+    vehicle_route_q_opt_state_before = (
+        copy.deepcopy(vehicle_route_q_optimizer.state_dict())
+        if vehicle_route_q_optimizer is not None
         else None
     )
     try:
@@ -404,6 +477,9 @@ def maybe_resume_dreamer_checkpoint(
             vehicle_critic_optimizer=vehicle_critic_optimizer,
             target_vehicle_critic=target_vehicle_critic,
             vehicle_return_normalizer=vehicle_return_normalizer,
+            vehicle_route_q_critic=vehicle_route_q_critic,
+            vehicle_route_q_optimizer=vehicle_route_q_optimizer,
+            target_vehicle_route_q_critic=target_vehicle_route_q_critic,
         )
         logger.info("Resumed Dreamer checkpoint from ep %d", start_episode)
         if reset_actor_optimizer:
@@ -440,12 +516,21 @@ def maybe_resume_dreamer_checkpoint(
             and vehicle_return_normalizer_state_before is not None
         ):
             vehicle_return_normalizer.load_state_dict(vehicle_return_normalizer_state_before)
+        if vehicle_route_q_critic is not None and vehicle_route_q_state_before is not None:
+            vehicle_route_q_critic.load_state_dict(vehicle_route_q_state_before)
+        if target_vehicle_route_q_critic is not None and target_vehicle_route_q_state_before is not None:
+            target_vehicle_route_q_critic.load_state_dict(target_vehicle_route_q_state_before)
+            for param in target_vehicle_route_q_critic.parameters():
+                param.requires_grad_(False)
+            target_vehicle_route_q_critic.eval()
         if actor_optimizer is not None and actor_opt_state_before is not None:
             actor_optimizer.load_state_dict(actor_opt_state_before)
         if critic_optimizer is not None and critic_opt_state_before is not None:
             critic_optimizer.load_state_dict(critic_opt_state_before)
         if vehicle_critic_optimizer is not None and vehicle_critic_opt_state_before is not None:
             vehicle_critic_optimizer.load_state_dict(vehicle_critic_opt_state_before)
+        if vehicle_route_q_optimizer is not None and vehicle_route_q_opt_state_before is not None:
+            vehicle_route_q_optimizer.load_state_dict(vehicle_route_q_opt_state_before)
         logger.warning(
             "Failed to resume Dreamer checkpoint %s; starting fresh. Error: %s",
             resume_ckpt,

@@ -1,0 +1,308 @@
+[
+  {
+    "run": "policy_ep400",
+    "run_dir": "results/ingolstadt_custom_current_to_dest_incident_20260528/eval_ep400_current_shortest_freeflow_exact",
+    "t_all": 4.345024154589372,
+    "t_CAV": 4.226288244766505,
+    "t_HDV": 4.424181427804616,
+    "completion_rate": 1.0,
+    "av_candidate_source": "current_shortest_freeflow",
+    "av_route_cost_policy": "none",
+    "wm_candidate_edge_cost_source": "freeflow",
+    "decision_rows": 2800,
+    "unique_vehicles": 413,
+    "selected_route_counts": {
+      "route0": 2484,
+      "route1": 249,
+      "route2": 46,
+      "route3": 21
+    },
+    "nonzero_decision_rows": 316,
+    "top_selected_edges": [
+      {
+        "edge": "386687235",
+        "count": 658
+      },
+      {
+        "edge": "201201950#4",
+        "count": 604
+      },
+      {
+        "edge": "201201950#3",
+        "count": 524
+      },
+      {
+        "edge": "201201950#1",
+        "count": 500
+      },
+      {
+        "edge": "201201950#2",
+        "count": 500
+      },
+      {
+        "edge": "51857517#1",
+        "count": 492
+      },
+      {
+        "edge": "201201950#0",
+        "count": 480
+      },
+      {
+        "edge": "51857517#0.33",
+        "count": 469
+      },
+      {
+        "edge": "402600768#1",
+        "count": 468
+      },
+      {
+        "edge": "402600768#0",
+        "count": 460
+      },
+      {
+        "edge": "51857517#0",
+        "count": 459
+      },
+      {
+        "edge": "306240162#0",
+        "count": 371
+      },
+      {
+        "edge": "202092676#0",
+        "count": 339
+      },
+      {
+        "edge": "386687239#1",
+        "count": 333
+      },
+      {
+        "edge": "386687239#0",
+        "count": 319
+      },
+      {
+        "edge": "-266565295#5",
+        "count": 312
+      },
+      {
+        "edge": "272042145",
+        "count": 310
+      },
+      {
+        "edge": "32999110#0",
+        "count": 300
+      },
+      {
+        "edge": "51857516#1",
+        "count": 293
+      },
+      {
+        "edge": "176550249#4",
+        "count": 269
+      }
+    ]
+  },
+  {
+    "run": "freeflow_greedy",
+    "run_dir": "results/ingolstadt_custom_current_to_dest_incident_20260528/baseline_ep400_ref_freeflow_candidates_freeflow_greedy",
+    "t_all": 4.408164251207729,
+    "t_CAV": 4.39098228663446,
+    "t_HDV": 4.419618894256575,
+    "completion_rate": 1.0,
+    "av_candidate_source": "current_shortest_freeflow",
+    "av_route_cost_policy": "freeflow_greedy",
+    "wm_candidate_edge_cost_source": "freeflow",
+    "decision_rows": 2974,
+    "unique_vehicles": 413,
+    "selected_route_counts": {
+      "route0": 2970,
+      "route1": 0,
+      "route2": 0,
+      "route3": 4
+    },
+    "nonzero_decision_rows": 4,
+    "top_selected_edges": [
+      {
+        "edge": "201201950#4",
+        "count": 1106
+      },
+      {
+        "edge": "201201950#3",
+        "count": 1089
+      },
+      {
+        "edge": "201201950#2",
+        "count": 1053
+      },
+      {
+        "edge": "201201950#1",
+        "count": 1052
+      },
+      {
+        "edge": "201201950#0",
+        "count": 1011
+      },
+      {
+        "edge": "386687239#1",
+        "count": 818
+      },
+      {
+        "edge": "386687239#0",
+        "count": 796
+      },
+      {
+        "edge": "386687235",
+        "count": 734
+      },
+      {
+        "edge": "202092676#0",
+        "count": 617
+      },
+      {
+        "edge": "51857517#1",
+        "count": 564
+      },
+      {
+        "edge": "402600768#1",
+        "count": 543
+      },
+      {
+        "edge": "51857517#0.33",
+        "count": 543
+      },
+      {
+        "edge": "402600768#0",
+        "count": 539
+      },
+      {
+        "edge": "51857517#0",
+        "count": 534
+      },
+      {
+        "edge": "176550249#4",
+        "count": 458
+      },
+      {
+        "edge": "315358253#2",
+        "count": 438
+      },
+      {
+        "edge": "315358253#1",
+        "count": 409
+      },
+      {
+        "edge": "315358253#0",
+        "count": 395
+      },
+      {
+        "edge": "315358248#0",
+        "count": 392
+      },
+      {
+        "edge": "315358245.27",
+        "count": 391
+      }
+    ]
+  },
+  {
+    "run": "live_current_greedy",
+    "run_dir": "results/ingolstadt_custom_current_to_dest_incident_20260528/baseline_ep400_ref_freeflow_candidates_live_current_greedy",
+    "t_all": 4.376698872785829,
+    "t_CAV": 4.295531400966183,
+    "t_HDV": 4.4308105206655926,
+    "completion_rate": 1.0,
+    "av_candidate_source": "current_shortest_freeflow",
+    "av_route_cost_policy": "live_current_tt",
+    "wm_candidate_edge_cost_source": "freeflow",
+    "decision_rows": 2882,
+    "unique_vehicles": 413,
+    "selected_route_counts": {
+      "route0": 2533,
+      "route1": 260,
+      "route2": 66,
+      "route3": 23
+    },
+    "nonzero_decision_rows": 349,
+    "top_selected_edges": [
+      {
+        "edge": "386687235",
+        "count": 706
+      },
+      {
+        "edge": "201201950#4",
+        "count": 635
+      },
+      {
+        "edge": "51857517#1",
+        "count": 509
+      },
+      {
+        "edge": "51857517#0.33",
+        "count": 487
+      },
+      {
+        "edge": "402600768#1",
+        "count": 483
+      },
+      {
+        "edge": "402600768#0",
+        "count": 475
+      },
+      {
+        "edge": "51857517#0",
+        "count": 474
+      },
+      {
+        "edge": "201201950#3",
+        "count": 473
+      },
+      {
+        "edge": "201201950#2",
+        "count": 441
+      },
+      {
+        "edge": "201201950#1",
+        "count": 440
+      },
+      {
+        "edge": "201201950#0",
+        "count": 420
+      },
+      {
+        "edge": "315358242#3",
+        "count": 380
+      },
+      {
+        "edge": "315358251#1",
+        "count": 380
+      },
+      {
+        "edge": "306240162#0",
+        "count": 361
+      },
+      {
+        "edge": "386687239#1",
+        "count": 350
+      },
+      {
+        "edge": "136436466",
+        "count": 349
+      },
+      {
+        "edge": "386687239#0",
+        "count": 340
+      },
+      {
+        "edge": "202092676#0",
+        "count": 335
+      },
+      {
+        "edge": "-266565295#5",
+        "count": 325
+      },
+      {
+        "edge": "272042145",
+        "count": 323
+      }
+    ]
+  }
+]

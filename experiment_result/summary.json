@@ -1,0 +1,191 @@
+{
+  "created_at_utc": "2026-05-30",
+  "network": "ingolstadt_custom_current_to_dest_incident_20260528",
+  "mainline_semantics": {
+    "train_vehicle_candidate_source": "current_to_dest",
+    "eval_av_candidate_source": "current_shortest_freeflow",
+    "wm_candidate_edge_cost_source": "freeflow",
+    "wm_edge_cost_source": "decoded_speed",
+    "interpretation": "Free-flow is used to generate candidate paths. Decoded speed is still used to score candidate route cost, build observations, and provide the route-cost reward to the critic."
+  },
+  "primary_conclusion": {
+    "status": "free_flow_candidates_can_converge_to_a_strong_policy",
+    "evidence_run": "seed98_freeflow_candidate_ac_ep100",
+    "t_all": 4.3437359098228665,
+    "completion_rate": 1.0,
+    "beats_freeflow_greedy_by_t_all": 0.06442834138486209,
+    "beats_freeflow_greedy_by_percent": 1.4615685286048565,
+    "beats_live_current_greedy_by_t_all": 0.032962962962962195,
+    "beats_live_current_greedy_by_percent": 0.753146696198928
+  },
+  "runs": [
+    {
+      "name": "seed98_freeflow_candidate_ac_ep100",
+      "role": "main_result",
+      "source_summary": "results/ingolstadt_custom_current_to_dest_incident_20260528/eval_candpair_freeflow_seed98_ep100_current_shortest_freeflow/collector_eval_summary.json",
+      "policy_ckpt": "logs/ingolstadt_custom_current_to_dest_incident_20260528/marl_ac_stability_refactor_current_to_dest_seed98_ep100_candpair_freeflow_seed98_ep100/checkpoint_ep00100.pt",
+      "train_candidate_source": "current_to_dest",
+      "eval_candidate_source": "current_shortest_freeflow",
+      "eval_route_cost_policy": "none",
+      "wm_candidate_edge_cost_source": "freeflow",
+      "wm_edge_cost_source": "decoded_speed",
+      "t_all": 4.3437359098228665,
+      "t_CAV": 4.2243961352657005,
+      "t_HDV": 4.423295759527644,
+      "completion_rate": 1.0,
+      "active_av_decisions": 2797,
+      "selected_route_counts": {
+        "route0": 2494,
+        "route1": 219,
+        "route2": 63,
+        "route3": 21
+      },
+      "selected_route_share": {
+        "route0": 0.8916696460493386,
+        "route1": 0.07829817661780408,
+        "route2": 0.022524132999642476,
+        "route3": 0.007508043333214158
+      }
+    },
+    {
+      "name": "baseline_freeflow_greedy",
+      "role": "baseline",
+      "source_summary": "results/ingolstadt_custom_current_to_dest_incident_20260528/baseline_ep400_ref_freeflow_candidates_freeflow_greedy/collector_eval_summary.json",
+      "script": "baseline/eval_current_to_dest_freeflow_candidates.sh",
+      "eval_candidate_source": "current_shortest_freeflow",
+      "eval_route_cost_policy": "freeflow_greedy",
+      "wm_candidate_edge_cost_source": "freeflow",
+      "wm_edge_cost_source": "decoded_speed",
+      "t_all": 4.408164251207729,
+      "t_CAV": 4.39098228663446,
+      "t_HDV": 4.419618894256575,
+      "completion_rate": 1.0,
+      "active_av_decisions": 2974,
+      "selected_route_counts": {
+        "route0": 2970,
+        "route1": 0,
+        "route2": 0,
+        "route3": 4
+      },
+      "selected_route_share": {
+        "route0": 0.9986550100874243,
+        "route1": 0.0,
+        "route2": 0.0,
+        "route3": 0.0013449899125756557
+      }
+    },
+    {
+      "name": "baseline_live_current_greedy",
+      "role": "baseline",
+      "source_summary": "results/ingolstadt_custom_current_to_dest_incident_20260528/baseline_ep400_ref_freeflow_candidates_live_current_greedy/collector_eval_summary.json",
+      "script": "baseline/eval_current_to_dest_freeflow_candidates.sh",
+      "eval_candidate_source": "current_shortest_freeflow",
+      "eval_route_cost_policy": "live_current_tt",
+      "wm_candidate_edge_cost_source": "freeflow",
+      "wm_edge_cost_source": "decoded_speed",
+      "t_all": 4.376698872785829,
+      "t_CAV": 4.295531400966183,
+      "t_HDV": 4.4308105206655926,
+      "completion_rate": 1.0,
+      "active_av_decisions": 2882,
+      "selected_route_counts": {
+        "route0": 2533,
+        "route1": 260,
+        "route2": 66,
+        "route3": 23
+      },
+      "selected_route_share": {
+        "route0": 0.8789035392088828,
+        "route1": 0.09021512838306731,
+        "route2": 0.022900763358778626,
+        "route3": 0.007980569049271339
+      }
+    },
+    {
+      "name": "policy_ep400_reference",
+      "role": "reference_policy",
+      "source_summary": "results/ingolstadt_custom_current_to_dest_incident_20260528/eval_ep400_current_shortest_freeflow_exact/collector_eval_summary.json",
+      "policy_ckpt": "logs/ingolstadt_custom_current_to_dest_incident_20260528/marl_ac_stability_refactor_current_to_dest_seed95_ep400_route0tr90_anchorveh25_anchorgchg01_progress_only_seed95_ep400_from_ep200/checkpoint_ep00400.pt",
+      "eval_candidate_source": "current_shortest_freeflow",
+      "eval_route_cost_policy": "none",
+      "wm_candidate_edge_cost_source": "freeflow",
+      "wm_edge_cost_source": "decoded_speed",
+      "t_all": 4.345024154589372,
+      "t_CAV": 4.226288244766505,
+      "t_HDV": 4.424181427804616,
+      "completion_rate": 1.0,
+      "active_av_decisions": 2800,
+      "selected_route_counts": {
+        "route0": 2484,
+        "route1": 249,
+        "route2": 46,
+        "route3": 21
+      }
+    },
+    {
+      "name": "seed96_freeflow_candidate_ac_ep400",
+      "role": "seed_sensitivity_counterexample",
+      "source_summary": "results/ingolstadt_custom_current_to_dest_incident_20260528/eval_seed96_freeflowcand_fromscratch_anchortrust_ep400/collector_eval_summary.json",
+      "policy_ckpt": "logs/ingolstadt_custom_current_to_dest_incident_20260528/marl_ac_stability_refactor_current_to_dest_seed96_ep400_freeflowcand_fromscratch_anchortrust_ep400/checkpoint_ep00400.pt",
+      "train_candidate_source": "current_to_dest",
+      "eval_candidate_source": "current_shortest_freeflow",
+      "eval_route_cost_policy": "none",
+      "wm_candidate_edge_cost_source": "freeflow",
+      "wm_edge_cost_source": "decoded_speed",
+      "t_all": 4.400547504025765,
+      "t_CAV": 4.3799919484702095,
+      "t_HDV": 4.414251207729468,
+      "completion_rate": 1.0,
+      "active_av_decisions": 2883,
+      "selected_route_counts": {
+        "route0": 1327,
+        "route1": 630,
+        "route2": 500,
+        "route3": 426
+      },
+      "selected_route_share": {
+        "route0": 0.46028442594519597,
+        "route1": 0.218522372528615,
+        "route2": 0.1734304543877905,
+        "route3": 0.1477627471383989
+      }
+    },
+    {
+      "name": "seed98_decoded_speed_candidate_train_ep100",
+      "role": "controlled_candidate_train_ablation",
+      "source_summary": "results/ingolstadt_custom_current_to_dest_incident_20260528/eval_candpair_decoded_speed_seed98_ep100_current_shortest_freeflow/collector_eval_summary.json",
+      "policy_ckpt": "logs/ingolstadt_custom_current_to_dest_incident_20260528/marl_ac_stability_refactor_current_to_dest_seed98_ep100_candpair_decoded_speed_seed98_ep100/checkpoint_ep00100.pt",
+      "train_candidate_source": "current_to_dest with decoded-speed candidate edge cost",
+      "eval_candidate_source": "current_shortest_freeflow",
+      "eval_route_cost_policy": "none",
+      "wm_candidate_edge_cost_source": "freeflow",
+      "wm_edge_cost_source": "decoded_speed",
+      "t_all": 4.3507729468599035,
+      "t_CAV": 4.242673107890499,
+      "t_HDV": 4.422839506172839,
+      "completion_rate": 1.0,
+      "active_av_decisions": 2820,
+      "selected_route_counts": {
+        "route0": 2521,
+        "route1": 219,
+        "route2": 59,
+        "route3": 21
+      }
+    }
+  ],
+  "candidate_set_gap_diagnostic": {
+    "source": "tmp/train_candidate_action_set_gap_summary.json",
+    "compared_agents": 5872,
+    "mean_candidate_set_jaccard": 0.8647406578435188,
+    "median_candidate_set_jaccard": 1.0,
+    "frac_decoded_candidate_strictly_better": 0.01907356948228883,
+    "mean_best_gap_free_minus_decoded_seconds": 0.16887905812068596,
+    "p95_best_gap_free_minus_decoded_seconds": 0.0,
+    "interpretation": "The free-flow generated candidate set is not usually missing a materially better decoded-speed route. This supports treating seed96's weak result as optimization/seed sensitivity rather than a candidate-set mismatch."
+  },
+  "running_or_unfinished": {
+    "name": "seed98_freeflow_mainline_fromscratch_ep400",
+    "run_dir": "logs/ingolstadt_custom_current_to_dest_incident_20260528/marl_ac_stability_refactor_current_to_dest_seed98_ep400_freeflow_mainline_fromscratch_seed98_ep400",
+    "status_when_report_written": "training still running; checkpoint_ep00100.pt exists; do not use as final 400ep result yet"
+  }
+}

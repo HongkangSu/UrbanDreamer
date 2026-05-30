@@ -349,6 +349,8 @@ def append_discrete_actor_critic_samples(
     vehicle_route_credit_reward_steps: Optional[List[torch.Tensor]] = None,
     vehicle_social_reward: Optional[torch.Tensor] = None,
     vehicle_social_reward_steps: Optional[List[torch.Tensor]] = None,
+    vehicle_route_reward_matrix: Optional[torch.Tensor] = None,
+    vehicle_route_reward_matrix_steps: Optional[List[torch.Tensor]] = None,
 ) -> int:
     """Append valid per-vehicle sampled route decisions for actor-critic loss."""
     if obs is None or selected_idx is None or route_valid is None:
@@ -478,6 +480,31 @@ def append_discrete_actor_critic_samples(
             vehicle_social_reward_steps.append(
                 torch.zeros((int(obs_used.shape[0]),), device=obs_used.device, dtype=obs_used.dtype)
             )
+    if vehicle_route_reward_matrix_steps is not None:
+        if (
+            torch.is_tensor(vehicle_route_reward_matrix)
+            and vehicle_route_reward_matrix.numel() > 0
+            and vehicle_route_reward_matrix.dim() == 2
+        ):
+            matrix_n = vehicle_route_reward_matrix[:n].to(device=obs_n.device, dtype=obs_n.dtype)
+            if int(matrix_n.shape[0]) == n and int(matrix_n.shape[1]) == int(valid_n.shape[1]):
+                vehicle_route_reward_matrix_steps.append(matrix_n[usable].detach())
+            else:
+                vehicle_route_reward_matrix_steps.append(
+                    torch.zeros(
+                        (int(obs_used.shape[0]), int(valid_used.shape[1])),
+                        device=obs_used.device,
+                        dtype=obs_used.dtype,
+                    )
+                )
+        else:
+            vehicle_route_reward_matrix_steps.append(
+                torch.zeros(
+                    (int(obs_used.shape[0]), int(valid_used.shape[1])),
+                    device=obs_used.device,
+                    dtype=obs_used.dtype,
+                )
+            )
     step_index_steps.append(
         torch.full(
             (int(obs_used.shape[0]),),
@@ -506,6 +533,7 @@ def pack_discrete_actor_critic_samples(
     vehicle_route_progress_reward_steps: Optional[List[torch.Tensor]] = None,
     vehicle_route_credit_reward_steps: Optional[List[torch.Tensor]] = None,
     vehicle_social_reward_steps: Optional[List[torch.Tensor]] = None,
+    vehicle_route_reward_matrix_steps: Optional[List[torch.Tensor]] = None,
     device: torch.device,
     dtype: torch.dtype,
     obs_dim: int,
@@ -559,6 +587,15 @@ def pack_discrete_actor_critic_samples(
             social_reward_cat = torch.cat(vehicle_social_reward_steps, dim=0).to(device=device, dtype=dtype)
             if int(social_reward_cat.numel()) == int(selected.numel()):
                 vehicle_social_reward = social_reward_cat
+        vehicle_route_reward_matrix = torch.zeros((int(selected.numel()), int(n_routes)), device=device, dtype=dtype)
+        if vehicle_route_reward_matrix_steps:
+            matrix_cat = torch.cat(vehicle_route_reward_matrix_steps, dim=0).to(device=device, dtype=dtype)
+            if (
+                int(matrix_cat.shape[0]) == int(selected.numel())
+                and matrix_cat.dim() == 2
+                and int(matrix_cat.shape[1]) == int(n_routes)
+            ):
+                vehicle_route_reward_matrix = matrix_cat
         return {
             "dreamer_ac_obs": torch.cat(obs_steps, dim=0),
             "dreamer_ac_selected": selected,
@@ -572,6 +609,7 @@ def pack_discrete_actor_critic_samples(
             "dreamer_ac_vehicle_route_progress_reward": vehicle_route_progress_reward,
             "dreamer_ac_vehicle_route_credit_reward": vehicle_route_credit_reward,
             "dreamer_ac_vehicle_social_reward": vehicle_social_reward,
+            "dreamer_ac_vehicle_route_reward_matrix": vehicle_route_reward_matrix,
             "dreamer_ac_sample_adv": torch.zeros((0,), device=device, dtype=dtype),
         }
     return {
@@ -587,6 +625,7 @@ def pack_discrete_actor_critic_samples(
         "dreamer_ac_vehicle_route_progress_reward": torch.zeros((0,), device=device, dtype=dtype),
         "dreamer_ac_vehicle_route_credit_reward": torch.zeros((0,), device=device, dtype=dtype),
         "dreamer_ac_vehicle_social_reward": torch.zeros((0,), device=device, dtype=dtype),
+        "dreamer_ac_vehicle_route_reward_matrix": torch.zeros((0, int(n_routes)), device=device, dtype=dtype),
         "dreamer_ac_sample_adv": torch.zeros((0,), device=device, dtype=dtype),
     }
 
@@ -933,3 +972,115 @@ def discrete_actor_critic_policy_loss(
         }
     )
     return loss, stats
+
+
+def vehicle_route_q_actor_loss(
+    *,
+    actor,
+    q_critic,
+    traj: Dict[str, object],
+    temperature: float,
+    actor_weight: float = 1.0,
+    advantage_clip: float = 5.0,
+    normalize_advantage: bool = True,
+    detach_values: bool = True,
+    entropy: Optional[torch.Tensor] = None,
+    entropy_coef: float = 0.0,
+) -> tuple[Optional[torch.Tensor], Dict[str, float]]:
+    """Policy loss from critic-predicted per-route vehicle Q values.
+
+    Rewards still enter through the route-Q critic target. This helper freezes
+    critic parameters and lets gradients flow only through actor probabilities.
+    """
+    obs = traj.get("dreamer_ac_obs")
+    valid = traj.get("dreamer_ac_valid")
+    step_index = traj.get("dreamer_ac_step_index")
+    sample_weight = traj.get("dreamer_ac_sample_weight")
+    if not (
+        torch.is_tensor(obs)
+        and torch.is_tensor(valid)
+        and torch.is_tensor(step_index)
+        and obs.numel() > 0
+        and valid.numel() > 0
+    ):
+        return None, {
+            "vehicle_route_q_actor_loss": 0.0,
+            "vehicle_route_q_adv_mean": 0.0,
+            "vehicle_route_q_adv_std": 0.0,
+        }
+    n = min(int(obs.shape[0]), int(valid.shape[0]), int(step_index.reshape(-1).shape[0]))
+    if n <= 0:
+        return None, {
+            "vehicle_route_q_actor_loss": 0.0,
+            "vehicle_route_q_adv_mean": 0.0,
+            "vehicle_route_q_adv_std": 0.0,
+        }
+
+    obs_n = obs[:n]
+    valid_n = valid[:n].to(device=obs_n.device)
+    usable = valid_n.any(dim=-1) & torch.isfinite(obs_n).all(dim=-1)
+    if not bool(usable.any().detach().cpu().item()):
+        return None, {
+            "vehicle_route_q_actor_loss": 0.0,
+            "vehicle_route_q_adv_mean": 0.0,
+            "vehicle_route_q_adv_std": 0.0,
+        }
+    obs_used = obs_n[usable]
+    valid_used = valid_n[usable]
+    logits = actor.forward_logits(obs_used)
+    log_probs = _masked_log_probs(logits, valid_used, temperature=float(temperature))
+    probs = torch.exp(log_probs)
+    q_values = q_critic(
+        obs_used,
+        context=None,
+        group_index=step_index.reshape(-1)[:n].to(device=obs_n.device, dtype=torch.long)[usable],
+    )
+    if q_values.dim() != 2 or int(q_values.shape[1]) != int(logits.shape[1]):
+        raise ValueError(
+            f"route-Q critic must return (N, K), got {tuple(q_values.shape)} for logits {tuple(logits.shape)}"
+        )
+    q_actor = q_values.detach() if bool(detach_values) else q_values
+    q_actor = q_actor.to(device=logits.device, dtype=logits.dtype)
+    q_actor = q_actor.masked_fill(~valid_used, 0.0)
+    baseline = (probs.detach() * q_actor).sum(dim=-1, keepdim=True)
+    advantage = (q_actor - baseline).masked_fill(~valid_used, 0.0)
+    if bool(normalize_advantage):
+        valid_adv = advantage[valid_used]
+        if int(valid_adv.numel()) > 1:
+            mean = valid_adv.detach().mean()
+            std = valid_adv.detach().std(unbiased=False).clamp_min(1e-6)
+            advantage = advantage / std
+            advantage = advantage - (mean / std)
+            advantage = advantage.masked_fill(~valid_used, 0.0)
+    if float(advantage_clip) > 0.0:
+        advantage = advantage.clamp(-float(advantage_clip), float(advantage_clip))
+
+    per_sample_obj = (probs * advantage).sum(dim=-1)
+    sample_w = torch.ones_like(per_sample_obj)
+    if torch.is_tensor(sample_weight) and sample_weight.numel() > 0:
+        weight_n = sample_weight.reshape(-1)[:n].to(device=obs_n.device, dtype=obs_n.dtype)
+        if int(weight_n.numel()) == n:
+            sample_w = weight_n[usable].to(device=per_sample_obj.device, dtype=per_sample_obj.dtype).clamp_min(0.0)
+    finite = torch.isfinite(per_sample_obj) & torch.isfinite(sample_w)
+    if not bool(finite.any().detach().cpu().item()):
+        return None, {
+            "vehicle_route_q_actor_loss": 0.0,
+            "vehicle_route_q_adv_mean": 0.0,
+            "vehicle_route_q_adv_std": 0.0,
+        }
+    weight_sum = sample_w[finite].sum().clamp_min(1e-6)
+    loss = -float(actor_weight) * (sample_w[finite] * per_sample_obj[finite]).sum() / weight_sum
+    if entropy is not None and torch.is_tensor(entropy) and float(entropy_coef) != 0.0:
+        loss = loss - float(entropy_coef) * entropy.to(device=loss.device, dtype=loss.dtype)
+    valid_adv_used = advantage[finite][valid_used[finite]]
+    return loss, {
+        "vehicle_route_q_actor_loss": float(loss.detach().cpu().item()),
+        "vehicle_route_q_adv_mean": (
+            float(valid_adv_used.detach().mean().cpu().item())
+            if int(valid_adv_used.numel()) > 0 else 0.0
+        ),
+        "vehicle_route_q_adv_std": (
+            float(valid_adv_used.detach().std(unbiased=False).cpu().item())
+            if int(valid_adv_used.numel()) > 1 else 0.0
+        ),
+    }

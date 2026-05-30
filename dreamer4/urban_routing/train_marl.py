@@ -42,6 +42,7 @@ try:
     from .dreamer_actor_critic import (
         CentralizedLatentValueCritic,
         CentralizedVehicleValueCritic,
+        CentralizedVehicleValueCritic as CentralizedVehicleRouteQCritic,
         VehicleRouteActor,
         freeze_module,
         lambda_return,
@@ -54,7 +55,7 @@ try:
     from . import dreamer_policy_gradient as dreamer_pg
     from . import dreamer_reward_readouts as rollout_rewards
     from .dreamer_checkpoint import (
-        _restore_dreamer_extra_state,
+        _restore_dreamer_extra_state as _checkpoint_restore_dreamer_extra_state,
         _move_nested_tensors,
         capture_rng_state,
         count_fresh_pending_trajs,
@@ -97,7 +98,7 @@ try:
         _vehicle_potential_progress_terms_from_paths,
     )
     from .experiment_settings import add_settings_arg, apply_stage_defaults, parse_settings_arg
-    from .flow_projector import PathTopology
+    from .flow_projector import PathTopology, RouteRegistry
     from .departure_schedule import (
         build_departure_schedule, rebuild_active_set,
         compute_avg_edge_time, compute_avg_route_steps,
@@ -121,6 +122,7 @@ try:
         build_vehicle_obs_from_path_batch,
         build_vehicle_obs_vectorized,
         build_vehicle_route_cost_obs_features,
+        choose_vehicle_next_edge,
         advance_vehicle_along_path_time_budget,
         vehicle_route_feature_dim,
     )
@@ -130,6 +132,7 @@ except ImportError:
     from dreamer_actor_critic import (
         CentralizedLatentValueCritic,
         CentralizedVehicleValueCritic,
+        CentralizedVehicleValueCritic as CentralizedVehicleRouteQCritic,
         VehicleRouteActor,
         freeze_module,
         lambda_return,
@@ -142,7 +145,7 @@ except ImportError:
     import dreamer_policy_gradient as dreamer_pg
     import dreamer_reward_readouts as rollout_rewards
     from dreamer_checkpoint import (
-        _restore_dreamer_extra_state,
+        _restore_dreamer_extra_state as _checkpoint_restore_dreamer_extra_state,
         _move_nested_tensors,
         capture_rng_state,
         count_fresh_pending_trajs,
@@ -185,7 +188,7 @@ except ImportError:
         _vehicle_potential_progress_terms_from_paths,
     )
     from experiment_settings import add_settings_arg, apply_stage_defaults, parse_settings_arg
-    from flow_projector import PathTopology
+    from flow_projector import PathTopology, RouteRegistry
     from departure_schedule import (
         build_departure_schedule, rebuild_active_set,
         compute_avg_edge_time, compute_avg_route_steps,
@@ -209,11 +212,22 @@ except ImportError:
         build_vehicle_obs_from_path_batch,
         build_vehicle_obs_vectorized,
         build_vehicle_route_cost_obs_features,
+        choose_vehicle_next_edge,
         advance_vehicle_along_path_time_budget,
         vehicle_route_feature_dim,
     )
 
 logger = logging.getLogger(__name__)
+
+
+def _restore_dreamer_extra_state(extra_state, *, device):
+    """Compatibility wrapper for older train_marl callers."""
+    pending_trajs, update_id, _restored_extra_state = _checkpoint_restore_dreamer_extra_state(
+        extra_state,
+        device=device,
+    )
+    return pending_trajs, update_id
+
 
 ROUTE_COST_RETURN_DISCOUNT = 1.0
 LEGACY_ACTOR_ONLY_LOSS_WEIGHTS = (
@@ -846,7 +860,7 @@ class TrainConfig:
     wm_cfm_init_mode: str = "zero"
     wm_policy_obs_source: str = "decoder_volume_tt"  # decoder_volume_tt | decoder_volume_tt_route_head | decoder_volume | decoder | obs_proj
     wm_edge_cost_source: str = "decoded_speed"  # bpr_volume | decoded_speed | route_head
-    wm_candidate_edge_cost_source: str = "auto"  # auto | bpr_volume | decoded_speed | route_head
+    wm_candidate_edge_cost_source: str = "auto"  # auto/freeflow | bpr_volume | decoded_speed | route_head
     wm_decoded_speed_min_ratio: float = 0.05
     wm_decoded_speed_max_ratio: float = 1.50
     wm_decoded_speed_excess_scale: float = 1.0
@@ -888,10 +902,10 @@ class TrainConfig:
     stackelberg_n_iters: int = 10
     stackelberg_damping: float = 0.5
     vehicle_path_penalty_factor: float = 3.0
-    vehicle_candidate_source: str = "current_to_dest"  # current_to_dest | od_suffix
+    vehicle_candidate_source: str = "current_to_dest"  # current_to_dest | od_suffix (deprecated legacy)
     vehicle_path_cache_mode: str = "lazy"  # lazy | precompute
     vehicle_path_cache_max_entries: int = 250000
-    vehicle_routes_csv: str = ""       # optional route artifacts CSV for od_suffix vehicle candidates
+    vehicle_routes_csv: str = ""       # optional route artifacts CSV for deprecated od_suffix candidates
     vehicle_obs_include_global: bool = True
     vehicle_obs_route_stats: str = "mean"
     vehicle_obs_include_route_costs: bool = False
@@ -953,6 +967,14 @@ class TrainConfig:
     dreamer_vehicle_critic_attention_heads: int = 4
     dreamer_vehicle_critic_value_coef: float = 1.0
     dreamer_vehicle_critic_return_normalizer: bool = True
+    dreamer_vehicle_route_q_critic: bool = False
+    dreamer_vehicle_route_q_critic_value_coef: float = 1.0
+    dreamer_vehicle_route_q_actor_weight: float = 0.0
+    dreamer_vehicle_route_q_actor_start_episode: int = -1
+    dreamer_vehicle_route_q_target_discount: float = 0.0
+    dreamer_vehicle_route_q_advantage_clip: float = 5.0
+    dreamer_vehicle_route_q_normalize_advantages: bool = True
+    dreamer_vehicle_route_q_detach_actor_values: bool = True
     dreamer_allow_legacy_actor_only_losses: bool = False
     dreamer_actor_lr: float = 0.0  # 0 keeps legacy cfg.lr
     dreamer_actor_lr_decay_start_episode: int = -1
@@ -1204,6 +1226,10 @@ DREAMER_UPDATE_SCALAR_KEYS = (
     "vehicle_route_progress_reward_mean", "vehicle_route_progress_reward_std",
     "vehicle_route_credit_reward_mean", "vehicle_route_credit_reward_std",
     "vehicle_route_credit_gate_frac", "vehicle_route_credit_selected_gate_frac",
+    "vehicle_route_q_loss", "vehicle_route_q_target_mean", "vehicle_route_q_target_std",
+    "vehicle_route_q_actor_loss",
+    "vehicle_route_q_adv_mean", "vehicle_route_q_adv_std",
+    "vehicle_route_q_explained_variance",
     "vehicle_social_reward_mean", "vehicle_social_reward_std",
     "vehicle_return_discount",
     "critic_target_mean", "critic_target_std", "critic_explained_variance",
@@ -1216,8 +1242,10 @@ def resolve_wm_candidate_edge_cost_source(cfg: TrainConfig) -> str:
     """Return the edge-cost source used only for imagined candidate path generation."""
     src = str(getattr(cfg, "wm_candidate_edge_cost_source", "auto") or "auto").strip().lower()
     if src == "auto":
-        src = str(getattr(cfg, "wm_edge_cost_source", "decoded_speed") or "decoded_speed").strip().lower()
-    if src not in {"bpr_volume", "decoded_speed", "route_head"}:
+        src = "freeflow"
+    if src in {"free_flow", "free-flow", "ff"}:
+        src = "freeflow"
+    if src not in {"freeflow", "bpr_volume", "decoded_speed", "route_head"}:
         raise ValueError(f"Unsupported wm_candidate_edge_cost_source={src!r}")
     return src
 
@@ -1225,7 +1253,7 @@ def resolve_wm_candidate_edge_cost_source(cfg: TrainConfig) -> str:
 def uses_explicit_dynamic_candidate_edge_cost_source(cfg: TrainConfig) -> bool:
     """True when the user explicitly asks candidate generation to track WM state costs."""
     src = str(getattr(cfg, "wm_candidate_edge_cost_source", "auto") or "auto").strip().lower()
-    return src != "auto"
+    return src not in {"auto", "freeflow", "free_flow", "free-flow", "ff"}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1403,6 +1431,24 @@ def edge_tt_from_latent_state(
             1.0 + float(bpr_alpha) * (v_e / np.maximum(capacities, 1.0)) ** float(bpr_beta)
         )
     return edge_dyn, v_e.astype(np.float32), free_flow.astype(np.float32), t_e.astype(np.float32)
+
+
+def _free_flow_edge_tt_numpy(wm: UrbanWorldModel) -> np.ndarray:
+    lengths = np.asarray(
+        wm._registry.lengths if wm._registry.lengths is not None
+        else np.ones((wm.n_edges,), dtype=np.float32) * 100.0,
+        dtype=np.float32,
+    )
+    speed_limits = np.asarray(wm._registry.speed_limits, dtype=np.float32)
+    n = min(int(lengths.shape[0]), int(speed_limits.shape[0]), int(wm.n_edges))
+    if n <= 0:
+        return np.ones((int(wm.n_edges),), dtype=np.float32)
+    out = lengths[:n] / np.maximum(speed_limits[:n], 0.1)
+    if n < int(wm.n_edges):
+        padded = np.ones((int(wm.n_edges),), dtype=np.float32)
+        padded[:n] = out.astype(np.float32)
+        return padded
+    return out.astype(np.float32)
 
 
 def _edge_tt_tensor_from_decoded(
@@ -1908,6 +1954,56 @@ def _selected_route_vehicle_rewards_from_cost_matrix(
     return torch.nan_to_num(reward, nan=0.0, posinf=0.0, neginf=0.0)
 
 
+def _route_vehicle_reward_matrix_from_cost_matrix(
+    *,
+    route_costs: torch.Tensor,
+    route_valid: torch.Tensor,
+    reward_weight: float,
+    reward_scale: float,
+    reward_mode: str,
+    step_interval: float,
+    elapsed_time: Optional[torch.Tensor],
+    progress_cap: float,
+    remaining_tt_eps: float,
+    normalize_regret: bool,
+    temperature: float,
+) -> torch.Tensor:
+    """Per-route version of the critic-visible vehicle route reward."""
+    n = min(int(route_costs.shape[0]), int(route_valid.shape[0]))
+    if n <= 0:
+        return torch.zeros_like(route_costs)
+    costs = route_costs[:n]
+    valid = route_valid[:n].to(device=route_costs.device)
+    mode_key = str(reward_mode or "progress_fraction").strip().lower()
+    if mode_key in {"progress_fraction", "step_progress", "trip_progress_fraction"}:
+        progress_costs = _route_credit_base_cost_matrix(
+            route_tt_costs=costs,
+            route_valid=valid,
+            mode="progress_fraction",
+            step_interval=float(step_interval),
+            elapsed_time=elapsed_time,
+            remaining_tt_eps=float(remaining_tt_eps),
+            progress_cap=float(progress_cap),
+        )
+        reward = -float(reward_weight) * progress_costs * float(reward_scale)
+    elif bool(normalize_regret):
+        large = torch.finfo(costs.dtype).max / 4.0
+        min_cost = costs.masked_fill(~valid, large).min(dim=-1, keepdim=True).values
+        regret = (costs - min_cost) / float(max(temperature, 1e-6))
+        reward = -float(reward_weight) * regret * float(reward_scale)
+    else:
+        if mode_key not in {"", "route_tt", "remaining_tt", "full_path", "legacy"}:
+            raise ValueError(
+                f"Unsupported dreamer_route_cost_reward_mode={reward_mode!r}; "
+                "expected progress_fraction or route_tt"
+            )
+        reward = -float(reward_weight) * costs * float(reward_scale)
+    reward = torch.where(valid, reward, torch.zeros_like(reward))
+    out = torch.zeros_like(route_costs)
+    out[:n] = torch.nan_to_num(reward, nan=0.0, posinf=0.0, neginf=0.0)
+    return out
+
+
 def _selected_route_credit_vehicle_rewards_from_cost_matrix(
     *,
     route_credit_costs: torch.Tensor,
@@ -1982,6 +2078,125 @@ def _selected_route_credit_vehicle_rewards_from_cost_matrix(
     reward = float(reward_weight) * score * float(reward_scale)
     reward = torch.where(selected_valid, reward, torch.zeros_like(reward))
     return torch.nan_to_num(reward, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def _route_credit_vehicle_reward_matrix_from_cost_matrix(
+    *,
+    route_credit_costs: torch.Tensor,
+    route_valid: torch.Tensor,
+    reward_weight: float,
+    reward_scale: float,
+    reward_transform: str = "negative_cost",
+    normalize: bool = False,
+    temperature: float = 1.0,
+) -> torch.Tensor:
+    """Per-route version of critic-visible route-credit rewards."""
+    n = min(int(route_credit_costs.shape[0]), int(route_valid.shape[0]))
+    if n <= 0 or float(reward_weight) == 0.0:
+        return torch.zeros_like(route_credit_costs)
+    costs = route_credit_costs[:n]
+    valid = route_valid[:n].to(device=route_credit_costs.device)
+    transform_key = str(reward_transform or "negative_cost").strip().lower()
+    if transform_key in {"", "negative_cost", "cost", "legacy", "absolute_cost"}:
+        score = -costs
+    elif transform_key in {"relative_mean", "mean", "mean_baseline", "advantage"}:
+        valid_f = valid.to(dtype=costs.dtype)
+        valid_count = valid_f.sum(dim=-1, keepdim=True).clamp_min(1.0)
+        cost_mean = (costs.masked_fill(~valid, 0.0) * valid_f).sum(dim=-1, keepdim=True) / valid_count
+        score = cost_mean - costs
+        if bool(normalize):
+            centered = (costs - cost_mean).masked_fill(~valid, 0.0)
+            cost_std = torch.sqrt(
+                (centered.square() * valid_f).sum(dim=-1, keepdim=True) / valid_count
+            ).clamp_min(1e-6)
+            score = score / cost_std
+        else:
+            score = score / float(max(temperature, 1e-6))
+    elif transform_key in {"relative_min", "min_regret", "best_regret"}:
+        large = torch.finfo(costs.dtype).max / 4.0
+        min_cost = costs.masked_fill(~valid, large).min(dim=-1, keepdim=True).values
+        score = min_cost - costs
+        if bool(normalize):
+            valid_f = valid.to(dtype=costs.dtype)
+            valid_count = valid_f.sum(dim=-1, keepdim=True).clamp_min(1.0)
+            cost_mean = (costs.masked_fill(~valid, 0.0) * valid_f).sum(dim=-1, keepdim=True) / valid_count
+            centered = (costs - cost_mean).masked_fill(~valid, 0.0)
+            cost_std = torch.sqrt(
+                (centered.square() * valid_f).sum(dim=-1, keepdim=True) / valid_count
+            ).clamp_min(1e-6)
+            score = score / cost_std
+        else:
+            score = score / float(max(temperature, 1e-6))
+    elif transform_key in {"zscore", "relative_zscore", "standardized_mean"}:
+        valid_f = valid.to(dtype=costs.dtype)
+        valid_count = valid_f.sum(dim=-1, keepdim=True).clamp_min(1.0)
+        cost_mean = (costs.masked_fill(~valid, 0.0) * valid_f).sum(dim=-1, keepdim=True) / valid_count
+        centered = (costs - cost_mean).masked_fill(~valid, 0.0)
+        cost_std = torch.sqrt(
+            (centered.square() * valid_f).sum(dim=-1, keepdim=True) / valid_count
+        ).clamp_min(1e-6)
+        score = (cost_mean - costs) / cost_std
+    else:
+        raise ValueError(
+            f"Unsupported route-credit reward transform {reward_transform!r}; "
+            "expected negative_cost, relative_mean, relative_min, or zscore"
+        )
+    reward = float(reward_weight) * score * float(reward_scale)
+    reward = torch.where(valid, reward, torch.zeros_like(reward))
+    out = torch.zeros_like(route_credit_costs)
+    out[:n] = torch.nan_to_num(reward, nan=0.0, posinf=0.0, neginf=0.0)
+    return out
+
+
+def _vehicle_route_q_targets(
+    *,
+    reward_matrix: torch.Tensor,
+    route_valid: torch.Tensor,
+    vehicle_ids: Optional[torch.Tensor],
+    step_index: Optional[torch.Tensor],
+    bootstrap_values: Optional[torch.Tensor] = None,
+    discount: float = 0.0,
+) -> torch.Tensor:
+    """Build critic targets for per-vehicle per-route Q values.
+
+    The default is a one-step critic-visible reward matrix.  Multi-step
+    bootstrapping is only used when a real next-sample sequence is supplied;
+    the same observation is never reused as its own bootstrap target.
+    """
+    if reward_matrix.dim() != 2:
+        raise ValueError(f"expected reward_matrix shape (N, K), got {tuple(reward_matrix.shape)}")
+    n = int(reward_matrix.shape[0])
+    targets = torch.nan_to_num(reward_matrix.detach(), nan=0.0, posinf=0.0, neginf=0.0).clone()
+    if n <= 0 or float(discount) == 0.0 or bootstrap_values is None:
+        return targets.masked_fill(~route_valid[:n].to(device=targets.device, dtype=torch.bool), 0.0)
+    if bootstrap_values.shape != reward_matrix.shape:
+        raise ValueError(
+            f"bootstrap_values shape {tuple(bootstrap_values.shape)} must match reward_matrix {tuple(reward_matrix.shape)}"
+        )
+    if vehicle_ids is None or step_index is None:
+        return targets.masked_fill(~route_valid[:n].to(device=targets.device, dtype=torch.bool), 0.0)
+    valid = route_valid[:n].to(device=targets.device, dtype=torch.bool)
+    veh = vehicle_ids.reshape(-1)[:n].to(device=targets.device, dtype=torch.long)
+    step = step_index.reshape(-1)[:n].to(device=targets.device, dtype=torch.long)
+    bootstrap = torch.nan_to_num(
+        bootstrap_values.detach().to(device=targets.device, dtype=targets.dtype),
+        nan=0.0,
+        posinf=0.0,
+        neginf=0.0,
+    )
+    finite = (veh >= 0) & valid.any(dim=-1)
+    if not bool(finite.any().detach().cpu().item()):
+        return targets.masked_fill(~valid, 0.0)
+    out = targets.clone()
+    gamma = float(discount)
+    for veh_id in torch.unique(veh[finite], sorted=True):
+        idx = torch.nonzero((veh == veh_id) & finite, as_tuple=False).reshape(-1)
+        if int(idx.numel()) <= 1:
+            continue
+        order = torch.argsort(step[idx], stable=True)
+        ordered = idx[order]
+        out[ordered[:-1]] = out[ordered[:-1]] + gamma * bootstrap[ordered[1:]]
+    return out.masked_fill(~valid, 0.0)
 
 
 def _route_credit_cost_gate_mask(
@@ -2405,7 +2620,10 @@ def imagined_episode_dynamic_dreamer(
     z = wm.encode_observation(flow_0.numpy()).to(device=device, dtype=torch.float32)
 
     active_avs, active_hdvs = rebuild_active_set(departure_schedule, s, avg_route_steps)
-    adj_list = PathTopology._build_adj_list(wm._registry.adjacency)
+    adj_list = RouteRegistry._build_vehicle_adj_list(
+        wm._registry.adjacency,
+        getattr(wm._registry, "passenger_allowed", None),
+    )
     capacities_np = np.asarray(wm._registry.capacities, dtype=np.float32)
     candidate_edge_cost_source = resolve_wm_candidate_edge_cost_source(cfg)
 
@@ -2414,13 +2632,16 @@ def imagined_episode_dynamic_dreamer(
     )
 
     if path_cache is None and not use_od_suffix_candidates:
-        _, _, _, t_e_ref = edge_tt_from_latent_state(
-            wm=wm, z=z.detach(), bpr_alpha=cfg.bpr_alpha, bpr_beta=cfg.bpr_beta,
-            edge_cost_source=candidate_edge_cost_source,
-            decoded_speed_min_ratio=cfg.wm_decoded_speed_min_ratio,
-            decoded_speed_max_ratio=cfg.wm_decoded_speed_max_ratio,
-            decoded_speed_excess_scale=cfg.wm_decoded_speed_excess_scale,
-        )
+        if candidate_edge_cost_source == "freeflow":
+            t_e_ref = _free_flow_edge_tt_numpy(wm)
+        else:
+            _, _, _, t_e_ref = edge_tt_from_latent_state(
+                wm=wm, z=z.detach(), bpr_alpha=cfg.bpr_alpha, bpr_beta=cfg.bpr_beta,
+                edge_cost_source=candidate_edge_cost_source,
+                decoded_speed_min_ratio=cfg.wm_decoded_speed_min_ratio,
+                decoded_speed_max_ratio=cfg.wm_decoded_speed_max_ratio,
+                decoded_speed_excess_scale=cfg.wm_decoded_speed_excess_scale,
+            )
         dest_edges_unique = list({
             int(v.get("dest_edge", 0))
             for dep in departure_schedule.values()
@@ -2466,6 +2687,7 @@ def imagined_episode_dynamic_dreamer(
     dreamer_ac_vehicle_route_progress_reward_steps: List[torch.Tensor] = []
     dreamer_ac_vehicle_route_credit_reward_steps: List[torch.Tensor] = []
     dreamer_ac_vehicle_social_reward_steps: List[torch.Tensor] = []
+    dreamer_ac_vehicle_route_reward_matrix_steps: List[torch.Tensor] = []
     vehicle_route_credit_gate_fracs: List[float] = []
     vehicle_route_credit_selected_gate_fracs: List[float] = []
     dreamer_ac_selected_nonzero_fracs: List[float] = []
@@ -2619,21 +2841,37 @@ def imagined_episode_dynamic_dreamer(
         vehicle_route_progress_reward_for_ac = None
         vehicle_route_credit_reward_for_ac = None
         vehicle_social_reward_for_ac = None
+        vehicle_route_reward_matrix_for_ac = None
         valid_action_mask_for_update = None
         sampled_obs_t = None
 
         if n_active_av > 0:
             edge_feats_obs = wm.latent_edge_features(z).detach().cpu().numpy().astype(np.float32)
-            _, _, _, t_e_curr = edge_tt_from_latent_state(
+            _, _, _, t_e_route_cost = edge_tt_from_latent_state(
                 wm=wm,
                 z=z.detach(),
                 bpr_alpha=cfg.bpr_alpha,
                 bpr_beta=cfg.bpr_beta,
-                edge_cost_source=candidate_edge_cost_source,
+                edge_cost_source=cfg.wm_edge_cost_source,
                 decoded_speed_min_ratio=cfg.wm_decoded_speed_min_ratio,
                 decoded_speed_max_ratio=cfg.wm_decoded_speed_max_ratio,
                 decoded_speed_excess_scale=cfg.wm_decoded_speed_excess_scale,
             )
+            if candidate_edge_cost_source == "freeflow":
+                t_e_candidate = _free_flow_edge_tt_numpy(wm)
+            elif candidate_edge_cost_source == str(cfg.wm_edge_cost_source).strip().lower():
+                t_e_candidate = t_e_route_cost
+            else:
+                _, _, _, t_e_candidate = edge_tt_from_latent_state(
+                    wm=wm,
+                    z=z.detach(),
+                    bpr_alpha=cfg.bpr_alpha,
+                    bpr_beta=cfg.bpr_beta,
+                    edge_cost_source=candidate_edge_cost_source,
+                    decoded_speed_min_ratio=cfg.wm_decoded_speed_min_ratio,
+                    decoded_speed_max_ratio=cfg.wm_decoded_speed_max_ratio,
+                    decoded_speed_excess_scale=cfg.wm_decoded_speed_excess_scale,
+                )
 
             current_edges_np = np.asarray(
                 [int(av.get("current_edge", av["origin_edge"])) for av in active_avs],
@@ -2658,18 +2896,18 @@ def imagined_episode_dynamic_dreamer(
                 )
             elif path_cache is not None:
                 if isinstance(path_cache, LazyVehiclePathCache):
-                    assert t_e_curr is not None
-                    path_batch = path_cache.lookup_batch(current_edges_np, dest_edges_np, done_np, t_e_curr)
+                    assert t_e_candidate is not None
+                    path_batch = path_cache.lookup_batch(current_edges_np, dest_edges_np, done_np, t_e_candidate)
                 else:
                     path_batch = path_cache.lookup_batch(current_edges_np, dest_edges_np, done_np)
             else:
-                assert t_e_curr is not None
+                assert t_e_candidate is not None
                 path_batch = []
                 for i in range(n_active_av):
                     path_batch.append(
                         build_diverse_paths_current_to_dest(
                             adj_list=adj_list,
-                            edge_tt=t_e_curr,
+                            edge_tt=t_e_candidate,
                             src_idx=int(current_edges_np[i]),
                             dst_idx=int(dest_edges_np[i]),
                             K=K,
@@ -2683,23 +2921,6 @@ def imagined_episode_dynamic_dreamer(
                 or route_adv_route_cost_matrix_needed
                 or rollout_policy in {"route_cost_greedy", "route_cost_pressure_greedy"}
             )
-            if (
-                need_route_cost_matrix
-                and (t_e_curr is None or candidate_edge_cost_source != str(cfg.wm_edge_cost_source).strip().lower())
-            ):
-                _, _, _, t_e_route_cost = edge_tt_from_latent_state(
-                    wm=wm,
-                    z=z.detach(),
-                    bpr_alpha=cfg.bpr_alpha,
-                    bpr_beta=cfg.bpr_beta,
-                    edge_cost_source=cfg.wm_edge_cost_source,
-                    decoded_speed_min_ratio=cfg.wm_decoded_speed_min_ratio,
-                    decoded_speed_max_ratio=cfg.wm_decoded_speed_max_ratio,
-                    decoded_speed_excess_scale=cfg.wm_decoded_speed_excess_scale,
-                )
-            else:
-                t_e_route_cost = t_e_curr
-
             valid_path_count = 0
             valid_path_agents = 0
             for paths in path_batch:
@@ -2716,7 +2937,7 @@ def imagined_episode_dynamic_dreamer(
                 path_batch=path_batch,
                 include_global=bool(cfg.vehicle_obs_include_global),
                 route_stats=str(cfg.vehicle_obs_route_stats),
-                edge_cost=t_e_curr,
+                edge_cost=t_e_route_cost,
                 include_route_costs=bool(cfg.vehicle_obs_include_route_costs),
                 include_fleet_pressure=False,
             )
@@ -2860,8 +3081,6 @@ def imagined_episode_dynamic_dreamer(
                             )
                         )
             elif rollout_policy in {"route_cost_greedy", "route_cost_pressure_greedy"}:
-                if t_e_route_cost is None:
-                    t_e_route_cost = t_e_curr
                 edge_cost_t = torch.from_numpy(np.asarray(t_e_route_cost, dtype=np.float32)).to(
                     device=device,
                     dtype=logits.dtype,
@@ -3353,7 +3572,7 @@ def imagined_episode_dynamic_dreamer(
                 n_edges=n_edges,
                 n_routes=K,
                 current_edges=torch.from_numpy(current_edges_np).to(device=device),
-                edge_travel_times=torch.from_numpy(np.asarray(t_e_curr, dtype=np.float32)).to(device=device),
+                edge_travel_times=torch.from_numpy(np.asarray(t_e_route_cost, dtype=np.float32)).to(device=device),
                 horizon_seconds=float(cfg.step_interval),
             )
             with torch.no_grad():
@@ -3377,7 +3596,7 @@ def imagined_episode_dynamic_dreamer(
                     av,
                     current_edge=int(current_edges_np[i]),
                     chosen_path=chosen_path,
-                    edge_travel_times=np.asarray(t_e_curr, dtype=np.float32),
+                    edge_travel_times=np.asarray(t_e_route_cost, dtype=np.float32),
                     step_interval=float(cfg.step_interval),
                     n_edges=n_edges,
                 )
@@ -3602,6 +3821,24 @@ def imagined_episode_dynamic_dreamer(
                                 )
                             )
                             vehicle_reward_parts.append(vehicle_route_progress_reward_for_ac)
+                            vehicle_route_reward_matrix_for_ac = (
+                                _route_vehicle_reward_matrix_from_cost_matrix(
+                                    route_costs=vehicle_reward_costs,
+                                    route_valid=vehicle_reward_valid,
+                                    reward_weight=route_reward_weight,
+                                    reward_scale=float(getattr(cfg, "vehicle_reward_scale", 1.0)),
+                                    reward_mode=str(getattr(cfg, "dreamer_route_cost_reward_mode", "progress_fraction")),
+                                    step_interval=float(getattr(cfg, "step_interval", 30.0)),
+                                    elapsed_time=torch.from_numpy(elapsed_time_np).to(
+                                        device=vehicle_reward_costs.device,
+                                        dtype=vehicle_reward_costs.dtype,
+                                    ),
+                                    progress_cap=float(getattr(cfg, "dreamer_ac_route_credit_progress_cap", 1.0)),
+                                    remaining_tt_eps=float(getattr(cfg, "dreamer_ac_route_credit_remaining_tt_eps", 1.0)),
+                                    normalize_regret=bool(getattr(cfg, "dreamer_route_cost_reward_normalize_regret", False)),
+                                    temperature=float(getattr(cfg, "dreamer_route_cost_reward_temperature", 60.0)),
+                                )
+                            )
                         route_credit_reward_weight = float(
                             getattr(cfg, "dreamer_vehicle_route_credit_reward_weight", 0.0)
                         )
@@ -3784,6 +4021,40 @@ def imagined_episode_dynamic_dreamer(
                                 )
                             )
                             vehicle_reward_parts.append(vehicle_route_credit_reward_for_ac)
+                            route_credit_reward_matrix = (
+                                _route_credit_vehicle_reward_matrix_from_cost_matrix(
+                                    route_credit_costs=route_credit_costs,
+                                    route_valid=route_credit_valid,
+                                    reward_weight=route_credit_reward_weight,
+                                    reward_scale=float(getattr(cfg, "vehicle_reward_scale", 1.0)),
+                                    reward_transform=str(
+                                        getattr(
+                                            cfg,
+                                            "dreamer_vehicle_route_credit_reward_transform",
+                                            "negative_cost",
+                                        )
+                                    ),
+                                    normalize=bool(
+                                        getattr(
+                                            cfg,
+                                            "dreamer_vehicle_route_credit_reward_normalize",
+                                            False,
+                                        )
+                                    ),
+                                    temperature=float(
+                                        getattr(
+                                            cfg,
+                                            "dreamer_vehicle_route_credit_reward_temperature",
+                                            1.0,
+                                        )
+                                    ),
+                                )
+                            )
+                            vehicle_route_reward_matrix_for_ac = (
+                                route_credit_reward_matrix
+                                if vehicle_route_reward_matrix_for_ac is None
+                                else vehicle_route_reward_matrix_for_ac + route_credit_reward_matrix
+                            )
                         social_reward_weight = float(
                             getattr(cfg, "dreamer_vehicle_social_reward_weight", 0.0)
                         )
@@ -3853,6 +4124,7 @@ def imagined_episode_dynamic_dreamer(
                 vehicle_route_progress_reward_steps=dreamer_ac_vehicle_route_progress_reward_steps,
                 vehicle_route_credit_reward_steps=dreamer_ac_vehicle_route_credit_reward_steps,
                 vehicle_social_reward_steps=dreamer_ac_vehicle_social_reward_steps,
+                vehicle_route_reward_matrix_steps=dreamer_ac_vehicle_route_reward_matrix_steps,
                 selected_nonzero_fracs=dreamer_ac_selected_nonzero_fracs,
                 obs=sampled_obs_t,
                 selected_idx=selected_route_idx_t_for_update,
@@ -3866,6 +4138,7 @@ def imagined_episode_dynamic_dreamer(
                 vehicle_route_progress_reward=vehicle_route_progress_reward_for_ac,
                 vehicle_route_credit_reward=vehicle_route_credit_reward_for_ac,
                 vehicle_social_reward=vehicle_social_reward_for_ac,
+                vehicle_route_reward_matrix=vehicle_route_reward_matrix_for_ac,
             )
         reward_requires_grad = bool(reward_t.requires_grad)
         if reward_requires_grad:
@@ -4083,6 +4356,7 @@ def imagined_episode_dynamic_dreamer(
         vehicle_route_progress_reward_steps=dreamer_ac_vehicle_route_progress_reward_steps,
         vehicle_route_credit_reward_steps=dreamer_ac_vehicle_route_credit_reward_steps,
         vehicle_social_reward_steps=dreamer_ac_vehicle_social_reward_steps,
+        vehicle_route_reward_matrix_steps=dreamer_ac_vehicle_route_reward_matrix_steps,
         device=device,
         dtype=z.dtype,
         obs_dim=int(getattr(actor, "obs_dim", 0)),
@@ -4198,6 +4472,14 @@ def imagined_episode_dynamic_dreamer(
         "vehicle_route_credit_reward_std": (
             float(ac_samples["dreamer_ac_vehicle_route_credit_reward"].detach().std(unbiased=False).cpu().item())
             if ac_samples["dreamer_ac_vehicle_route_credit_reward"].numel() > 1 else 0.0
+        ),
+        "vehicle_route_q_reward_matrix_mean": (
+            float(ac_samples["dreamer_ac_vehicle_route_reward_matrix"].detach().mean().cpu().item())
+            if ac_samples["dreamer_ac_vehicle_route_reward_matrix"].numel() > 0 else 0.0
+        ),
+        "vehicle_route_q_reward_matrix_std": (
+            float(ac_samples["dreamer_ac_vehicle_route_reward_matrix"].detach().std(unbiased=False).cpu().item())
+            if ac_samples["dreamer_ac_vehicle_route_reward_matrix"].numel() > 1 else 0.0
         ),
         "vehicle_route_credit_gate_frac": (
             float(np.mean(vehicle_route_credit_gate_fracs))
@@ -4324,6 +4606,9 @@ def dreamer_update(
     vehicle_critic_optimizer: Optional[torch.optim.Optimizer] = None,
     target_vehicle_critic: Optional[CentralizedVehicleValueCritic] = None,
     vehicle_return_normalizer: Optional[DreamerReturnNormalizer] = None,
+    vehicle_route_q_critic: Optional[CentralizedVehicleRouteQCritic] = None,
+    vehicle_route_q_optimizer: Optional[torch.optim.Optimizer] = None,
+    target_vehicle_route_q_critic: Optional[CentralizedVehicleRouteQCritic] = None,
     actor_gate_state: Optional[Dict[str, Any]] = None,
     actor_anchor: Optional[VehicleRouteActor] = None,
     actor_probe_snapshot: Optional[Dict[str, object]] = None,
@@ -4331,6 +4616,7 @@ def dreamer_update(
     actor_losses: List[torch.Tensor] = []
     critic_losses: List[torch.Tensor] = []
     vehicle_critic_losses: List[torch.Tensor] = []
+    vehicle_route_q_losses: List[torch.Tensor] = []
     q_actor_items: List[
         Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], torch.Tensor, Optional[torch.Tensor]]
     ] = []
@@ -4419,6 +4705,12 @@ def dreamer_update(
     vehicle_route_credit_reward_stds: List[float] = []
     vehicle_route_credit_gate_fracs: List[float] = []
     vehicle_route_credit_selected_gate_fracs: List[float] = []
+    vehicle_route_q_actor_loss_values: List[float] = []
+    vehicle_route_q_adv_means: List[float] = []
+    vehicle_route_q_adv_stds: List[float] = []
+    vehicle_route_q_explained_variances: List[float] = []
+    vehicle_route_q_target_means: List[float] = []
+    vehicle_route_q_target_stds: List[float] = []
     vehicle_social_reward_means: List[float] = []
     vehicle_social_reward_stds: List[float] = []
     skipped_actor_trajs = 0
@@ -4437,11 +4729,29 @@ def dreamer_update(
     if not dreamer_pg.supports_actor_objective(actor_objective):
         raise ValueError(f"Unsupported dreamer_actor_objective={actor_objective!r}")
     use_discrete_actor_critic = bool(dreamer_pg.uses_discrete_actor_critic(cfg))
+    update_episode = max(
+        [int(traj.get("episode_index", traj.get("traj_id", -1))) for traj in trajectories]
+        or [-1]
+    )
     use_vehicle_critic = bool(
         use_discrete_actor_critic
         and bool(getattr(cfg, "dreamer_vehicle_critic", True))
         and vehicle_critic is not None
         and vehicle_critic_optimizer is not None
+    )
+    use_vehicle_route_q_critic = bool(
+        use_discrete_actor_critic
+        and bool(getattr(cfg, "dreamer_vehicle_route_q_critic", False))
+        and vehicle_route_q_critic is not None
+        and vehicle_route_q_optimizer is not None
+    )
+    use_vehicle_route_q_actor = bool(
+        use_vehicle_route_q_critic
+        and float(getattr(cfg, "dreamer_vehicle_route_q_actor_weight", 0.0)) != 0.0
+        and (
+            int(getattr(cfg, "dreamer_vehicle_route_q_actor_start_episode", -1)) < 0
+            or int(update_episode) >= int(getattr(cfg, "dreamer_vehicle_route_q_actor_start_episode", -1))
+        )
     )
     train_global_critic = _global_critic_reward_enabled(cfg)
     critic_return_discount = _dreamer_global_return_discount(cfg)
@@ -4741,6 +5051,115 @@ def dreamer_update(
                             device=vehicle_obs_n.device,
                             dtype=vehicle_obs_n.dtype,
                         )
+        if use_vehicle_route_q_critic:
+            route_q_obs = traj.get("dreamer_ac_obs")
+            route_q_reward = traj.get("dreamer_ac_vehicle_route_reward_matrix")
+            route_q_valid = traj.get("dreamer_ac_valid")
+            route_q_step = traj.get("dreamer_ac_step_index")
+            route_q_vehicle_id = traj.get("dreamer_ac_vehicle_id")
+            if (
+                torch.is_tensor(route_q_obs)
+                and torch.is_tensor(route_q_reward)
+                and torch.is_tensor(route_q_valid)
+                and torch.is_tensor(route_q_step)
+                and route_q_obs.numel() > 0
+                and route_q_reward.numel() > 0
+                and route_q_valid.numel() > 0
+            ):
+                n_route_q = min(
+                    int(route_q_obs.shape[0]),
+                    int(route_q_reward.shape[0]),
+                    int(route_q_valid.shape[0]),
+                    int(route_q_step.reshape(-1).shape[0]),
+                )
+                if torch.is_tensor(route_q_vehicle_id):
+                    n_route_q = min(n_route_q, int(route_q_vehicle_id.reshape(-1).shape[0]))
+                if n_route_q > 0:
+                    obs_q = route_q_obs[:n_route_q]
+                    reward_q = route_q_reward[:n_route_q].to(device=obs_q.device, dtype=obs_q.dtype)
+                    valid_q = route_q_valid[:n_route_q].to(device=obs_q.device, dtype=torch.bool)
+                    step_q = route_q_step.reshape(-1)[:n_route_q].to(device=obs_q.device, dtype=torch.long)
+                    vehicle_id_q = (
+                        route_q_vehicle_id.reshape(-1)[:n_route_q].to(device=obs_q.device, dtype=torch.long)
+                        if torch.is_tensor(route_q_vehicle_id)
+                        else None
+                    )
+                    finite_q = torch.isfinite(obs_q).all(dim=-1) & torch.isfinite(reward_q).all(dim=-1) & valid_q.any(dim=-1)
+                    if vehicle_id_q is not None:
+                        finite_q = finite_q & (vehicle_id_q >= 0)
+                    if bool(finite_q.any().detach().cpu().item()):
+                        obs_q = obs_q[finite_q]
+                        reward_q = reward_q[finite_q]
+                        valid_q = valid_q[finite_q]
+                        step_q = step_q[finite_q]
+                        vehicle_id_q = vehicle_id_q[finite_q] if vehicle_id_q is not None else None
+                        q_context = None
+                        if int(getattr(vehicle_route_q_critic, "context_dim", 0)) > 0:
+                            if (
+                                torch.is_tensor(critic_context_tensor)
+                                and int(critic_context_tensor.shape[0]) > 0
+                            ):
+                                ctx_idx = step_q.clamp(0, int(critic_context_tensor.shape[0]) - 1)
+                                q_context = critic_context_tensor[ctx_idx].detach()
+                        q_values = vehicle_route_q_critic(
+                            obs_q,
+                            context=q_context,
+                            group_index=step_q,
+                        )
+                        with torch.no_grad():
+                            route_q_discount = float(getattr(cfg, "dreamer_vehicle_route_q_target_discount", 0.0))
+                            next_route_q_values = None
+                            if route_q_discount != 0.0 and int(obs_q.shape[0]) > 1:
+                                bootstrap_q_critic = (
+                                    target_vehicle_route_q_critic
+                                    if target_vehicle_route_q_critic is not None
+                                    else vehicle_route_q_critic
+                                )
+                                next_route_q_values = bootstrap_q_critic(
+                                    obs_q,
+                                    context=q_context,
+                                    group_index=step_q,
+                                )
+                            route_q_targets = _vehicle_route_q_targets(
+                                reward_matrix=reward_q,
+                                route_valid=valid_q,
+                                vehicle_ids=vehicle_id_q,
+                                step_index=step_q,
+                                bootstrap_values=next_route_q_values,
+                                discount=route_q_discount,
+                            )
+                        q_loss_mask = valid_q & torch.isfinite(q_values) & torch.isfinite(route_q_targets)
+                        if bool(q_loss_mask.any().detach().cpu().item()):
+                            q_loss = (q_values - route_q_targets.detach()).square()[q_loss_mask].mean()
+                            q_loss = q_loss * float(getattr(cfg, "dreamer_vehicle_route_q_critic_value_coef", 1.0))
+                            vehicle_route_q_losses.append(q_loss)
+                            vehicle_route_q_target_means.append(
+                                float(route_q_targets.detach()[q_loss_mask].mean().cpu().item())
+                            )
+                            vehicle_route_q_target_stds.append(
+                                float(route_q_targets.detach()[q_loss_mask].std(unbiased=False).cpu().item())
+                                if int(q_loss_mask.sum().detach().cpu().item()) > 1 else 0.0
+                            )
+                            target_var = torch.var(route_q_targets.detach()[q_loss_mask], unbiased=False)
+                            if (
+                                bool(torch.isfinite(target_var).detach().cpu().item())
+                                and float(target_var.detach().cpu().item()) > 1e-8
+                            ):
+                                residual_var = torch.var(
+                                    (route_q_targets.detach() - q_values.detach())[q_loss_mask],
+                                    unbiased=False,
+                                )
+                                vehicle_route_q_explained_variances.append(
+                                    float(
+                                        (
+                                            1.0
+                                            - residual_var / target_var.clamp_min(1e-8)
+                                        )
+                                        .detach()
+                                        .cpu()
+                                        .item()
+                                    )
+                                )
         entropy = traj["entropies"].mean()
         route_cost_aux_loss = None
         route_cost_aux_tensor = traj.get("route_cost_aux_losses")
@@ -4900,6 +5319,32 @@ def dreamer_update(
             dreamer_ac_entropy_cost_mask_fracs.append(
                 float(discrete_ac_stats.get("dreamer_ac_entropy_cost_mask_frac", 0.0))
             )
+            route_q_actor_loss = None
+            route_q_stats: Dict[str, float] = {}
+            if use_vehicle_route_q_actor and vehicle_route_q_critic is not None:
+                old_q_requires_grad = [p.requires_grad for p in vehicle_route_q_critic.parameters()]
+                for p in vehicle_route_q_critic.parameters():
+                    p.requires_grad_(False)
+                try:
+                    route_q_actor_loss, route_q_stats = dreamer_pg.vehicle_route_q_actor_loss(
+                        actor=actor,
+                        q_critic=vehicle_route_q_critic,
+                        traj=traj,
+                        temperature=float(getattr(cfg, "dreamer_action_temperature", 1.0)),
+                        actor_weight=float(getattr(cfg, "dreamer_vehicle_route_q_actor_weight", 1.0)),
+                        advantage_clip=float(getattr(cfg, "dreamer_vehicle_route_q_advantage_clip", 5.0)),
+                        normalize_advantage=bool(
+                            getattr(cfg, "dreamer_vehicle_route_q_normalize_advantages", True)
+                        ),
+                        detach_values=bool(
+                            getattr(cfg, "dreamer_vehicle_route_q_detach_actor_values", True)
+                        ),
+                        entropy=None,
+                        entropy_coef=0.0,
+                    )
+                finally:
+                    for p, requires_grad in zip(vehicle_route_q_critic.parameters(), old_q_requires_grad):
+                        p.requires_grad_(requires_grad)
         direct_actor_loss = -(actor_advantages.mean() + float(cfg.dreamer_entropy_coef) * entropy)
         actor_loss = direct_actor_loss
         if route_cost_aux_loss is not None:
@@ -4935,11 +5380,23 @@ def dreamer_update(
             or q_actor_has_grad
             or grpo_policy_has_samples
             or discrete_ac_has_samples
+            or route_q_actor_loss is not None
         ) and not low_valid_agent_coverage and not actor_update_disabled:
             if use_direct_actor:
                 actor_losses.append(actor_loss)
             if discrete_ac_loss is not None:
                 actor_losses.append(discrete_ac_loss)
+            if route_q_actor_loss is not None:
+                actor_losses.append(route_q_actor_loss)
+                vehicle_route_q_actor_loss_values.append(
+                    float(route_q_stats.get("vehicle_route_q_actor_loss", 0.0))
+                )
+                vehicle_route_q_adv_means.append(
+                    float(route_q_stats.get("vehicle_route_q_adv_mean", 0.0))
+                )
+                vehicle_route_q_adv_stds.append(
+                    float(route_q_stats.get("vehicle_route_q_adv_std", 0.0))
+                )
             if q_actor_has_grad:
                 q_actor_items.append((
                     current_z,
@@ -4990,6 +5447,7 @@ def dreamer_update(
                 and grpo_rollout_vehicle_cost_loss is None
                 and not grpo_policy_has_samples
                 and not discrete_ac_has_samples
+                and route_q_actor_loss is None
             ):
                 reason = "no_reward_entropy_or_aux_grad"
             elif float(traj.get("reward_grad_steps", 0.0)) <= 0.0:
@@ -5003,10 +5461,6 @@ def dreamer_update(
         invalid_rates.append(float(traj.get("invalid_route_rate", 0.0)))
         route_churns.append(float(traj.get("route_churn", 0.0)))
 
-    update_episode = max(
-        [int(traj.get("episode_index", traj.get("traj_id", -1))) for traj in trajectories]
-        or [-1]
-    )
     consumed_fresh_traj_count = max(0, len(consumed_traj_ids) - int(consumed_restored_traj_count))
     skipped_restored_traj_count = int(skip_reason_counts.get("restored_traj_no_grad_graph", 0))
     skipped_fresh_traj_count = max(0, len(skipped_traj_ids) - skipped_restored_traj_count)
@@ -5077,7 +5531,7 @@ def dreamer_update(
         if combined_losses:
             actor_losses.append(torch.stack(combined_losses).mean())
 
-    if not critic_losses and not vehicle_critic_losses:
+    if not critic_losses and not vehicle_critic_losses and not vehicle_route_q_losses:
         return {
             "pg_loss": 0.0,
             "value_loss": 0.0,
@@ -5206,6 +5660,13 @@ def dreamer_update(
             "vehicle_route_progress_reward_std": 0.0,
             "vehicle_route_credit_reward_mean": 0.0,
             "vehicle_route_credit_reward_std": 0.0,
+            "vehicle_route_q_loss": 0.0,
+            "vehicle_route_q_target_mean": 0.0,
+            "vehicle_route_q_target_std": 0.0,
+            "vehicle_route_q_actor_loss": 0.0,
+            "vehicle_route_q_adv_mean": 0.0,
+            "vehicle_route_q_adv_std": 0.0,
+            "vehicle_route_q_explained_variance": 0.0,
             "vehicle_social_reward_mean": 0.0,
             "vehicle_social_reward_std": 0.0,
             "vehicle_return_discount": float(vehicle_return_discount),
@@ -5261,6 +5722,28 @@ def dreamer_update(
             )
     else:
         vehicle_critic_loss_total = torch.zeros((), device=critic_loss_total.device, dtype=critic_loss_total.dtype)
+
+    if (
+        vehicle_route_q_losses
+        and vehicle_route_q_critic is not None
+        and vehicle_route_q_optimizer is not None
+    ):
+        vehicle_route_q_optimizer.zero_grad()
+        vehicle_route_q_loss_total = torch.stack(vehicle_route_q_losses).mean()
+        vehicle_route_q_loss_total.backward()
+        nn.utils.clip_grad_norm_(vehicle_route_q_critic.parameters(), 1.0)
+        vehicle_route_q_optimizer.step()
+        if (
+            target_vehicle_route_q_critic is not None
+            and float(getattr(cfg, "dreamer_slow_critic_tau", 0.0)) > 0.0
+        ):
+            _polyak_update_module(
+                target_vehicle_route_q_critic,
+                vehicle_route_q_critic,
+                tau=float(cfg.dreamer_slow_critic_tau),
+            )
+    else:
+        vehicle_route_q_loss_total = torch.zeros((), device=critic_loss_total.device, dtype=critic_loss_total.dtype)
 
     if q_actor_items:
         old_requires_grad = [p.requires_grad for p in critic.parameters()]
@@ -5884,6 +6367,29 @@ def dreamer_update(
             float(np.mean(vehicle_route_credit_reward_stds))
             if vehicle_route_credit_reward_stds else 0.0
         ),
+        "vehicle_route_q_loss": float(vehicle_route_q_loss_total.detach().cpu().item()),
+        "vehicle_route_q_target_mean": (
+            float(np.mean(vehicle_route_q_target_means))
+            if vehicle_route_q_target_means else 0.0
+        ),
+        "vehicle_route_q_target_std": (
+            float(np.mean(vehicle_route_q_target_stds))
+            if vehicle_route_q_target_stds else 0.0
+        ),
+        "vehicle_route_q_actor_loss": (
+            float(np.mean(vehicle_route_q_actor_loss_values))
+            if vehicle_route_q_actor_loss_values else 0.0
+        ),
+        "vehicle_route_q_adv_mean": (
+            float(np.mean(vehicle_route_q_adv_means)) if vehicle_route_q_adv_means else 0.0
+        ),
+        "vehicle_route_q_adv_std": (
+            float(np.mean(vehicle_route_q_adv_stds)) if vehicle_route_q_adv_stds else 0.0
+        ),
+        "vehicle_route_q_explained_variance": (
+            float(np.mean(vehicle_route_q_explained_variances))
+            if vehicle_route_q_explained_variances else 0.0
+        ),
         "vehicle_route_credit_gate_frac": (
             float(np.mean([
                 float(traj.get("vehicle_route_credit_gate_frac", 0.0))
@@ -5950,6 +6456,9 @@ def maybe_resume_dreamer_checkpoint(
     vehicle_critic_optimizer=None,
     target_vehicle_critic=None,
     vehicle_return_normalizer=None,
+    vehicle_route_q_critic=None,
+    vehicle_route_q_optimizer=None,
+    target_vehicle_route_q_critic=None,
 ):
     return _checkpoint_maybe_resume_dreamer_checkpoint(
         resume_ckpt=resume_ckpt,
@@ -5965,6 +6474,9 @@ def maybe_resume_dreamer_checkpoint(
         vehicle_critic_optimizer=vehicle_critic_optimizer,
         target_vehicle_critic=target_vehicle_critic,
         vehicle_return_normalizer=vehicle_return_normalizer,
+        vehicle_route_q_critic=vehicle_route_q_critic,
+        vehicle_route_q_optimizer=vehicle_route_q_optimizer,
+        target_vehicle_route_q_critic=target_vehicle_route_q_critic,
         load_checkpoint_fn=load_dreamer_checkpoint,
     )
 
@@ -6137,6 +6649,8 @@ def train(cfg: TrainConfig) -> None:
             param.requires_grad_(False)
     vehicle_critic: Optional[CentralizedVehicleValueCritic] = None
     target_vehicle_critic: Optional[CentralizedVehicleValueCritic] = None
+    vehicle_route_q_critic: Optional[CentralizedVehicleRouteQCritic] = None
+    target_vehicle_route_q_critic: Optional[CentralizedVehicleRouteQCritic] = None
     if bool(getattr(cfg, "dreamer_vehicle_critic", True)):
         vehicle_critic = CentralizedVehicleValueCritic(
             obs_dim=obs_dim,
@@ -6154,6 +6668,21 @@ def train(cfg: TrainConfig) -> None:
             target_vehicle_critic = copy.deepcopy(vehicle_critic).to(device)
             target_vehicle_critic.eval()
             for param in target_vehicle_critic.parameters():
+                param.requires_grad_(False)
+    if bool(getattr(cfg, "dreamer_vehicle_route_q_critic", False)):
+        vehicle_route_q_critic = CentralizedVehicleRouteQCritic(
+            obs_dim=obs_dim,
+            context_dim=0,
+            hidden_dim=cfg.hidden_dim,
+            n_hidden_layers=cfg.n_hidden_layers,
+            architecture=str(getattr(cfg, "dreamer_vehicle_critic_architecture", "self_attention")),
+            n_attention_heads=int(getattr(cfg, "dreamer_vehicle_critic_attention_heads", 4)),
+            output_dim=int(cfg.n_routes),
+        ).to(device)
+        if float(getattr(cfg, "dreamer_slow_critic_tau", 0.0)) > 0.0:
+            target_vehicle_route_q_critic = copy.deepcopy(vehicle_route_q_critic).to(device)
+            target_vehicle_route_q_critic.eval()
+            for param in target_vehicle_route_q_critic.parameters():
                 param.requires_grad_(False)
     actor_anchor: Optional[VehicleRouteActor] = None
     if _actor_anchor_enabled(cfg):
@@ -6188,9 +6717,14 @@ def train(cfg: TrainConfig) -> None:
         if vehicle_critic is not None
         else None
     )
+    vehicle_route_q_optimizer = (
+        torch.optim.Adam(vehicle_route_q_critic.parameters(), lr=vehicle_critic_lr)
+        if vehicle_route_q_critic is not None
+        else None
+    )
     critic_return_discount = _dreamer_global_return_discount(cfg)
     logger.info(
-        "Dreamer CTDE mainline active: actor_obs_dim=%d n_routes=%d d_spatial=%d batch_eps=%d actor_h=%d critic_variant=%s critic_aggregation=%s critic_context_dim=%d slow_critic_tau=%.4f return_norm=%s actor_lr=%.2e actor_lr_decay=%d->%d@%.3f critic_lr=%.2e vehicle_critic=%s vehicle_critic_context_dim=%d vehicle_critic_lr=%.2e critic_discount=%.4f vehicle_discount=%.4f",
+        "Dreamer CTDE mainline active: actor_obs_dim=%d n_routes=%d d_spatial=%d batch_eps=%d actor_h=%d critic_variant=%s critic_aggregation=%s critic_context_dim=%d slow_critic_tau=%.4f return_norm=%s actor_lr=%.2e actor_lr_decay=%d->%d@%.3f critic_lr=%.2e vehicle_critic=%s vehicle_critic_context_dim=%d vehicle_route_q=%s vehicle_q_actor_w=%.3f vehicle_critic_lr=%.2e critic_discount=%.4f vehicle_discount=%.4f",
         obs_dim,
         int(cfg.n_routes),
         int(wm.d_spatial),
@@ -6208,6 +6742,8 @@ def train(cfg: TrainConfig) -> None:
         critic_lr,
         str(vehicle_critic is not None),
         int(getattr(vehicle_critic, "context_dim", 0)) if vehicle_critic is not None else 0,
+        str(vehicle_route_q_critic is not None),
+        float(getattr(cfg, "dreamer_vehicle_route_q_actor_weight", 0.0)),
         vehicle_critic_lr,
         float(critic_return_discount),
         float(ROUTE_COST_RETURN_DISCOUNT),
@@ -6286,7 +6822,10 @@ def train(cfg: TrainConfig) -> None:
     if route_registry is not None and wm._registry.adjacency is not None:
         import time as _time
         _pc_t0 = _time.time()
-        _adj_list = PathTopology._build_adj_list(wm._registry.adjacency)
+        _adj_list = RouteRegistry._build_vehicle_adj_list(
+            wm._registry.adjacency,
+            getattr(wm._registry, "passenger_allowed", None),
+        )
         # Use free-flow travel times as reference for path pre-computation
         _lengths = np.asarray(wm._registry.lengths, dtype=np.float64)
         _speeds = np.asarray(wm._registry.speed_limits, dtype=np.float64)
@@ -6299,7 +6838,7 @@ def train(cfg: TrainConfig) -> None:
         _candidate_source = str(getattr(cfg, "vehicle_candidate_source", "current_to_dest")).strip().lower()
         if _candidate_source == "od_suffix":
             _vehicle_path_cache = None
-            logger.info("Vehicle path cache disabled: using precomputed od_suffix candidate routes.")
+            logger.info("Vehicle path cache disabled: using deprecated precomputed od_suffix candidate routes.")
         elif _candidate_source == "current_to_dest":
             _cache_mode = str(getattr(cfg, "vehicle_path_cache_mode", "lazy") or "lazy").strip().lower()
             if _cache_mode in {"lazy", "on_demand", "ondemand"}:
@@ -6509,6 +7048,9 @@ def train(cfg: TrainConfig) -> None:
                 vehicle_critic_optimizer=vehicle_critic_optimizer,
                 target_vehicle_critic=target_vehicle_critic,
                 vehicle_return_normalizer=vehicle_return_normalizer,
+                vehicle_route_q_critic=vehicle_route_q_critic,
+                vehicle_route_q_optimizer=vehicle_route_q_optimizer,
+                target_vehicle_route_q_critic=target_vehicle_route_q_critic,
             )
             if resume_state is not None:
                 start_episode = int(resume_state["start_episode"])
@@ -6946,6 +7488,9 @@ def train(cfg: TrainConfig) -> None:
                     vehicle_critic_optimizer=vehicle_critic_optimizer,
                     target_vehicle_critic=target_vehicle_critic,
                     vehicle_return_normalizer=vehicle_return_normalizer,
+                    vehicle_route_q_critic=vehicle_route_q_critic,
+                    vehicle_route_q_optimizer=vehicle_route_q_optimizer,
+                    target_vehicle_route_q_critic=target_vehicle_route_q_critic,
                     actor_gate_state=actor_gate_state,
                     actor_anchor=actor_anchor,
                     actor_probe_snapshot=actor_probe_snapshot,
@@ -7107,6 +7652,10 @@ def train(cfg: TrainConfig) -> None:
                 recent_vehicle_route_credit_std = np.mean(stats_history["vehicle_route_credit_reward_std"][-cfg.log_every:]) if stats_history["vehicle_route_credit_reward_std"] else 0.0
                 recent_vehicle_route_credit_gate = np.mean(stats_history["vehicle_route_credit_gate_frac"][-cfg.log_every:]) if stats_history["vehicle_route_credit_gate_frac"] else 0.0
                 recent_vehicle_route_credit_selected_gate = np.mean(stats_history["vehicle_route_credit_selected_gate_frac"][-cfg.log_every:]) if stats_history["vehicle_route_credit_selected_gate_frac"] else 0.0
+                recent_vehicle_route_q = np.mean(stats_history["vehicle_route_q_loss"][-cfg.log_every:]) if stats_history["vehicle_route_q_loss"] else 0.0
+                recent_vehicle_route_q_actor = np.mean(stats_history["vehicle_route_q_actor_loss"][-cfg.log_every:]) if stats_history["vehicle_route_q_actor_loss"] else 0.0
+                recent_vehicle_route_q_adv_mean = np.mean(stats_history["vehicle_route_q_adv_mean"][-cfg.log_every:]) if stats_history["vehicle_route_q_adv_mean"] else 0.0
+                recent_vehicle_route_q_adv_std = np.mean(stats_history["vehicle_route_q_adv_std"][-cfg.log_every:]) if stats_history["vehicle_route_q_adv_std"] else 0.0
                 recent_vehicle_social_mean = np.mean(stats_history["vehicle_social_reward_mean"][-cfg.log_every:]) if stats_history["vehicle_social_reward_mean"] else 0.0
                 recent_vehicle_social_std = np.mean(stats_history["vehicle_social_reward_std"][-cfg.log_every:]) if stats_history["vehicle_social_reward_std"] else 0.0
                 recent_vehicle_ret_std = np.mean(stats_history["vehicle_return_norm_std"][-cfg.log_every:]) if stats_history["vehicle_return_norm_std"] else 1.0
@@ -7170,6 +7719,8 @@ def train(cfg: TrainConfig) -> None:
                     f"veh_route_progress={recent_vehicle_route_progress_mean:.2f}/{recent_vehicle_route_progress_std:.2f} "
                     f"veh_route_credit={recent_vehicle_route_credit_mean:.2f}/{recent_vehicle_route_credit_std:.2f} "
                     f"credit_gate={recent_vehicle_route_credit_gate:.2f}/{recent_vehicle_route_credit_selected_gate:.2f} "
+                    f"veh_q={recent_vehicle_route_q:.4f}/{recent_vehicle_route_q_actor:.4f} "
+                    f"qadv={recent_vehicle_route_q_adv_mean:.2f}/{recent_vehicle_route_q_adv_std:.2f} "
                     f"veh_social={recent_vehicle_social_mean:.2f}/{recent_vehicle_social_std:.2f} "
                     f"veh_tgt_std={recent_vehicle_target_std:.2f} veh_ret_std={recent_vehicle_ret_std:.2f} | "
                     f"hdv_resp_bg={recent_hdv_response_bg:.4f} | "
@@ -7197,6 +7748,9 @@ def train(cfg: TrainConfig) -> None:
                     vehicle_critic_optimizer=vehicle_critic_optimizer,
                     target_vehicle_critic=target_vehicle_critic,
                     vehicle_return_normalizer=vehicle_return_normalizer,
+                    vehicle_route_q_critic=vehicle_route_q_critic,
+                    vehicle_route_q_optimizer=vehicle_route_q_optimizer,
+                    target_vehicle_route_q_critic=target_vehicle_route_q_critic,
                 )
                 logger.info("  Dreamer checkpoint saved: %s", path)
 
@@ -7227,6 +7781,9 @@ def train(cfg: TrainConfig) -> None:
                 vehicle_critic_optimizer=vehicle_critic_optimizer,
                 target_vehicle_critic=target_vehicle_critic,
                 vehicle_return_normalizer=vehicle_return_normalizer,
+                vehicle_route_q_critic=vehicle_route_q_critic,
+                vehicle_route_q_optimizer=vehicle_route_q_optimizer,
+                target_vehicle_route_q_critic=target_vehicle_route_q_critic,
                 actor_gate_state=actor_gate_state,
                 actor_anchor=actor_anchor,
                 actor_probe_snapshot=actor_probe_snapshot,
@@ -7312,6 +7869,9 @@ def train(cfg: TrainConfig) -> None:
             vehicle_critic_optimizer=vehicle_critic_optimizer,
             target_vehicle_critic=target_vehicle_critic,
             vehicle_return_normalizer=vehicle_return_normalizer,
+            vehicle_route_q_critic=vehicle_route_q_critic,
+            vehicle_route_q_optimizer=vehicle_route_q_optimizer,
+            target_vehicle_route_q_critic=target_vehicle_route_q_critic,
         )
         logger.info("Dreamer-style training complete.")
         return
@@ -7409,8 +7969,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    choices=["bpr_volume", "decoded_speed", "route_head"],
                    help="Source for WM-derived edge travel times used by imagined progress rewards and route-cost auxiliary ranking.")
     p.add_argument("--wm_candidate_edge_cost_source", type=str, default="auto",
-                   choices=["auto", "bpr_volume", "decoded_speed", "route_head"],
-                   help="WM edge cost source used only for imagined candidate path generation. auto preserves the default cached candidate behavior.")
+                   choices=["auto", "freeflow", "bpr_volume", "decoded_speed", "route_head"],
+                   help="Edge cost source used only for imagined candidate path generation. auto/freeflow uses registry free-flow times; WM sources are explicit ablations.")
     p.add_argument("--wm_decoded_speed_min_ratio", type=float, default=0.05,
                    help="Minimum decoded speed/speed_limit ratio when --wm_edge_cost_source=decoded_speed.")
     p.add_argument("--wm_decoded_speed_max_ratio", type=float, default=1.50,
@@ -7471,6 +8031,35 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dreamer_vehicle_critic_return_normalizer",
                    action=argparse.BooleanOptionalAction, default=True,
                    help="Use a separate EMA normalizer for per-vehicle critic targets and advantages.")
+    p.add_argument("--dreamer_vehicle_route_q_critic",
+                   action=argparse.BooleanOptionalAction, default=False,
+                   help=(
+                       "Train an optional per-vehicle per-route Q critic from critic-visible "
+                       "vehicle rewards. Actor updates can use this critic via "
+                       "--dreamer_vehicle_route_q_actor_weight without direct reward losses."
+                   ))
+    p.add_argument("--dreamer_vehicle_route_q_critic_value_coef", type=float, default=1.0,
+                   help="Scale factor for the per-route vehicle Q critic regression loss.")
+    p.add_argument("--dreamer_vehicle_route_q_actor_weight", type=float, default=0.0,
+                   help="Actor loss weight for the route-Q critic advantage. 0 disables the route-Q actor term.")
+    p.add_argument("--dreamer_vehicle_route_q_actor_start_episode", type=int, default=-1,
+                   help=(
+                       "First absolute episode index where route-Q actor advantages may update the actor. "
+                       "<0 enables immediately; useful for warming a newly initialized route-Q critic after resume."
+                   ))
+    p.add_argument("--dreamer_vehicle_route_q_target_discount", type=float, default=0.0,
+                   help=(
+                       "Discount for optional sequential route-Q bootstrap. 0 trains one-step "
+                       "critic-visible per-route rewards and avoids same-observation bootstrap leakage."
+                   ))
+    p.add_argument("--dreamer_vehicle_route_q_advantage_clip", type=float, default=5.0,
+                   help="Clip route-Q actor advantages to this absolute value; <=0 disables clipping.")
+    p.add_argument("--dreamer_vehicle_route_q_normalize_advantages",
+                   action=argparse.BooleanOptionalAction, default=True,
+                   help="Normalize per-route Q advantages over valid route entries before actor loss.")
+    p.add_argument("--dreamer_vehicle_route_q_detach_actor_values",
+                   action=argparse.BooleanOptionalAction, default=True,
+                   help="Detach route-Q values in the actor objective so gradients flow only through actor probabilities.")
     p.add_argument("--dreamer_allow_legacy_actor_only_losses", action="store_true",
                    help=(
                        "Allow deprecated actor-only losses for reproducing legacy checkpoints. "
@@ -8260,7 +8849,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="Penalty multiplier for diverse K-path generation in vehicle mode.")
     p.add_argument("--vehicle_candidate_source", type=str, default="current_to_dest",
                    choices=["current_to_dest", "od_suffix"],
-                   help="Vehicle imagined candidate action space. Use od_suffix to match urb_fair od_suffix evaluation.")
+                   help=(
+                       "Vehicle imagined candidate action space. current_to_dest is the training mainline; "
+                       "od_suffix is deprecated legacy behavior kept only for old checkpoint reproduction."
+                   ))
     p.add_argument("--vehicle_path_cache_mode", type=str, default="lazy",
                    choices=["lazy", "precompute"],
                    help=(
@@ -8272,7 +8864,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--vehicle_path_cache_max_entries", type=int, default=250000,
                    help="Maximum cached current_to_dest path entries when --vehicle_path_cache_mode=lazy.")
     p.add_argument("--vehicle_routes_csv", type=str, default="",
-                   help="routes.csv artifact used when --vehicle_candidate_source=od_suffix.")
+                   help="routes.csv artifact used only by deprecated --vehicle_candidate_source=od_suffix.")
     p.add_argument("--vehicle_reward_scale", type=float, default=1.0,
                    help="Scale factor for per-vehicle marginal-delay reward in vehicle mode.")
     p.add_argument("--no_vehicle_obs_global", action="store_true",
