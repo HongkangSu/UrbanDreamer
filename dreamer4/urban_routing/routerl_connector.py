@@ -186,6 +186,7 @@ class RouteRLConnector:
 
         self._started = False
         self.current_step = 0
+        self._last_reset_arrival_events: List[Tuple[str, float]] = []
 
         print(f"RouteRLConnector initialized")
         print(f"  Network: {network_name} @ {self.network_folder}")
@@ -707,8 +708,11 @@ class RouteRLConnector:
         rng = _random.Random(self.seed + self._episode_count)
         self._add_all_vehicles(rng, route_probs=route_probs)
 
-        # Warm up: advance so vehicles enter the network
-        self.advance_steps(30)
+        # Warm up so vehicles enter the network.  Very short trips can also
+        # finish during this bootstrap window; keep those arrivals available to
+        # DataCollector so episode completion and travel-time labels stay in
+        # sync with SUMO's tripinfo output.
+        self._last_reset_arrival_events = self.advance_steps(30)
 
         state = self._build_state_from_traci(include_edges=False)
         num_vehicles = len(state.get("vehicles", {}))

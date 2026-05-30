@@ -2109,6 +2109,13 @@ class DataCollector:
         # Register vehicles present after warm-up and assign roles
         self._register_vehicles(list(state.get("vehicles", {}).keys()), rng)
         self._record_depart_times(state, veh_depart)
+        reset_arrivals = getattr(self.connector, "_last_reset_arrival_events", None)
+        if reset_arrivals:
+            self._record_arrivals(
+                veh_depart,
+                veh_travel_times,
+                arrival_events=reset_arrivals,
+            )
 
         decision_ticks = sorted(self._decision_tick_map(max_steps).keys())
         if not decision_ticks:
