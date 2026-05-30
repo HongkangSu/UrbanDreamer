@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="/home/wangwenrui/shk/UrbanDreamer"
 PY="/home/wangwenrui/opt/miniconda3/envs/URB/bin/python"
-TAG="${TAG:-fontenay_en_parisis_current_to_dest_incident_20260530}"
+TAG="${TAG:-fontenay_en_parisis_current_to_dest_noincident_20260530}"
 NETWORK_DIR="networks/fontenay_en_parisis"
 
 cd "$ROOT"
@@ -16,10 +16,11 @@ env CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-1}" WANDB_MODE=offline MPLCONF
   --wm-candidate-edge-cost-source freeflow \
   --eval-candidate-source current_shortest_freeflow \
   --ratio-machines "${RATIO_MACHINES:-0.4}" \
-  "--incident-edge=${INCIDENT_EDGE:--18951224#4}" \
+  "${REQUIRE_INCIDENT_FLAG:---no-require-incident}" \
+  "--incident-edge=${INCIDENT_EDGE:-}" \
   --incident-start "${INCIDENT_START:-500}" \
   --incident-end "${INCIDENT_END:-1500}" \
-  --incident-speed "${INCIDENT_SPEED:-5.0}" \
+  --incident-speed "${INCIDENT_SPEED:-0.0}" \
   --output-root "data/${TAG}" \
   --logs-root "logs/${TAG}" \
   --results-root "results/${TAG}" \
