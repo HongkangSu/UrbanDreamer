@@ -13,6 +13,7 @@ the public project surface is slimmed down.
 ## Retained Entrypoints
 
 - `scripts/run_urb_fair_full_cycle.py`
+- `scripts/run_current_to_dest_candidate_full_cycle.py`
 - `scripts/collect_urb_fair.py`
 - `dreamer4/train_dynamics.py`
 - `dreamer4/urban_routing/train_marl.py`
@@ -36,3 +37,23 @@ The migrated test set covers:
 - full-cycle command translation for `--network-dir` and `--network-name`;
 - Dreamer CTDE MARL mode behavior;
 - absence of out-of-scope public surfaces in source code.
+
+## Current Candidate Experiment Entrypoint
+
+Use `scripts/run_current_to_dest_candidate_full_cycle.py` for additional
+networks such as `plaisir`, `les_mureaux`, or `guyancourt`. The wrapper keeps
+the training/eval candidate semantics on the current mainline:
+
+- candidate paths are generated from current edge to destination;
+- candidate path search uses free-flow edge costs;
+- SUMO eval uses `current_shortest_freeflow`;
+- route-cost reward enters the per-vehicle critic path;
+- legacy actor-only reward/loss weights stay zero;
+- route-Q actor/critic experiments remain outside the default full-cycle path.
+
+The wrapper also refuses to start while the protected Gretz full-cycle status is
+`STATE='running'`, unless the override flag is explicit. This prevents
+second-network screening from competing with the protected long Gretz run.
+
+`od_suffix` remains available only for old checkpoint reproduction. It is not a
+candidate-network or actor-critic mainline setting.
