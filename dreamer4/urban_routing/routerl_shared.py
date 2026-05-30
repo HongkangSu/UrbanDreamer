@@ -30,9 +30,10 @@ def load_od_data(network_folder: str, network_name: str) -> Dict[str, Any]:
         return ast.literal_eval(f.read())
 
 
-def load_agents_dataframe(network_folder: str) -> pd.DataFrame:
-    """Load `<network_folder>/agents.csv`."""
-    return pd.read_csv(os.path.join(network_folder, "agents.csv"))
+def load_agents_dataframe(network_folder: str, agents_csv: Optional[str] = None) -> pd.DataFrame:
+    """Load an agents CSV, defaulting to `<network_folder>/agents.csv`."""
+    path = agents_csv or os.path.join(network_folder, "agents.csv")
+    return pd.read_csv(path)
 
 
 def compute_agent_counts(agents_df: pd.DataFrame, ratio_machines: float) -> Tuple[int, int, int]:
@@ -61,17 +62,35 @@ def ensure_agents_csv_in_records(
     network_folder: str,
     records_folder: str,
     overwrite: bool = False,
+    agents_csv: Optional[str] = None,
 ) -> str:
     """
     Ensure RouteRL-visible `agents.csv` exists under `records_folder`.
     Returns destination path.
     """
     os.makedirs(records_folder, exist_ok=True)
-    src = os.path.join(network_folder, "agents.csv")
+    src = agents_csv or os.path.join(network_folder, "agents.csv")
     dst = os.path.join(records_folder, "agents.csv")
     if overwrite or (not os.path.exists(dst)):
         shutil.copy2(src, dst)
     return dst
+
+
+def _load_demand_od_pairs(agents_csv: Optional[str]) -> list[tuple[int, int]]:
+    if not agents_csv or not os.path.exists(agents_csv):
+        return []
+    try:
+        agents_df = pd.read_csv(agents_csv)
+        if {"origin", "destination"}.issubset(agents_df.columns):
+            return [
+                (int(o), int(d))
+                for o, d in agents_df[["origin", "destination"]]
+                .drop_duplicates()
+                .itertuples(index=False, name=None)
+            ]
+    except Exception:
+        return []
+    return []
 
 
 def _routes_meta_path(records_folder: str) -> str:
@@ -83,6 +102,7 @@ def _cached_routes_match(
     *,
     generator: str,
     expected_rows: int,
+    expected_od_pairs: Optional[Sequence[tuple[int, int]]] = None,
 ) -> Optional[pd.DataFrame]:
     routes_csv = os.path.join(records_folder, "routes.csv")
     routes_xml = os.path.join(records_folder, "route.rou.xml")
@@ -93,6 +113,11 @@ def _cached_routes_match(
         meta = json.loads(Path(meta_path).read_text(encoding="utf-8"))
         if str(meta.get("generator", "")).strip().lower() != str(generator).strip().lower():
             return None
+        if expected_od_pairs is not None:
+            meta_od_pairs = meta.get("od_pairs")
+            expected = [[int(oi), int(di)] for oi, di in expected_od_pairs]
+            if meta_od_pairs != expected:
+                return None
         cached_df = pd.read_csv(routes_csv)
         if len(cached_df) != int(expected_rows):
             return None
@@ -109,6 +134,7 @@ def _write_routes_meta(
     n_routes: int,
     n_origins: int,
     n_destinations: int,
+    od_pairs: Optional[Sequence[tuple[int, int]]] = None,
 ) -> None:
     meta = {
         "generator": str(generator),
@@ -117,6 +143,8 @@ def _write_routes_meta(
         "n_origins": int(n_origins),
         "n_destinations": int(n_destinations),
     }
+    if od_pairs is not None:
+        meta["od_pairs"] = [[int(oi), int(di)] for oi, di in od_pairs]
     Path(_routes_meta_path(records_folder)).write_text(
         json.dumps(meta, indent=2, sort_keys=True),
         encoding="utf-8",
@@ -131,6 +159,7 @@ def generate_dijkstra_routes(
     n_routes: int,
     records_folder: str,
     penalty_factor: float = 3.0,
+    agents_csv: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Generate penalty-based Dijkstra routes and save:
@@ -141,18 +170,8 @@ def generate_dijkstra_routes(
     os.makedirs(records_folder, exist_ok=True)
     routes_csv = os.path.join(records_folder, "routes.csv")
     routes_xml = os.path.join(records_folder, "route.rou.xml")
-    agents_csv = os.path.join(network_folder, "agents.csv")
-    od_pairs: list[tuple[int, int]] = []
-    if os.path.exists(agents_csv):
-        try:
-            agents_df = pd.read_csv(agents_csv)
-            if {"origin", "destination"}.issubset(agents_df.columns):
-                od_pairs = [
-                    (int(o), int(d))
-                    for o, d in agents_df[["origin", "destination"]].drop_duplicates().itertuples(index=False, name=None)
-                ]
-        except Exception:
-            od_pairs = []
+    demand_agents_csv = agents_csv or os.path.join(network_folder, "agents.csv")
+    od_pairs = _load_demand_od_pairs(demand_agents_csv)
     if not od_pairs:
         od_pairs = [(oi, di) for oi in range(len(origins)) for di in range(len(destinations))]
     expected_rows = int(len(od_pairs)) * int(n_routes)
@@ -163,6 +182,7 @@ def generate_dijkstra_routes(
         records_folder,
         generator="dijkstra_passenger",
         expected_rows=expected_rows,
+        expected_od_pairs=od_pairs,
     )
     if cached_df is not None:
         return cached_df
@@ -247,6 +267,7 @@ def generate_dijkstra_routes(
         n_routes=n_routes,
         n_origins=len(origins),
         n_destinations=len(destinations),
+        od_pairs=od_pairs,
     )
     return df
 
@@ -262,6 +283,7 @@ def generate_routerl_routes(
     num_agents: Optional[int] = None,
     beta: float = -5.0,
     num_samples: int = 10,
+    agents_csv: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Generate routes.csv + route.rou.xml via RouteRL/janux path generation.
@@ -272,21 +294,16 @@ def generate_routerl_routes(
     os.makedirs(records_folder, exist_ok=True)
     routes_csv = os.path.join(records_folder, "routes.csv")
     routes_xml = os.path.join(records_folder, "route.rou.xml")
-    agents_csv = os.path.join(records_folder, "agents.csv")
+    records_agents_csv = os.path.join(records_folder, "agents.csv")
     expected_rows = int(len(origins)) * int(len(destinations)) * int(n_routes)
-    if os.path.exists(agents_csv):
-        try:
-            demand_df = pd.read_csv(agents_csv)
-            if {"origin", "destination"}.issubset(demand_df.columns):
-                expected_rows = int(
-                    demand_df[["origin", "destination"]].drop_duplicates().shape[0]
-                ) * int(n_routes)
-        except Exception:
-            pass
+    demand_od_pairs = _load_demand_od_pairs(agents_csv or records_agents_csv)
+    if demand_od_pairs:
+        expected_rows = int(len(demand_od_pairs)) * int(n_routes)
     cached_df = _cached_routes_match(
         records_folder,
         generator="routerl",
         expected_rows=expected_rows,
+        expected_od_pairs=demand_od_pairs or None,
     )
     if cached_df is not None:
         return cached_df
@@ -296,7 +313,7 @@ def generate_routerl_routes(
     except ImportError as exc:
         raise RuntimeError("routerl is not installed; cannot generate RouteRL routes") from exc
 
-    create_agents = not os.path.exists(agents_csv)
+    create_agents = not os.path.exists(records_agents_csv)
     env = create_routerl_environment(
         TrafficEnvironment,
         seed=42,
@@ -344,6 +361,7 @@ def generate_routerl_routes(
         n_routes=n_routes,
         n_origins=len(origins),
         n_destinations=len(destinations),
+        od_pairs=demand_od_pairs or None,
     )
     return df
 

@@ -811,9 +811,15 @@ def _bootstrap_route_artifacts(args: argparse.Namespace, paths: dict[str, object
 
     route_artifacts_dir.mkdir(parents=True, exist_ok=True)
     od_data = load_od_data(str(paths["network_dir"]), args.network_name)
-    agents_df = load_agents_dataframe(str(paths["network_dir"]))
+    agents_csv = str(paths["agents_csv"])
+    agents_df = load_agents_dataframe(str(paths["network_dir"]), agents_csv=agents_csv)
     num_agents, _num_machines, max_start_time = compute_agent_counts(agents_df, float(args.ratio_machines))
-    ensure_agents_csv_in_records(str(paths["network_dir"]), str(route_artifacts_dir), overwrite=True)
+    ensure_agents_csv_in_records(
+        str(paths["network_dir"]),
+        str(route_artifacts_dir),
+        overwrite=True,
+        agents_csv=agents_csv,
+    )
     if str(args.route_generator).strip().lower() == "routerl":
         generate_routerl_routes(
             network_folder=str(paths["network_dir"]),
@@ -826,6 +832,7 @@ def _bootstrap_route_artifacts(args: argparse.Namespace, paths: dict[str, object
             num_agents=int(num_agents),
             beta=float(args.path_gen_beta),
             num_samples=int(args.path_num_samples),
+            agents_csv=agents_csv,
         )
     else:
         generate_dijkstra_routes(
@@ -835,6 +842,7 @@ def _bootstrap_route_artifacts(args: argparse.Namespace, paths: dict[str, object
             destinations=od_data["destinations"],
             n_routes=int(args.n_routes),
             records_folder=str(route_artifacts_dir),
+            agents_csv=agents_csv,
         )
     if not _has_route_artifact_bundle(route_artifacts_dir):
         raise FileNotFoundError(f"Failed to bootstrap route artifacts in {route_artifacts_dir}")
