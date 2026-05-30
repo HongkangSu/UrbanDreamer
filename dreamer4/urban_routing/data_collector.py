@@ -76,13 +76,71 @@ class _LightRouteRegistry:
         route_edge_indices: List[List[List[int]]],
         od_av_counts: np.ndarray,
         od_hdv_counts: np.ndarray,
+        od_pairs: Optional[List[Tuple[int, int]]] = None,
     ):
         self.origins = list(origins)
         self.destinations = list(destinations)
         self.route_edge_indices = route_edge_indices
         self.od_av_counts = np.asarray(od_av_counts, dtype=np.float32)
         self.od_hdv_counts = np.asarray(od_hdv_counts, dtype=np.float32)
+        self.n_od = int(len(route_edge_indices))
+        self.od_pairs = (
+            [(int(o), int(d)) for o, d in od_pairs]
+            if od_pairs is not None
+            else None
+        )
+        self.od_index_map = (
+            {(int(o), int(d)): int(i) for i, (o, d) in enumerate(self.od_pairs)}
+            if self.od_pairs is not None
+            else None
+        )
         self.route_masks = None
+
+    def od_index(self, origin_idx: int, dest_idx: int) -> int:
+        if self.od_index_map is not None:
+            return int(self.od_index_map.get((int(origin_idx), int(dest_idx)), -1))
+        n_dests = max(1, len(self.destinations))
+        od_idx = int(origin_idx) * n_dests + int(dest_idx)
+        return int(od_idx) if 0 <= od_idx < self.n_od else -1
+
+    def iter_od_rows(self):
+        if self.od_pairs is not None:
+            for od_idx, od_key in enumerate(self.od_pairs):
+                yield int(od_idx), (int(od_key[0]), int(od_key[1]))
+            return
+        n_origins = len(self.origins)
+        n_dests = len(self.destinations)
+        for oi in range(n_origins):
+            for di in range(n_dests):
+                yield oi * n_dests + di, (oi, di)
+
+
+def _route_registry_od_index(rr: Any, oi: int, di: int) -> int:
+    if hasattr(rr, "od_index"):
+        try:
+            return int(rr.od_index(int(oi), int(di)))
+        except Exception:
+            return -1
+    n_dests = max(1, len(getattr(rr, "destinations", []) or []))
+    od_idx = int(oi) * n_dests + int(di)
+    n_od = int(getattr(rr, "n_od", len(getattr(rr, "route_edge_indices", []) or [])))
+    return int(od_idx) if 0 <= od_idx < n_od else -1
+
+
+def _iter_route_registry_od_rows(rr: Any):
+    if hasattr(rr, "iter_od_rows"):
+        yield from rr.iter_od_rows()
+        return
+    od_pairs = getattr(rr, "od_pairs", None)
+    if od_pairs is not None:
+        for od_idx, od_key in enumerate(od_pairs):
+            yield int(od_idx), (int(od_key[0]), int(od_key[1]))
+        return
+    n_origins = len(getattr(rr, "origins", []) or [])
+    n_dests = len(getattr(rr, "destinations", []) or [])
+    for oi in range(n_origins):
+        for di in range(n_dests):
+            yield oi * n_dests + di, (oi, di)
 
 
 def _copy_agents_csv_to_records(agents_csv: str, records_folder: str) -> str:
@@ -180,33 +238,46 @@ def _build_light_route_registry_from_routes_csv(
     routes_df = pd.read_csv(routes_csv_path)
     agents_df = pd.read_csv(agents_csv_path)
 
-    n_origins = len(origins)
-    n_dests = len(destinations)
-    n_od = n_origins * n_dests
-    route_edge_indices: List[List[List[int]]] = [[] for _ in range(n_od)]
+    observed_pairs: set[Tuple[int, int]] = set()
+    if {"origin", "destination"}.issubset(agents_df.columns):
+        for oi, di in agents_df[["origin", "destination"]].itertuples(index=False, name=None):
+            try:
+                oi_i = int(oi)
+                di_i = int(di)
+            except Exception:
+                continue
+            if 0 <= oi_i < len(origins) and 0 <= di_i < len(destinations):
+                observed_pairs.add((oi_i, di_i))
+
+    route_rows: Dict[Tuple[int, int], List[List[int]]] = {}
 
     for (oi, di), group in routes_df.groupby(["origins", "destinations"], sort=True):
         oi_i = int(oi)
         di_i = int(di)
-        if oi_i < 0 or oi_i >= n_origins or di_i < 0 or di_i >= n_dests:
+        if oi_i < 0 or oi_i >= len(origins) or di_i < 0 or di_i >= len(destinations):
             continue
-        od_flat = oi_i * n_dests + di_i
+        if observed_pairs and (oi_i, di_i) not in observed_pairs:
+            continue
         paths: List[List[int]] = []
         for path_str in group["path"].tolist():
             idxs = [int(edge_to_idx[e]) for e in str(path_str).split() if e in edge_to_idx]
             if idxs:
                 paths.append(idxs)
-        route_edge_indices[od_flat] = paths
+        if paths:
+            route_rows[(oi_i, di_i)] = paths
 
-    total_counts = np.zeros((n_od,), dtype=np.float32)
+    od_pairs = sorted(route_rows.keys())
+    od_index_map = {od_key: i for i, od_key in enumerate(od_pairs)}
+    route_edge_indices: List[List[List[int]]] = [route_rows[od_key] for od_key in od_pairs]
+
+    total_counts = np.zeros((len(od_pairs),), dtype=np.float32)
     if {"origin", "destination"}.issubset(agents_df.columns):
         for (oi, di), group in agents_df.groupby(["origin", "destination"], sort=False):
             oi_i = int(oi)
             di_i = int(di)
-            if oi_i < 0 or oi_i >= n_origins or di_i < 0 or di_i >= n_dests:
-                continue
-            od_flat = oi_i * n_dests + di_i
-            total_counts[od_flat] = float(len(group))
+            od_idx = od_index_map.get((oi_i, di_i))
+            if od_idx is not None:
+                total_counts[int(od_idx)] = float(len(group))
 
     od_av_counts, od_hdv_counts = split_od_agent_counts(total_counts, ratio_machines)
     return _LightRouteRegistry(
@@ -215,6 +286,7 @@ def _build_light_route_registry_from_routes_csv(
         route_edge_indices=route_edge_indices,
         od_av_counts=od_av_counts,
         od_hdv_counts=od_hdv_counts,
+        od_pairs=od_pairs,
     )
 
 
@@ -616,20 +688,17 @@ class DataCollector:
                     destinations=list(destinations),
                     ratio_machines=float(self.av_fraction),
                 )
-                n_origins = len(self._route_registry.origins)
-                n_dests = len(self._route_registry.destinations)
                 self._hdv_route_probs = {}
                 self._hdv_route_costs = {} if self._hdv_gawron_mode == "routerl" else None
-                for oi in range(n_origins):
-                    for di in range(n_dests):
-                        od_flat = oi * n_dests + di
-                        K = len(self._route_registry.route_edge_indices[od_flat])
-                        if K <= 0:
-                            continue
-                        od_key = (oi, di)
-                        self._hdv_route_probs[od_key] = np.ones(K, dtype=np.float32) / K
-                        if self._hdv_route_costs is not None:
-                            self._hdv_route_costs[od_key] = np.zeros(K, dtype=np.float32)
+                for od_idx, od_key in _iter_route_registry_od_rows(self._route_registry):
+                    if od_idx < 0 or od_idx >= len(self._route_registry.route_edge_indices):
+                        continue
+                    K = len(self._route_registry.route_edge_indices[od_idx])
+                    if K <= 0:
+                        continue
+                    self._hdv_route_probs[od_key] = np.ones(K, dtype=np.float32) / K
+                    if self._hdv_route_costs is not None:
+                        self._hdv_route_costs[od_key] = np.zeros(K, dtype=np.float32)
                 print(
                     "  HDV Gawron update (light): mode=%s lr=%.3f alpha_zero=%.3f beta=%.3f update=%s, %d OD pairs"
                     % (
@@ -662,18 +731,17 @@ class DataCollector:
                 )
             # Initialize uniform route probs keyed by (origin_idx, dest_idx) integers
             # matching agents.csv format used by routerl_connector
-            n_origins = len(self._route_registry.origins)
-            n_dests = len(self._route_registry.destinations)
             self._hdv_route_probs = {}
             self._hdv_route_costs = {} if self._hdv_gawron_mode == "routerl" else None
-            for oi in range(n_origins):
-                for di in range(n_dests):
-                    od_flat = oi * n_dests + di
-                    K = len(self._route_registry.route_edge_indices[od_flat])
-                    od_key = (oi, di)
-                    self._hdv_route_probs[od_key] = np.ones(K, dtype=np.float32) / K
-                    if self._hdv_route_costs is not None:
-                        self._hdv_route_costs[od_key] = np.zeros(K, dtype=np.float32)
+            for od_idx, od_key in _iter_route_registry_od_rows(self._route_registry):
+                if od_idx < 0 or od_idx >= len(self._route_registry.route_edge_indices):
+                    continue
+                K = len(self._route_registry.route_edge_indices[od_idx])
+                if K <= 0:
+                    continue
+                self._hdv_route_probs[od_key] = np.ones(K, dtype=np.float32) / K
+                if self._hdv_route_costs is not None:
+                    self._hdv_route_costs[od_key] = np.zeros(K, dtype=np.float32)
             print(
                 "  HDV Gawron update: mode=%s lr=%.3f alpha_zero=%.3f beta=%.3f update=%s, %d OD pairs"
                 % (
@@ -1501,42 +1569,38 @@ class DataCollector:
 
         t_e = self._edge_travel_times(final_flow)
 
-        # Update each OD pair
-        n_origins = len(rr.origins)
-        n_dests = len(rr.destinations)
-        for oi in range(n_origins):
-            for di in range(n_dests):
-                od_flat = oi * n_dests + di
-                od_key = (oi, di)
-                if od_key not in self._hdv_route_probs:
-                    continue
-                route_masks_od = getattr(rr, "route_masks", None)
-                if route_masks_od is not None:
-                    route_tt = route_masks_od[od_flat] @ t_e  # (K,)
-                else:
-                    route_tt = np.asarray(
-                        [sum(float(t_e[e]) for e in edges) for edges in rr.route_edge_indices[od_flat]],
-                        dtype=np.float32,
-                    )
-                hdv_frac = self._hdv_route_probs[od_key]
-                hdv_cost = (
-                    self._hdv_route_costs.get(od_key)
-                    if self._hdv_route_costs is not None else None
+        for od_idx, od_key in _iter_route_registry_od_rows(rr):
+            if od_key not in self._hdv_route_probs:
+                continue
+            if od_idx < 0 or od_idx >= len(rr.route_edge_indices):
+                continue
+            route_masks_od = getattr(rr, "route_masks", None)
+            if route_masks_od is not None:
+                route_tt = route_masks_od[od_idx] @ t_e  # (K,)
+            else:
+                route_tt = np.asarray(
+                    [sum(float(t_e[e]) for e in edges) for edges in rr.route_edge_indices[od_idx]],
+                    dtype=np.float32,
                 )
-                new_probs, new_cost = gawron_step_from_route_tt(
-                    probs=hdv_frac,
-                    route_tt=route_tt,
-                    mode=self._hdv_gawron_mode,
-                    lr=self._hdv_gawron_lr,
-                    cost=hdv_cost,
-                    alpha_zero=self._hdv_gawron_alpha_zero,
-                    beta=self._hdv_gawron_beta,
-                    update_mode=self._hdv_gawron_update_mode,
-                    min_prob=self._hdv_min_prob,
-                )
-                self._hdv_route_probs[od_key] = new_probs.astype(np.float32)
-                if self._hdv_route_costs is not None and new_cost is not None:
-                    self._hdv_route_costs[od_key] = new_cost.astype(np.float32)
+            hdv_frac = self._hdv_route_probs[od_key]
+            hdv_cost = (
+                self._hdv_route_costs.get(od_key)
+                if self._hdv_route_costs is not None else None
+            )
+            new_probs, new_cost = gawron_step_from_route_tt(
+                probs=hdv_frac,
+                route_tt=route_tt,
+                mode=self._hdv_gawron_mode,
+                lr=self._hdv_gawron_lr,
+                cost=hdv_cost,
+                alpha_zero=self._hdv_gawron_alpha_zero,
+                beta=self._hdv_gawron_beta,
+                update_mode=self._hdv_gawron_update_mode,
+                min_prob=self._hdv_min_prob,
+            )
+            self._hdv_route_probs[od_key] = new_probs.astype(np.float32)
+            if self._hdv_route_costs is not None and new_cost is not None:
+                self._hdv_route_costs[od_key] = new_cost.astype(np.float32)
 
     def _update_hdv_gawron_actual(self) -> None:
         """Update HDV route probabilities using actual per-route travel times.
@@ -1545,16 +1609,18 @@ class DataCollector:
         collected from traci arrival data during the episode.
         """
         rr = self._route_registry
-        n_dests = len(rr.destinations)
-
         # Build per-OD route travel times: {(oi, di): (K,) array}
         od_route_tt: Dict[Tuple[int, int], np.ndarray] = {}
         for (oi, di, k), tts in self._last_ep_route_tts.items():
             od_key = (oi, di)
             if od_key not in od_route_tt:
-                od_flat = oi * n_dests + di
-                K = len(rr.route_edge_indices[od_flat])
+                od_idx = _route_registry_od_index(rr, oi, di)
+                if od_idx < 0 or od_idx >= len(rr.route_edge_indices):
+                    continue
+                K = len(rr.route_edge_indices[od_idx])
                 od_route_tt[od_key] = np.full(K, np.nan, dtype=np.float32)
+            if int(k) < 0 or int(k) >= od_route_tt[od_key].shape[0]:
+                continue
             od_route_tt[od_key][k] = float(np.mean(tts))
 
         # Update each OD pair that has observed travel times
@@ -1612,31 +1678,29 @@ class DataCollector:
 
         total_tt = 0.0
         total_veh = 0.0
-        n_origins = len(rr.origins)
-        n_dests = len(rr.destinations)
+        for od_idx, od_key in _iter_route_registry_od_rows(rr):
+            if od_idx < 0 or od_idx >= len(rr.route_edge_indices):
+                continue
+            n_av = float(rr.od_av_counts[od_idx])
+            n_hdv = float(rr.od_hdv_counts[od_idx])
+            if n_av + n_hdv == 0:
+                continue
 
-        for oi in range(n_origins):
-            for di in range(n_dests):
-                od_flat = oi * n_dests + di
-                n_av = float(rr.od_av_counts[od_flat])
-                n_hdv = float(rr.od_hdv_counts[od_flat])
-                if n_av + n_hdv == 0:
-                    continue
+            # HDV route fracs from Gawron state; AV assumed uniform
+            K_od = len(rr.route_edge_indices[od_idx])
+            if K_od <= 0:
+                continue
+            hdv_frac = self._hdv_route_probs.get(od_key) if self._hdv_route_probs else None
+            if hdv_frac is None:
+                hdv_frac = np.ones(K_od, dtype=np.float32) / K_od
+            av_frac = np.ones(K_od, dtype=np.float32) / K_od
 
-                # HDV route fracs from Gawron state; AV assumed uniform
-                od_key = (oi, di)
-                K_od = len(rr.route_edge_indices[od_flat])
-                hdv_frac = self._hdv_route_probs.get(od_key) if self._hdv_route_probs else None
-                if hdv_frac is None:
-                    hdv_frac = np.ones(K_od, dtype=np.float32) / K_od
-                av_frac = np.ones(K_od, dtype=np.float32) / K_od
-
-                for k in range(K_od):
-                    edges = rr.route_edge_indices[od_flat][k]
-                    route_tt = sum(t_e[e] for e in edges)  # full route travel time
-                    n_veh_k = n_hdv * hdv_frac[k] + n_av * av_frac[k]
-                    total_tt += n_veh_k * route_tt
-                    total_veh += n_veh_k
+            for k in range(K_od):
+                edges = rr.route_edge_indices[od_idx][k]
+                route_tt = sum(t_e[e] for e in edges)  # full route travel time
+                n_veh_k = n_hdv * hdv_frac[k] + n_av * av_frac[k]
+                total_tt += n_veh_k * route_tt
+                total_veh += n_veh_k
 
         return total_tt / max(total_veh, 1.0)
 
