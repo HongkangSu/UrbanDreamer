@@ -560,6 +560,23 @@ def _vehicle_critic_reward_enabled(cfg: Any) -> bool:
     )
 
 
+def _route_cost_reward_state_key(cfg: Any) -> str:
+    key = str(getattr(cfg, "dreamer_route_cost_reward_state", "next") or "next").strip().lower()
+    if key in {"current", "pre", "pre_action", "z", "z_current"}:
+        return "current"
+    if key in {"next", "post", "post_action", "z_next"}:
+        return "next"
+    raise ValueError(
+        "Unsupported dreamer_route_cost_reward_state="
+        f"{getattr(cfg, 'dreamer_route_cost_reward_state', None)!r}; "
+        "expected current or next"
+    )
+
+
+def _route_cost_reward_z(cfg: Any, z_current: torch.Tensor, z_next: torch.Tensor) -> torch.Tensor:
+    return z_current if _route_cost_reward_state_key(cfg) == "current" else z_next
+
+
 def _dreamer_vehicle_return_discount(cfg: Any) -> float:
     """Discount for the per-vehicle critic target.
 
@@ -1009,6 +1026,7 @@ class TrainConfig:
     dreamer_route_cost_reward_weight: float = 0.0
     dreamer_route_cost_reward_scope: str = "both"
     dreamer_route_cost_reward_mode: str = "progress_fraction"
+    dreamer_route_cost_reward_state: str = "next"
     dreamer_pred_t_cav_proxy_reward_weight: float = 0.0
     dreamer_route_cost_reward_normalize_regret: bool = False
     dreamer_route_cost_reward_temperature: float = 60.0
@@ -1541,6 +1559,7 @@ def _dreamer_step_reward(
     z_next: torch.Tensor,
     reward_scale: float,
     z_current: Optional[torch.Tensor] = None,
+    route_cost_z: Optional[torch.Tensor] = None,
     action_edge: Optional[torch.Tensor] = None,
     current_edge_indices: Optional[Union[torch.Tensor, np.ndarray, List[int]]] = None,
     route_probs: Optional[torch.Tensor] = None,
@@ -1587,6 +1606,20 @@ def _dreamer_step_reward(
     total_tt = torch.sum(v_total * edge_tt)
     n_veh = v_total.sum().clamp_min(1.0)
     all_tt = total_tt / n_veh
+    route_cost_edge_tt = edge_tt
+    route_cost_v_total = v_total
+    if route_cost_z is not None and route_cost_z is not z_next:
+        edge_dyn_route_cost = wm.flow_projector.decode(route_cost_z)
+        route_cost_v_total = torch.relu(edge_dyn_route_cost[:, 2]) * capacities
+        route_cost_edge_tt = _edge_tt_tensor_from_decoded(
+            wm=wm,
+            decoded=edge_dyn_route_cost,
+            z=route_cost_z,
+            edge_cost_source=edge_cost_source,
+            decoded_speed_min_ratio=decoded_speed_min_ratio,
+            decoded_speed_max_ratio=decoded_speed_max_ratio,
+            decoded_speed_excess_scale=decoded_speed_excess_scale,
+        )
 
     remaining_progress = torch.zeros((), device=z_next.device, dtype=z_next.dtype)
     remaining_next = None
@@ -1660,7 +1693,7 @@ def _dreamer_step_reward(
         )
     ):
         invalid_route_cost = (
-            edge_tt.mean()
+            route_cost_edge_tt.mean()
             * float(max(cav_route_steps, 1.0))
             * float(invalid_route_cost_factor)
         )
@@ -1670,15 +1703,15 @@ def _dreamer_step_reward(
         if pressure_weight != 0.0:
             route_costs, route_valid = _route_cost_matrix_from_paths(
                 path_batch=path_batch,
-                edge_cost=edge_tt,
+                edge_cost=route_cost_edge_tt,
                 n_routes=int(route_probs.shape[1]),
                 invalid_route_cost=invalid_route_cost,
             )
             if route_costs is not None and route_valid is not None:
                 pressure_edge_weights = _planned_av_pressure_edge_weights(
                     wm=wm,
-                    edge_tt=edge_tt,
-                    v_total=v_total,
+                    edge_tt=route_cost_edge_tt,
+                    v_total=route_cost_v_total,
                     capacities=capacities,
                     mode=route_cost_reward_planned_av_pressure_mode,
                 )
@@ -1715,7 +1748,7 @@ def _dreamer_step_reward(
             route_plan_abs_tt = _expected_route_cost_from_paths(
                 route_probs=route_probs,
                 path_batch=path_batch,
-                edge_cost=edge_tt,
+                edge_cost=route_cost_edge_tt,
                 n_routes=int(route_probs.shape[1]),
                 invalid_route_cost=invalid_route_cost,
             )
@@ -1724,7 +1757,7 @@ def _dreamer_step_reward(
                 route_plan_reward_cost = _expected_route_regret_from_paths(
                     route_probs=route_probs,
                     path_batch=path_batch,
-                    edge_cost=edge_tt,
+                    edge_cost=route_cost_edge_tt,
                     n_routes=int(route_probs.shape[1]),
                     invalid_route_cost=invalid_route_cost,
                     temperature=float(route_cost_reward_temperature),
@@ -3424,11 +3457,13 @@ def imagined_episode_dynamic_dreamer(
                     hdv_context=hdv_context_for_wm,
                 )
             z_next = z_next.detach()
+        route_reward_z = _route_cost_reward_z(cfg, z, z_next)
         reward_t, t_all_step_min, t_cav_step_min = _dreamer_step_reward(
             wm=wm,
             z_next=z_next,
             reward_scale=float(cfg.vehicle_reward_scale),
             z_current=z,
+            route_cost_z=route_reward_z,
             action_edge=action_edge,
             current_edge_indices=current_edges_np if n_active_av > 0 else None,
             route_probs=route_probs_for_reward,
@@ -3475,11 +3510,12 @@ def imagined_episode_dynamic_dreamer(
         ):
             if vehicle_critic_reward_needed and path_batch_for_reward is not None:
                 with torch.no_grad():
-                    edge_dyn_next_for_vehicle_reward = wm.flow_projector.decode(z_next.detach())
+                    vehicle_reward_z = route_reward_z.detach()
+                    edge_dyn_for_vehicle_reward = wm.flow_projector.decode(vehicle_reward_z)
                     edge_tt_next_for_vehicle_reward = _edge_tt_tensor_from_decoded(
                         wm=wm,
-                        decoded=edge_dyn_next_for_vehicle_reward,
-                        z=z_next.detach(),
+                        decoded=edge_dyn_for_vehicle_reward,
+                        z=vehicle_reward_z,
                         edge_cost_source=cfg.wm_edge_cost_source,
                         decoded_speed_min_ratio=cfg.wm_decoded_speed_min_ratio,
                         decoded_speed_max_ratio=cfg.wm_decoded_speed_max_ratio,
@@ -3505,14 +3541,14 @@ def imagined_episode_dynamic_dreamer(
                             pressure_edge_weights = _planned_av_pressure_edge_weights(
                                 wm=wm,
                                 edge_tt=edge_tt_next_for_vehicle_reward,
-                                v_total=torch.relu(edge_dyn_next_for_vehicle_reward[:, 2])
+                                v_total=torch.relu(edge_dyn_for_vehicle_reward[:, 2])
                                 * wm.bpr.capacities.to(
-                                    device=z_next.device,
-                                    dtype=z_next.dtype,
+                                    device=vehicle_reward_z.device,
+                                    dtype=vehicle_reward_z.dtype,
                                 ),
                                 capacities=wm.bpr.capacities.to(
-                                    device=z_next.device,
-                                    dtype=z_next.dtype,
+                                    device=vehicle_reward_z.device,
+                                    dtype=vehicle_reward_z.dtype,
                                 ),
                                 mode=str(
                                     getattr(
@@ -3754,7 +3790,7 @@ def imagined_episode_dynamic_dreamer(
                         if social_reward_weight != 0.0:
                             vehicle_social_reward_for_ac = _vehicle_social_reward_from_decoded(
                                 wm=wm,
-                                decoded=edge_dyn_next_for_vehicle_reward,
+                                decoded=edge_dyn_for_vehicle_reward,
                                 edge_tt=edge_tt_next_for_vehicle_reward,
                                 selected_idx=selected_route_idx_t_for_update,
                                 valid_action_mask=valid_action_mask_for_update,
@@ -7749,6 +7785,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
                        "min(step_interval, remaining_route_tt)/(elapsed+remaining_route_tt), "
                        "so final steps that arrive early cannot exceed one step of progress; "
                        "route_tt/legacy keeps the old negative remaining-route-seconds reward."
+                   ))
+    p.add_argument("--dreamer_route_cost_reward_state", type=str, default="next",
+                   choices=["current", "next"],
+                   help=(
+                       "WM latent state used to price candidate routes for route-cost rewards. "
+                       "next preserves the historical post-action reward; current aligns the "
+                       "per-vehicle critic target with the route-cost observation available at "
+                       "the decision state."
                    ))
     p.add_argument("--dreamer_pred_t_cav_proxy_reward_weight", type=float, default=0.0,
                    help=(
