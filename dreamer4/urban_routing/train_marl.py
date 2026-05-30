@@ -463,6 +463,52 @@ def _actor_anchor_enabled(cfg: Any) -> bool:
     )
 
 
+def _actor_probe_enabled(cfg: Any) -> bool:
+    return (
+        float(getattr(cfg, "dreamer_actor_probe_kl", 0.0)) > 0.0
+        or float(getattr(cfg, "dreamer_actor_probe_max_argmax_change_frac", 0.0)) > 0.0
+        or float(getattr(cfg, "dreamer_actor_probe_max_vehicle_argmax_change_frac", 0.0)) > 0.0
+        or float(getattr(cfg, "dreamer_actor_probe_max_route_frac", 0.0)) > 0.0
+        or float(getattr(cfg, "dreamer_actor_probe_max_route0_frac", 0.0)) > 0.0
+    )
+
+
+def _snapshot_sample_count(snapshot: Optional[Dict[str, object]]) -> float:
+    if not isinstance(snapshot, dict):
+        return 0.0
+    try:
+        return float(snapshot.get("sample_count", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _maybe_init_actor_probe_snapshot(
+    cfg: Any,
+    *,
+    actor: VehicleRouteActor,
+    trajectories: List[Dict[str, Any]],
+    actor_probe_snapshot: Optional[Dict[str, object]],
+    update_episode: int,
+) -> Tuple[Optional[Dict[str, object]], bool]:
+    if not _actor_probe_enabled(cfg):
+        return actor_probe_snapshot, False
+    if _snapshot_sample_count(actor_probe_snapshot) > 0.0:
+        return actor_probe_snapshot, False
+    probe_start = int(getattr(cfg, "dreamer_actor_probe_start_episode", -1))
+    if int(update_episode) < max(probe_start, 0):
+        return actor_probe_snapshot, False
+    snapshot = dreamer_pg.discrete_ac_policy_snapshot(
+        actor,
+        trajectories,
+        temperature=float(getattr(cfg, "dreamer_action_temperature", 1.0)),
+        max_samples=int(getattr(cfg, "dreamer_actor_probe_max_samples", 4096)),
+    )
+    min_samples = float(getattr(cfg, "dreamer_actor_probe_min_samples", 128))
+    if _snapshot_sample_count(snapshot) < min_samples:
+        return actor_probe_snapshot, False
+    return snapshot, True
+
+
 def _dreamer_global_return_discount(cfg: Any) -> float:
     """Use unit discount only when the scalar reward is route-duration based.
 
@@ -917,6 +963,14 @@ class TrainConfig:
     dreamer_actor_anchor_max_vehicle_argmax_change_frac: float = 0.0
     dreamer_actor_anchor_max_route_frac: float = 0.0
     dreamer_actor_anchor_max_route0_frac: float = 0.0
+    dreamer_actor_probe_start_episode: int = -1
+    dreamer_actor_probe_min_samples: int = 128
+    dreamer_actor_probe_max_samples: int = 4096
+    dreamer_actor_probe_kl: float = 0.0
+    dreamer_actor_probe_max_argmax_change_frac: float = 0.0
+    dreamer_actor_probe_max_vehicle_argmax_change_frac: float = 0.0
+    dreamer_actor_probe_max_route_frac: float = 0.0
+    dreamer_actor_probe_max_route0_frac: float = 0.0
     dreamer_critic_lr: float = 0.0  # 0 keeps legacy cfg.lr
     dreamer_actor_objective: str = "discrete_actor_critic"  # direct_return | critic_q | direct_plus_q | discrete_actor_critic
     dreamer_actor_q_weight: float = 1.0
@@ -1110,6 +1164,16 @@ DREAMER_UPDATE_SCALAR_KEYS = (
     "dreamer_actor_anchor_argmax_max_route_frac",
     "dreamer_actor_anchor_argmax_route0_frac", "dreamer_actor_anchor_top1_prob",
     "dreamer_actor_anchor_sample_count",
+    "dreamer_actor_probe_active", "dreamer_actor_probe_initialized",
+    "dreamer_actor_probe_accepted", "dreamer_actor_probe_kl",
+    "dreamer_actor_probe_argmax_change_frac",
+    "dreamer_actor_probe_vehicle_argmax_change_max",
+    "dreamer_actor_probe_vehicle_argmax_change_mean",
+    "dreamer_actor_probe_vehicle_argmax_change_p95",
+    "dreamer_actor_probe_vehicle_group_count",
+    "dreamer_actor_probe_argmax_max_route_frac",
+    "dreamer_actor_probe_argmax_route0_frac", "dreamer_actor_probe_top1_prob",
+    "dreamer_actor_probe_sample_count",
     "dreamer_ac_sample_count",
     "dreamer_ac_policy_kl", "dreamer_ac_clip_frac", "dreamer_ac_weight_mean",
     "dreamer_ac_uses_sample_adv", "dreamer_ac_entropy_loss",
@@ -4226,6 +4290,7 @@ def dreamer_update(
     vehicle_return_normalizer: Optional[DreamerReturnNormalizer] = None,
     actor_gate_state: Optional[Dict[str, Any]] = None,
     actor_anchor: Optional[VehicleRouteActor] = None,
+    actor_probe_snapshot: Optional[Dict[str, object]] = None,
 ) -> Dict[str, float]:
     actor_losses: List[torch.Tensor] = []
     critic_losses: List[torch.Tensor] = []
@@ -5069,6 +5134,19 @@ def dreamer_update(
             "dreamer_actor_anchor_argmax_route0_frac": 0.0,
             "dreamer_actor_anchor_top1_prob": 0.0,
             "dreamer_actor_anchor_sample_count": 0.0,
+            "dreamer_actor_probe_active": 0.0,
+            "dreamer_actor_probe_initialized": 0.0,
+            "dreamer_actor_probe_accepted": 0.0,
+            "dreamer_actor_probe_kl": 0.0,
+            "dreamer_actor_probe_argmax_change_frac": 0.0,
+            "dreamer_actor_probe_vehicle_argmax_change_max": 0.0,
+            "dreamer_actor_probe_vehicle_argmax_change_mean": 0.0,
+            "dreamer_actor_probe_vehicle_argmax_change_p95": 0.0,
+            "dreamer_actor_probe_vehicle_group_count": 0.0,
+            "dreamer_actor_probe_argmax_max_route_frac": 0.0,
+            "dreamer_actor_probe_argmax_route0_frac": 0.0,
+            "dreamer_actor_probe_top1_prob": 0.0,
+            "dreamer_actor_probe_sample_count": 0.0,
             "dreamer_ac_sample_count": 0.0,
             "dreamer_ac_policy_kl": 0.0,
             "dreamer_ac_clip_frac": 0.0,
@@ -5230,6 +5308,19 @@ def dreamer_update(
     actor_anchor_argmax_route0_frac = 0.0
     actor_anchor_top1_prob = 0.0
     actor_anchor_sample_count = 0.0
+    actor_probe_active = 0.0
+    actor_probe_initialized = 1.0 if _snapshot_sample_count(actor_probe_snapshot) > 0.0 else 0.0
+    actor_probe_accepted = 0.0
+    actor_probe_kl = 0.0
+    actor_probe_argmax_change_frac = 0.0
+    actor_probe_vehicle_argmax_change_max = 0.0
+    actor_probe_vehicle_argmax_change_mean = 0.0
+    actor_probe_vehicle_argmax_change_p95 = 0.0
+    actor_probe_vehicle_group_count = 0.0
+    actor_probe_argmax_max_route_frac = 0.0
+    actor_probe_argmax_route0_frac = 0.0
+    actor_probe_top1_prob = 0.0
+    actor_probe_sample_count = _snapshot_sample_count(actor_probe_snapshot)
 
     if actor_losses and not actor_gate_skip:
         actor_loss_total = torch.stack(actor_losses).mean()
@@ -5292,7 +5383,17 @@ def dreamer_update(
             )
             actor_anchor_active = 1.0 if anchor_enabled else 0.0
 
-        if trust_region_enabled or anchor_enabled:
+        if _actor_probe_enabled(cfg) and use_discrete_actor_critic:
+            actor_probe_sample_count = _snapshot_sample_count(actor_probe_snapshot)
+            actor_probe_initialized = 1.0 if actor_probe_sample_count > 0.0 else 0.0
+        probe_enabled = (
+            _actor_probe_enabled(cfg)
+            and use_discrete_actor_critic
+            and actor_probe_sample_count >= float(getattr(cfg, "dreamer_actor_probe_min_samples", 128))
+        )
+        actor_probe_active = 1.0 if probe_enabled else 0.0
+
+        if trust_region_enabled or anchor_enabled or probe_enabled:
             actor_state_before = copy.deepcopy(actor.state_dict())
             actor_optimizer_state_before = copy.deepcopy(actor_optimizer.state_dict())
             optimizer_lrs_before = [float(group.get("lr", 0.0)) for group in actor_optimizer.param_groups]
@@ -5309,6 +5410,7 @@ def dreamer_update(
                 lr_shrink = 0.5
             accepted = False
             last_anchor_accepted = True
+            last_probe_accepted = True
             for attempt in range(max_retries + 1):
                 actor.load_state_dict(actor_state_before)
                 actor_optimizer.load_state_dict(actor_optimizer_state_before)
@@ -5436,9 +5538,73 @@ def dreamer_update(
                     actor_anchor_accepted = 1.0
                     anchor_accepted = True
                     last_anchor_accepted = True
-                if trust_accepted and anchor_accepted:
+                if probe_enabled and isinstance(actor_probe_snapshot, dict):
+                    probe_shift_stats = dreamer_pg.discrete_ac_policy_shift_from_snapshot(
+                        actor,
+                        actor_probe_snapshot,
+                        temperature=float(getattr(cfg, "dreamer_action_temperature", 1.0)),
+                        group_min_samples=1,
+                    )
+                    actor_probe_kl = float(probe_shift_stats.get("kl", 0.0))
+                    actor_probe_argmax_change_frac = float(
+                        probe_shift_stats.get("argmax_change_frac", 0.0)
+                    )
+                    actor_probe_vehicle_argmax_change_max = float(
+                        probe_shift_stats.get("vehicle_argmax_change_max", 0.0)
+                    )
+                    actor_probe_vehicle_argmax_change_mean = float(
+                        probe_shift_stats.get("vehicle_argmax_change_mean", 0.0)
+                    )
+                    actor_probe_vehicle_argmax_change_p95 = float(
+                        probe_shift_stats.get("vehicle_argmax_change_p95", 0.0)
+                    )
+                    actor_probe_vehicle_group_count = float(
+                        probe_shift_stats.get("vehicle_group_count", 0.0)
+                    )
+                    actor_probe_argmax_max_route_frac = float(
+                        probe_shift_stats.get("argmax_max_route_frac", 0.0)
+                    )
+                    actor_probe_argmax_route0_frac = float(
+                        probe_shift_stats.get("argmax_route0_frac", 0.0)
+                    )
+                    actor_probe_top1_prob = float(probe_shift_stats.get("top1_prob_mean", 0.0))
+                    probe_accepted = _actor_trust_region_accepts(
+                        kl=actor_probe_kl,
+                        argmax_change_frac=actor_probe_argmax_change_frac,
+                        vehicle_argmax_change_max=actor_probe_vehicle_argmax_change_max,
+                        vehicle_group_count=actor_probe_vehicle_group_count,
+                        new_argmax_max_route_frac=actor_probe_argmax_max_route_frac,
+                        old_argmax_max_route_frac=float(
+                            actor_probe_snapshot.get("old_argmax_max_route_frac", 0.0)
+                        ),
+                        new_argmax_route0_frac=actor_probe_argmax_route0_frac,
+                        old_argmax_route0_frac=float(
+                            actor_probe_snapshot.get("old_argmax_route0_frac", 0.0)
+                        ),
+                        kl_limit=float(getattr(cfg, "dreamer_actor_probe_kl", 0.0)),
+                        argmax_change_limit=float(
+                            getattr(cfg, "dreamer_actor_probe_max_argmax_change_frac", 0.0)
+                        ),
+                        vehicle_argmax_change_limit=float(
+                            getattr(cfg, "dreamer_actor_probe_max_vehicle_argmax_change_frac", 0.0)
+                        ),
+                        max_route_frac_limit=float(
+                            getattr(cfg, "dreamer_actor_probe_max_route_frac", 0.0)
+                        ),
+                        route0_frac_limit=float(
+                            getattr(cfg, "dreamer_actor_probe_max_route0_frac", 0.0)
+                        ),
+                    )
+                    last_probe_accepted = bool(probe_accepted)
+                    actor_probe_accepted = 1.0 if probe_accepted else 0.0
+                else:
+                    actor_probe_accepted = 1.0
+                    probe_accepted = True
+                    last_probe_accepted = True
+                if trust_accepted and anchor_accepted and probe_accepted:
                     accepted = True
                     actor_anchor_accepted = 1.0 if anchor_enabled else actor_anchor_accepted
+                    actor_probe_accepted = 1.0 if probe_enabled else actor_probe_accepted
                     break
             if accepted:
                 actor_trust_region_accepted = 1.0
@@ -5453,7 +5619,9 @@ def dreamer_update(
                     dtype=critic_loss_total.dtype,
                 )
                 skipped_actor_trajs += max(1, len(actor_losses))
-                if anchor_enabled and not last_anchor_accepted:
+                if probe_enabled and not last_probe_accepted:
+                    reason = "actor_probe_reject"
+                elif anchor_enabled and not last_anchor_accepted:
                     reason = "actor_anchor_reject"
                 else:
                     reason = "actor_trust_region_reject"
@@ -5602,6 +5770,19 @@ def dreamer_update(
         "dreamer_actor_anchor_argmax_route0_frac": actor_anchor_argmax_route0_frac,
         "dreamer_actor_anchor_top1_prob": actor_anchor_top1_prob,
         "dreamer_actor_anchor_sample_count": actor_anchor_sample_count,
+        "dreamer_actor_probe_active": actor_probe_active,
+        "dreamer_actor_probe_initialized": actor_probe_initialized,
+        "dreamer_actor_probe_accepted": actor_probe_accepted,
+        "dreamer_actor_probe_kl": actor_probe_kl,
+        "dreamer_actor_probe_argmax_change_frac": actor_probe_argmax_change_frac,
+        "dreamer_actor_probe_vehicle_argmax_change_max": actor_probe_vehicle_argmax_change_max,
+        "dreamer_actor_probe_vehicle_argmax_change_mean": actor_probe_vehicle_argmax_change_mean,
+        "dreamer_actor_probe_vehicle_argmax_change_p95": actor_probe_vehicle_argmax_change_p95,
+        "dreamer_actor_probe_vehicle_group_count": actor_probe_vehicle_group_count,
+        "dreamer_actor_probe_argmax_max_route_frac": actor_probe_argmax_max_route_frac,
+        "dreamer_actor_probe_argmax_route0_frac": actor_probe_argmax_route0_frac,
+        "dreamer_actor_probe_top1_prob": actor_probe_top1_prob,
+        "dreamer_actor_probe_sample_count": actor_probe_sample_count,
         "dreamer_ac_sample_count": float(np.mean(dreamer_ac_sample_counts)) if dreamer_ac_sample_counts else 0.0,
         "dreamer_ac_policy_kl": float(np.mean(dreamer_ac_policy_kls)) if dreamer_ac_policy_kls else 0.0,
         "dreamer_ac_clip_frac": float(np.mean(dreamer_ac_clip_fracs)) if dreamer_ac_clip_fracs else 0.0,
@@ -6275,6 +6456,7 @@ def train(cfg: TrainConfig) -> None:
             actor_anchor is not None
             and int(getattr(cfg, "dreamer_actor_anchor_start_episode", -1)) < 0
         )
+        actor_probe_snapshot: Optional[Dict[str, object]] = None
 
         if cfg.resume_ckpt and os.path.exists(cfg.resume_ckpt):
             resume_state = maybe_resume_dreamer_checkpoint(
@@ -6319,6 +6501,14 @@ def train(cfg: TrainConfig) -> None:
                     actor_anchor_initialized = bool(
                         extra_state.get("actor_anchor_initialized", actor_anchor_state is not None)
                     )
+                restored_probe = extra_state.get("actor_probe_snapshot")
+                if isinstance(restored_probe, dict):
+                    actor_probe_snapshot = _move_nested_tensors(restored_probe, device=device, cpu=False)
+                    if _snapshot_sample_count(actor_probe_snapshot) > 0.0:
+                        logger.info(
+                            "Restored actor probe snapshot from Dreamer checkpoint extra_state (n=%d).",
+                            int(_snapshot_sample_count(actor_probe_snapshot)),
+                        )
         if start_episode > 0 and int(cfg.n_total_episodes) <= start_episode:
             logger.warning(
                 "n_total_episodes=%d <= resumed Dreamer episode=%d; interpret as additional episodes "
@@ -6336,6 +6526,8 @@ def train(cfg: TrainConfig) -> None:
             if actor_anchor is not None:
                 extra_state["actor_anchor"] = _move_nested_tensors(actor_anchor.state_dict(), cpu=True)
                 extra_state["actor_anchor_initialized"] = bool(actor_anchor_initialized)
+            if actor_probe_snapshot is not None and _snapshot_sample_count(actor_probe_snapshot) > 0.0:
+                extra_state["actor_probe_snapshot"] = _move_nested_tensors(actor_probe_snapshot, cpu=True)
             extra_state["update_id"] = int(update_id)
             extra_state.update(capture_rng_state(rng=rng))
             return extra_state
@@ -6690,6 +6882,19 @@ def train(cfg: TrainConfig) -> None:
 
             fresh_pending_traj_count = count_fresh_pending_trajs(pending_trajs)
             if fresh_pending_traj_count >= max(1, int(cfg.dreamer_batch_episodes)):
+                actor_probe_snapshot, probe_initialized_now = _maybe_init_actor_probe_snapshot(
+                    cfg,
+                    actor=actor,
+                    trajectories=pending_trajs,
+                    actor_probe_snapshot=actor_probe_snapshot,
+                    update_episode=int(episode),
+                )
+                if probe_initialized_now:
+                    logger.info(
+                        "Initialized fixed actor probe at episode %d from %d AC samples.",
+                        int(episode),
+                        int(_snapshot_sample_count(actor_probe_snapshot)),
+                    )
                 _update_t0 = _time.perf_counter()
                 last_update_stats = dreamer_update(
                     cfg,
@@ -6707,6 +6912,7 @@ def train(cfg: TrainConfig) -> None:
                     vehicle_return_normalizer=vehicle_return_normalizer,
                     actor_gate_state=actor_gate_state,
                     actor_anchor=actor_anchor,
+                    actor_probe_snapshot=actor_probe_snapshot,
                 )
                 _update_wall_sec += _time.perf_counter() - _update_t0
                 anchor_interval = int(getattr(cfg, "dreamer_actor_anchor_update_interval", 0))
@@ -6756,6 +6962,19 @@ def train(cfg: TrainConfig) -> None:
                     ),
                     "actor_anchor_argmax_route0_frac": float(
                         last_update_stats.get("dreamer_actor_anchor_argmax_route0_frac", 0.0)
+                    ),
+                    "actor_probe_active": bool(last_update_stats.get("dreamer_actor_probe_active", 0.0)),
+                    "actor_probe_initialized": bool(last_update_stats.get("dreamer_actor_probe_initialized", 0.0)),
+                    "actor_probe_accepted": bool(last_update_stats.get("dreamer_actor_probe_accepted", 0.0)),
+                    "actor_probe_kl": float(last_update_stats.get("dreamer_actor_probe_kl", 0.0)),
+                    "actor_probe_argmax_change_frac": float(
+                        last_update_stats.get("dreamer_actor_probe_argmax_change_frac", 0.0)
+                    ),
+                    "actor_probe_vehicle_argmax_change_max": float(
+                        last_update_stats.get("dreamer_actor_probe_vehicle_argmax_change_max", 0.0)
+                    ),
+                    "actor_probe_argmax_route0_frac": float(
+                        last_update_stats.get("dreamer_actor_probe_argmax_route0_frac", 0.0)
                     ),
                     "skipped_actor_trajs": float(last_update_stats.get("skipped_actor_trajs", 0.0)),
                     "consumed_fresh_traj_count": int(last_update_stats.get("consumed_fresh_traj_count", 0)),
@@ -6827,6 +7046,12 @@ def train(cfg: TrainConfig) -> None:
                 recent_actor_anchor_change = np.mean(stats_history["dreamer_actor_anchor_argmax_change_frac"][-cfg.log_every:]) if stats_history["dreamer_actor_anchor_argmax_change_frac"] else 0.0
                 recent_actor_anchor_vehicle_change = np.mean(stats_history["dreamer_actor_anchor_vehicle_argmax_change_max"][-cfg.log_every:]) if stats_history["dreamer_actor_anchor_vehicle_argmax_change_max"] else 0.0
                 recent_actor_anchor_route0 = np.mean(stats_history["dreamer_actor_anchor_argmax_route0_frac"][-cfg.log_every:]) if stats_history["dreamer_actor_anchor_argmax_route0_frac"] else 0.0
+                recent_actor_probe_active = np.mean(stats_history["dreamer_actor_probe_active"][-cfg.log_every:]) if stats_history["dreamer_actor_probe_active"] else 0.0
+                recent_actor_probe_accept = np.mean(stats_history["dreamer_actor_probe_accepted"][-cfg.log_every:]) if stats_history["dreamer_actor_probe_accepted"] else 0.0
+                recent_actor_probe_kl = np.mean(stats_history["dreamer_actor_probe_kl"][-cfg.log_every:]) if stats_history["dreamer_actor_probe_kl"] else 0.0
+                recent_actor_probe_change = np.mean(stats_history["dreamer_actor_probe_argmax_change_frac"][-cfg.log_every:]) if stats_history["dreamer_actor_probe_argmax_change_frac"] else 0.0
+                recent_actor_probe_vehicle_change = np.mean(stats_history["dreamer_actor_probe_vehicle_argmax_change_max"][-cfg.log_every:]) if stats_history["dreamer_actor_probe_vehicle_argmax_change_max"] else 0.0
+                recent_actor_probe_route0 = np.mean(stats_history["dreamer_actor_probe_argmax_route0_frac"][-cfg.log_every:]) if stats_history["dreamer_actor_probe_argmax_route0_frac"] else 0.0
                 recent_ac_samples = np.mean(stats_history["dreamer_ac_sample_count"][-cfg.log_every:]) if stats_history["dreamer_ac_sample_count"] else 0.0
                 recent_ac_kl = np.mean(stats_history["dreamer_ac_policy_kl"][-cfg.log_every:]) if stats_history["dreamer_ac_policy_kl"] else 0.0
                 recent_ac_clip = np.mean(stats_history["dreamer_ac_clip_frac"][-cfg.log_every:]) if stats_history["dreamer_ac_clip_frac"] else 0.0
@@ -6900,6 +7125,7 @@ def train(cfg: TrainConfig) -> None:
                     f"top1={recent_ac_policy_top1:.2f} gate={recent_actor_gate:.1f}/{recent_actor_gate_latched:.1f} "
                     f"trust={recent_actor_tr_accept:.1f}/kl={recent_actor_tr_kl:.4f}/retry={recent_actor_tr_retries:.1f}/chg={recent_actor_tr_argmax_change:.3f}/vchg={recent_actor_tr_vehicle_change:.3f}/r0={recent_actor_tr_route0:.2f} "
                     f"anchor={recent_actor_anchor_active:.1f}/{recent_actor_anchor_accept:.1f}/kl={recent_actor_anchor_kl:.4f}/chg={recent_actor_anchor_change:.3f}/vchg={recent_actor_anchor_vehicle_change:.3f}/r0={recent_actor_anchor_route0:.2f} "
+                    f"probe={recent_actor_probe_active:.1f}/{recent_actor_probe_accept:.1f}/kl={recent_actor_probe_kl:.4f}/chg={recent_actor_probe_change:.3f}/vchg={recent_actor_probe_vehicle_change:.3f}/r0={recent_actor_probe_route0:.2f} "
                     f"ac_n={recent_ac_samples:.1f} "
                     f"ac_kl/clip/w/sample_adv={recent_ac_kl:.4f}/{recent_ac_clip:.3f}/{recent_ac_weight:.3f}/{recent_ac_sample_adv:.1f} "
                     f"ent_floor={recent_ac_entropy_floor:.4f}/{recent_ac_entropy_target:.3f}/k={recent_ac_entropy_routes:.2f}/mask={recent_ac_entropy_mask:.2f} "
@@ -6939,6 +7165,18 @@ def train(cfg: TrainConfig) -> None:
                 logger.info("  Dreamer checkpoint saved: %s", path)
 
         if pending_trajs and not bool(cfg.dreamer_preserve_partial_batch_on_exit):
+            actor_probe_snapshot, probe_initialized_now = _maybe_init_actor_probe_snapshot(
+                cfg,
+                actor=actor,
+                trajectories=pending_trajs,
+                actor_probe_snapshot=actor_probe_snapshot,
+                update_episode=max(int(target_episode) - 1, 0),
+            )
+            if probe_initialized_now:
+                logger.info(
+                    "Initialized fixed actor probe during final flush from %d AC samples.",
+                    int(_snapshot_sample_count(actor_probe_snapshot)),
+                )
             last_update_stats = dreamer_update(
                 cfg,
                 actor,
@@ -6955,6 +7193,7 @@ def train(cfg: TrainConfig) -> None:
                 vehicle_return_normalizer=vehicle_return_normalizer,
                 actor_gate_state=actor_gate_state,
                 actor_anchor=actor_anchor,
+                actor_probe_snapshot=actor_probe_snapshot,
             )
             anchor_interval = int(getattr(cfg, "dreamer_actor_anchor_update_interval", 0))
             if (
@@ -6997,6 +7236,19 @@ def train(cfg: TrainConfig) -> None:
                 ),
                 "actor_anchor_argmax_route0_frac": float(
                     last_update_stats.get("dreamer_actor_anchor_argmax_route0_frac", 0.0)
+                ),
+                "actor_probe_active": bool(last_update_stats.get("dreamer_actor_probe_active", 0.0)),
+                "actor_probe_initialized": bool(last_update_stats.get("dreamer_actor_probe_initialized", 0.0)),
+                "actor_probe_accepted": bool(last_update_stats.get("dreamer_actor_probe_accepted", 0.0)),
+                "actor_probe_kl": float(last_update_stats.get("dreamer_actor_probe_kl", 0.0)),
+                "actor_probe_argmax_change_frac": float(
+                    last_update_stats.get("dreamer_actor_probe_argmax_change_frac", 0.0)
+                ),
+                "actor_probe_vehicle_argmax_change_max": float(
+                    last_update_stats.get("dreamer_actor_probe_vehicle_argmax_change_max", 0.0)
+                ),
+                "actor_probe_argmax_route0_frac": float(
+                    last_update_stats.get("dreamer_actor_probe_argmax_route0_frac", 0.0)
                 ),
                 "skipped_actor_trajs": float(last_update_stats.get("skipped_actor_trajs", 0.0)),
                 "consumed_fresh_traj_count": int(last_update_stats.get("consumed_fresh_traj_count", 0)),
@@ -7298,6 +7550,41 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help=(
                        "If >0, reject actor steps whose post-step deterministic argmax "
                        "distribution places route0 above this fraction relative to the anchor samples."
+                   ))
+    p.add_argument("--dreamer_actor_probe_start_episode", type=int, default=-1,
+                   help=(
+                       "Episode at which to capture a fixed actor-probe sample set. <0 starts "
+                       "as soon as any probe limit is enabled. The probe constrains actor drift "
+                       "without adding a reward or actor-only loss."
+                   ))
+    p.add_argument("--dreamer_actor_probe_min_samples", type=int, default=128,
+                   help="Minimum fixed-probe AC samples required before actor probe checks run.")
+    p.add_argument("--dreamer_actor_probe_max_samples", type=int, default=4096,
+                   help="Maximum deterministic AC samples stored in the fixed actor probe.")
+    p.add_argument("--dreamer_actor_probe_kl", type=float, default=0.0,
+                   help=(
+                       "If >0, reject actor steps whose categorical KL from the fixed probe "
+                       "snapshot exceeds this value."
+                   ))
+    p.add_argument("--dreamer_actor_probe_max_argmax_change_frac", type=float, default=0.0,
+                   help=(
+                       "If >0, reject actor steps whose deterministic argmax changes on more "
+                       "than this weighted fraction of fixed-probe samples."
+                   ))
+    p.add_argument("--dreamer_actor_probe_max_vehicle_argmax_change_frac", type=float, default=0.0,
+                   help=(
+                       "If >0, reject actor steps when any vehicle group changes its fixed-probe "
+                       "deterministic argmax on more than this fraction of samples."
+                   ))
+    p.add_argument("--dreamer_actor_probe_max_route_frac", type=float, default=0.0,
+                   help=(
+                       "If >0, reject actor steps whose fixed-probe deterministic argmax "
+                       "distribution places any route above this fraction."
+                   ))
+    p.add_argument("--dreamer_actor_probe_max_route0_frac", type=float, default=0.0,
+                   help=(
+                       "If >0, reject actor steps whose fixed-probe deterministic argmax "
+                       "distribution places route0 above this fraction."
                    ))
     p.add_argument("--dreamer_critic_lr", type=float, default=0.0,
                    help="Critic learning rate override for Dreamer CTDE. <=0 uses --lr.")
