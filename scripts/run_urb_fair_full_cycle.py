@@ -351,11 +351,11 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
         "--num_workers",
         str(args.num_workers),
         "--d_model_dyn",
-        "256",
+        str(args.wm_d_model_dyn),
         "--dyn_depth",
-        "6",
+        str(args.wm_dyn_depth),
         "--n_heads",
-        "4",
+        str(args.wm_n_heads),
         "--use_actions",
         "--joint_route_action",
         "--n_routes",
@@ -388,7 +388,7 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
         "--packing_factor",
         "1",
         "--k_max",
-        "8",
+        str(args.wm_k_max),
         "--n_ode_steps",
         "1",
         "--max_steps",
@@ -964,6 +964,10 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--wm-batch-size", type=int, default=2, help=hidden)
     p.add_argument("--wm-seq-len", type=int, default=16, help=hidden)
     p.add_argument("--wm-grad-accum", type=int, default=16, help=hidden)
+    p.add_argument("--wm-d-model-dyn", type=int, default=256, help=hidden)
+    p.add_argument("--wm-dyn-depth", type=int, default=6, help=hidden)
+    p.add_argument("--wm-n-heads", type=int, default=4, help=hidden)
+    p.add_argument("--wm-k-max", type=int, default=8, help=hidden)
     p.add_argument("--wm-max-steps", type=int, default=8000, help=hidden)
     p.add_argument("--wm-save-every", type=int, default=1000, help=hidden)
     p.add_argument("--wm-log-every", type=int, default=200, help=hidden)

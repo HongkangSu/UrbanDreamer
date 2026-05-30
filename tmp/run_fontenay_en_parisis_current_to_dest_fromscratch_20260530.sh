@@ -31,6 +31,12 @@ env CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-1}" WANDB_MODE=offline MPLCONF
   --wm-max-steps "${WM_MAX_STEPS:-8000}" \
   --wm-save-every "${WM_SAVE_EVERY:-1000}" \
   --wm-eval-every "${WM_EVAL_EVERY:-1000}" \
+  --wm-batch-size "${WM_BATCH_SIZE:-1}" \
+  --wm-seq-len "${WM_SEQ_LEN:-8}" \
+  --wm-grad-accum "${WM_GRAD_ACCUM:-4}" \
+  --wm-d-model-dyn "${WM_D_MODEL_DYN:-128}" \
+  --wm-dyn-depth "${WM_DYN_DEPTH:-4}" \
+  --wm-n-heads "${WM_N_HEADS:-4}" \
   --marl-actor-objective discrete_actor_critic \
   --marl-episodes "${MARL_EPISODES:-400}" \
   --marl-batch-episodes 1 \
