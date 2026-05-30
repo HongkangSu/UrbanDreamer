@@ -391,9 +391,15 @@ def _actor_trust_region_accepts(
     argmax_change_frac: float,
     new_argmax_max_route_frac: float,
     old_argmax_max_route_frac: float,
-    kl_limit: float,
-    argmax_change_limit: float,
-    max_route_frac_limit: float,
+    new_argmax_route0_frac: float = 0.0,
+    old_argmax_route0_frac: float = 0.0,
+    kl_limit: float = 0.0,
+    argmax_change_limit: float = 0.0,
+    max_route_frac_limit: float = 0.0,
+    route0_frac_limit: float = 0.0,
+    vehicle_argmax_change_max: float = 0.0,
+    vehicle_group_count: float = 0.0,
+    vehicle_argmax_change_limit: float = 0.0,
     eps: float = 1e-6,
 ) -> bool:
     kl_ok = (
@@ -405,6 +411,15 @@ def _actor_trust_region_accepts(
         or (
             np.isfinite(float(argmax_change_frac))
             and float(argmax_change_frac) <= float(argmax_change_limit) + float(eps)
+        )
+    )
+    vehicle_argmax_change_ok = (
+        float(vehicle_argmax_change_limit) <= 0.0
+        or (
+            np.isfinite(float(vehicle_argmax_change_max))
+            and np.isfinite(float(vehicle_group_count))
+            and float(vehicle_group_count) > 0.0
+            and float(vehicle_argmax_change_max) <= float(vehicle_argmax_change_limit) + float(eps)
         )
     )
     if float(max_route_frac_limit) <= 0.0:
@@ -421,14 +436,30 @@ def _actor_trust_region_accepts(
         max_route_ok = True
     else:
         max_route_ok = False
-    return bool(kl_ok and argmax_change_ok and max_route_ok)
+    if float(route0_frac_limit) <= 0.0:
+        route0_ok = True
+    elif not np.isfinite(float(new_argmax_route0_frac)):
+        route0_ok = False
+    elif float(new_argmax_route0_frac) <= float(route0_frac_limit) + float(eps):
+        route0_ok = True
+    elif (
+        np.isfinite(float(old_argmax_route0_frac))
+        and float(old_argmax_route0_frac) >= float(route0_frac_limit) - float(eps)
+        and float(new_argmax_route0_frac) <= float(old_argmax_route0_frac) + float(eps)
+    ):
+        route0_ok = True
+    else:
+        route0_ok = False
+    return bool(kl_ok and argmax_change_ok and vehicle_argmax_change_ok and max_route_ok and route0_ok)
 
 
 def _actor_anchor_enabled(cfg: Any) -> bool:
     return (
         float(getattr(cfg, "dreamer_actor_anchor_kl", 0.0)) > 0.0
         or float(getattr(cfg, "dreamer_actor_anchor_max_argmax_change_frac", 0.0)) > 0.0
+        or float(getattr(cfg, "dreamer_actor_anchor_max_vehicle_argmax_change_frac", 0.0)) > 0.0
         or float(getattr(cfg, "dreamer_actor_anchor_max_route_frac", 0.0)) > 0.0
+        or float(getattr(cfg, "dreamer_actor_anchor_max_route0_frac", 0.0)) > 0.0
     )
 
 
@@ -872,7 +903,9 @@ class TrainConfig:
     dreamer_actor_update_gate_latch: bool = False
     dreamer_actor_trust_region_kl: float = 0.0
     dreamer_actor_trust_region_max_argmax_change_frac: float = 0.0
+    dreamer_actor_trust_region_max_vehicle_argmax_change_frac: float = 0.0
     dreamer_actor_trust_region_max_route_frac: float = 0.0
+    dreamer_actor_trust_region_max_route0_frac: float = 0.0
     dreamer_actor_trust_region_max_retries: int = 0
     dreamer_actor_trust_region_lr_shrink: float = 0.5
     dreamer_actor_trust_region_min_samples: int = 128
@@ -881,7 +914,9 @@ class TrainConfig:
     dreamer_actor_anchor_update_interval: int = 0
     dreamer_actor_anchor_kl: float = 0.0
     dreamer_actor_anchor_max_argmax_change_frac: float = 0.0
+    dreamer_actor_anchor_max_vehicle_argmax_change_frac: float = 0.0
     dreamer_actor_anchor_max_route_frac: float = 0.0
+    dreamer_actor_anchor_max_route0_frac: float = 0.0
     dreamer_critic_lr: float = 0.0  # 0 keeps legacy cfg.lr
     dreamer_actor_objective: str = "discrete_actor_critic"  # direct_return | critic_q | direct_plus_q | discrete_actor_critic
     dreamer_actor_q_weight: float = 1.0
@@ -938,6 +973,9 @@ class TrainConfig:
     dreamer_vehicle_route_credit_normalize_by_path_length: bool = False
     dreamer_vehicle_route_credit_base_cost_mode: str = "none"
     dreamer_vehicle_route_credit_include_base_cost: bool = False
+    dreamer_vehicle_route_credit_cost_gate_max_seconds: float = -1.0
+    dreamer_vehicle_route_credit_cost_gate_max_ratio: float = 0.0
+    dreamer_vehicle_route_credit_cost_gate_min_routes: int = 1
     dreamer_vehicle_social_reward_weight: float = 0.0
     dreamer_vehicle_social_reward_source: str = "excess_all_tt"
     dreamer_vehicle_social_reward_distribution: str = "per_vehicle"
@@ -1056,11 +1094,21 @@ DREAMER_UPDATE_SCALAR_KEYS = (
     "dreamer_actor_trust_region_accepted", "dreamer_actor_trust_region_kl",
     "dreamer_actor_trust_region_retries", "dreamer_actor_trust_region_sample_count",
     "dreamer_actor_trust_region_argmax_change_frac",
+    "dreamer_actor_trust_region_vehicle_argmax_change_max",
+    "dreamer_actor_trust_region_vehicle_argmax_change_mean",
+    "dreamer_actor_trust_region_vehicle_argmax_change_p95",
+    "dreamer_actor_trust_region_vehicle_group_count",
     "dreamer_actor_trust_region_argmax_max_route_frac",
+    "dreamer_actor_trust_region_argmax_route0_frac",
     "dreamer_actor_trust_region_top1_prob",
     "dreamer_actor_anchor_active", "dreamer_actor_anchor_accepted",
     "dreamer_actor_anchor_kl", "dreamer_actor_anchor_argmax_change_frac",
-    "dreamer_actor_anchor_argmax_max_route_frac", "dreamer_actor_anchor_top1_prob",
+    "dreamer_actor_anchor_vehicle_argmax_change_max",
+    "dreamer_actor_anchor_vehicle_argmax_change_mean",
+    "dreamer_actor_anchor_vehicle_argmax_change_p95",
+    "dreamer_actor_anchor_vehicle_group_count",
+    "dreamer_actor_anchor_argmax_max_route_frac",
+    "dreamer_actor_anchor_argmax_route0_frac", "dreamer_actor_anchor_top1_prob",
     "dreamer_actor_anchor_sample_count",
     "dreamer_ac_sample_count",
     "dreamer_ac_policy_kl", "dreamer_ac_clip_frac", "dreamer_ac_weight_mean",
@@ -1073,6 +1121,7 @@ DREAMER_UPDATE_SCALAR_KEYS = (
     "vehicle_reward_mean", "vehicle_reward_std",
     "vehicle_route_progress_reward_mean", "vehicle_route_progress_reward_std",
     "vehicle_route_credit_reward_mean", "vehicle_route_credit_reward_std",
+    "vehicle_route_credit_gate_frac", "vehicle_route_credit_selected_gate_frac",
     "vehicle_social_reward_mean", "vehicle_social_reward_std",
     "vehicle_return_discount",
     "critic_target_mean", "critic_target_std", "critic_explained_variance",
@@ -1838,6 +1887,148 @@ def _selected_route_credit_vehicle_rewards_from_cost_matrix(
     return torch.nan_to_num(reward, nan=0.0, posinf=0.0, neginf=0.0)
 
 
+def _route_credit_cost_gate_mask(
+    *,
+    route_tt_costs: torch.Tensor,
+    route_valid: torch.Tensor,
+    max_seconds: float,
+    max_ratio: float,
+    min_routes: int,
+) -> torch.Tensor:
+    """Mask candidates that are close enough to the local fastest route.
+
+    The gate is intentionally based on local travel-time cost, not pressure
+    cost.  It lets critic-visible externality rewards break near ties while
+    preventing them from making clearly slower routes look attractive.
+    """
+    n = min(int(route_tt_costs.shape[0]), int(route_valid.shape[0]))
+    if n <= 0:
+        return torch.zeros(
+            tuple(route_valid.shape),
+            dtype=torch.bool,
+            device=route_tt_costs.device,
+        )
+    costs = route_tt_costs[:n]
+    valid = route_valid[:n].to(device=route_tt_costs.device, dtype=torch.bool)
+    if float(max_seconds) < 0.0 and float(max_ratio) <= 0.0 and int(min_routes) <= 1:
+        return valid
+
+    large = torch.finfo(costs.dtype).max / 4.0
+    masked_costs = costs.masked_fill(~valid, large)
+    best_cost = masked_costs.min(dim=-1, keepdim=True).values
+    finite_best = torch.isfinite(best_cost) & (best_cost < large / 2.0)
+    threshold = torch.zeros_like(best_cost)
+    if float(max_seconds) >= 0.0:
+        threshold = torch.maximum(
+            threshold,
+            torch.full_like(threshold, float(max_seconds)),
+        )
+    if float(max_ratio) > 0.0:
+        threshold = torch.maximum(
+            threshold,
+            best_cost.clamp_min(0.0) * float(max_ratio),
+        )
+    gated = valid & finite_best & ((costs - best_cost) <= threshold)
+
+    keep_count = max(int(min_routes), 1)
+    if keep_count > 1 and int(costs.shape[1]) > 1:
+        valid_count = valid.sum(dim=-1)
+        keep = torch.minimum(
+            valid_count,
+            torch.full_like(valid_count, keep_count),
+        ).clamp_min(1)
+        order = torch.argsort(masked_costs, dim=-1, stable=True)
+        rank = torch.arange(int(costs.shape[1]), device=costs.device).unsqueeze(0).expand_as(order)
+        top_sorted = rank < keep.unsqueeze(-1)
+        top_keep = torch.zeros_like(valid)
+        top_keep.scatter_(1, order, top_sorted)
+        gated = gated | (top_keep & valid)
+
+    no_gated = valid.any(dim=-1) & ~gated.any(dim=-1)
+    if bool(no_gated.any().detach().cpu().item()):
+        fallback_idx = masked_costs.argmin(dim=-1)
+        gated[no_gated, fallback_idx[no_gated]] = True
+    return gated
+
+
+def _selected_route_credit_cost_gate_stats(
+    *,
+    route_tt_costs: torch.Tensor,
+    route_valid: torch.Tensor,
+    selected_idx: torch.Tensor,
+    max_seconds: float,
+    max_ratio: float,
+    min_routes: int,
+) -> Tuple[float, float]:
+    if float(max_seconds) < 0.0 and float(max_ratio) <= 0.0 and int(min_routes) <= 1:
+        return 1.0, 1.0
+    n = min(
+        int(route_tt_costs.shape[0]),
+        int(route_valid.shape[0]),
+        int(selected_idx.reshape(-1).shape[0]),
+    )
+    if n <= 0:
+        return 0.0, 0.0
+    gate = _route_credit_cost_gate_mask(
+        route_tt_costs=route_tt_costs[:n],
+        route_valid=route_valid[:n],
+        max_seconds=float(max_seconds),
+        max_ratio=float(max_ratio),
+        min_routes=int(min_routes),
+    )
+    valid = route_valid[:n].to(device=gate.device, dtype=torch.bool)
+    valid_count = valid.sum().clamp_min(1)
+    gate_frac = float((gate & valid).to(dtype=torch.float32).sum().div(valid_count).detach().cpu().item())
+    selected = selected_idx.reshape(-1)[:n].to(device=gate.device, dtype=torch.long)
+    selected = selected.clamp(0, max(int(gate.shape[1]) - 1, 0))
+    rows = torch.arange(n, device=gate.device)
+    selected_valid = valid[rows, selected]
+    selected_denom = selected_valid.to(dtype=torch.float32).sum().clamp_min(1.0)
+    selected_frac = float(
+        (gate[rows, selected] & selected_valid)
+        .to(dtype=torch.float32)
+        .sum()
+        .div(selected_denom)
+        .detach()
+        .cpu()
+        .item()
+    )
+    return gate_frac, selected_frac
+
+
+def _apply_route_credit_cost_gate(
+    *,
+    route_credit_costs: torch.Tensor,
+    route_tt_costs: torch.Tensor,
+    route_valid: torch.Tensor,
+    max_seconds: float,
+    max_ratio: float,
+    min_routes: int,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    if float(max_seconds) < 0.0 and float(max_ratio) <= 0.0 and int(min_routes) <= 1:
+        return route_credit_costs, route_valid
+    n = min(
+        int(route_credit_costs.shape[0]),
+        int(route_tt_costs.shape[0]),
+        int(route_valid.shape[0]),
+    )
+    if n <= 0:
+        return route_credit_costs, route_valid
+    gated_valid = route_valid.clone()
+    gate = _route_credit_cost_gate_mask(
+        route_tt_costs=route_tt_costs[:n].to(
+            device=route_credit_costs.device,
+            dtype=route_credit_costs.dtype,
+        ),
+        route_valid=route_valid[:n].to(device=route_credit_costs.device),
+        max_seconds=float(max_seconds),
+        max_ratio=float(max_ratio),
+        min_routes=int(min_routes),
+    )
+    gated_valid[:n] = route_valid[:n].to(device=gated_valid.device) & gate.to(device=gated_valid.device)
+    return route_credit_costs, gated_valid
+
+
 def _vehicle_social_reward_from_decoded(
     *,
     wm: UrbanWorldModel,
@@ -2178,6 +2369,8 @@ def imagined_episode_dynamic_dreamer(
     dreamer_ac_vehicle_route_progress_reward_steps: List[torch.Tensor] = []
     dreamer_ac_vehicle_route_credit_reward_steps: List[torch.Tensor] = []
     dreamer_ac_vehicle_social_reward_steps: List[torch.Tensor] = []
+    vehicle_route_credit_gate_fracs: List[float] = []
+    vehicle_route_credit_selected_gate_fracs: List[float] = []
     dreamer_ac_selected_nonzero_fracs: List[float] = []
     critic_contexts: List[torch.Tensor] = []
     rollout_reward_stats_steps: List[Dict[str, float]] = []
@@ -3406,10 +3599,64 @@ def imagined_episode_dynamic_dreamer(
                                 ),
                                 detach_pressure=True,
                             )
+                            route_credit_costs, route_credit_valid = _apply_route_credit_cost_gate(
+                                route_credit_costs=route_credit_costs.detach(),
+                                route_tt_costs=vehicle_route_tt_costs.detach(),
+                                route_valid=vehicle_reward_valid,
+                                max_seconds=float(
+                                    getattr(
+                                        cfg,
+                                        "dreamer_vehicle_route_credit_cost_gate_max_seconds",
+                                        -1.0,
+                                    )
+                                ),
+                                max_ratio=float(
+                                    getattr(
+                                        cfg,
+                                        "dreamer_vehicle_route_credit_cost_gate_max_ratio",
+                                        0.0,
+                                    )
+                                ),
+                                min_routes=int(
+                                    getattr(
+                                        cfg,
+                                        "dreamer_vehicle_route_credit_cost_gate_min_routes",
+                                        1,
+                                    )
+                                ),
+                            )
+                            gate_frac, selected_gate_frac = _selected_route_credit_cost_gate_stats(
+                                route_tt_costs=vehicle_route_tt_costs.detach(),
+                                route_valid=vehicle_reward_valid,
+                                selected_idx=selected_route_idx_t_for_update,
+                                max_seconds=float(
+                                    getattr(
+                                        cfg,
+                                        "dreamer_vehicle_route_credit_cost_gate_max_seconds",
+                                        -1.0,
+                                    )
+                                ),
+                                max_ratio=float(
+                                    getattr(
+                                        cfg,
+                                        "dreamer_vehicle_route_credit_cost_gate_max_ratio",
+                                        0.0,
+                                    )
+                                ),
+                                min_routes=int(
+                                    getattr(
+                                        cfg,
+                                        "dreamer_vehicle_route_credit_cost_gate_min_routes",
+                                        1,
+                                    )
+                                ),
+                            )
+                            vehicle_route_credit_gate_fracs.append(gate_frac)
+                            vehicle_route_credit_selected_gate_fracs.append(selected_gate_frac)
                             vehicle_route_credit_reward_for_ac = (
                                 _selected_route_credit_vehicle_rewards_from_cost_matrix(
-                                    route_credit_costs=route_credit_costs.detach(),
-                                    route_valid=vehicle_reward_valid,
+                                    route_credit_costs=route_credit_costs,
+                                    route_valid=route_credit_valid,
                                     selected_idx=selected_route_idx_t_for_update,
                                     reward_weight=route_credit_reward_weight,
                                     reward_scale=float(getattr(cfg, "vehicle_reward_scale", 1.0)),
@@ -3852,6 +4099,14 @@ def imagined_episode_dynamic_dreamer(
             float(ac_samples["dreamer_ac_vehicle_route_credit_reward"].detach().std(unbiased=False).cpu().item())
             if ac_samples["dreamer_ac_vehicle_route_credit_reward"].numel() > 1 else 0.0
         ),
+        "vehicle_route_credit_gate_frac": (
+            float(np.mean(vehicle_route_credit_gate_fracs))
+            if vehicle_route_credit_gate_fracs else 0.0
+        ),
+        "vehicle_route_credit_selected_gate_frac": (
+            float(np.mean(vehicle_route_credit_selected_gate_fracs))
+            if vehicle_route_credit_selected_gate_fracs else 0.0
+        ),
         "vehicle_social_reward_mean": (
             float(ac_samples["dreamer_ac_vehicle_social_reward"].detach().mean().cpu().item())
             if ac_samples["dreamer_ac_vehicle_social_reward"].numel() > 0 else 0.0
@@ -3946,6 +4201,8 @@ def imagined_episode_dynamic_dreamer(
         "dreamer_ac_selected_route1_frac": ep_metrics["dreamer_ac_selected_route1_frac"],
         "dreamer_ac_selected_route2_frac": ep_metrics["dreamer_ac_selected_route2_frac"],
         "dreamer_ac_selected_route3_frac": ep_metrics["dreamer_ac_selected_route3_frac"],
+        "vehicle_route_credit_gate_frac": ep_metrics["vehicle_route_credit_gate_frac"],
+        "vehicle_route_credit_selected_gate_frac": ep_metrics["vehicle_route_credit_selected_gate_frac"],
         **ac_samples,
     }
     rollout_rewards.add_rollout_reward_trajectory_fields(trajectory, ep_metrics)
@@ -4059,6 +4316,8 @@ def dreamer_update(
     vehicle_route_progress_reward_stds: List[float] = []
     vehicle_route_credit_reward_means: List[float] = []
     vehicle_route_credit_reward_stds: List[float] = []
+    vehicle_route_credit_gate_fracs: List[float] = []
+    vehicle_route_credit_selected_gate_fracs: List[float] = []
     vehicle_social_reward_means: List[float] = []
     vehicle_social_reward_stds: List[float] = []
     skipped_actor_trajs = 0
@@ -4791,13 +5050,23 @@ def dreamer_update(
             "dreamer_actor_trust_region_retries": 0.0,
             "dreamer_actor_trust_region_sample_count": 0.0,
             "dreamer_actor_trust_region_argmax_change_frac": 0.0,
+            "dreamer_actor_trust_region_vehicle_argmax_change_max": 0.0,
+            "dreamer_actor_trust_region_vehicle_argmax_change_mean": 0.0,
+            "dreamer_actor_trust_region_vehicle_argmax_change_p95": 0.0,
+            "dreamer_actor_trust_region_vehicle_group_count": 0.0,
             "dreamer_actor_trust_region_argmax_max_route_frac": 0.0,
+            "dreamer_actor_trust_region_argmax_route0_frac": 0.0,
             "dreamer_actor_trust_region_top1_prob": 0.0,
             "dreamer_actor_anchor_active": 0.0,
             "dreamer_actor_anchor_accepted": 0.0,
             "dreamer_actor_anchor_kl": 0.0,
             "dreamer_actor_anchor_argmax_change_frac": 0.0,
+            "dreamer_actor_anchor_vehicle_argmax_change_max": 0.0,
+            "dreamer_actor_anchor_vehicle_argmax_change_mean": 0.0,
+            "dreamer_actor_anchor_vehicle_argmax_change_p95": 0.0,
+            "dreamer_actor_anchor_vehicle_group_count": 0.0,
             "dreamer_actor_anchor_argmax_max_route_frac": 0.0,
+            "dreamer_actor_anchor_argmax_route0_frac": 0.0,
             "dreamer_actor_anchor_top1_prob": 0.0,
             "dreamer_actor_anchor_sample_count": 0.0,
             "dreamer_ac_sample_count": 0.0,
@@ -4942,13 +5211,23 @@ def dreamer_update(
     actor_trust_region_retries = 0.0
     actor_trust_region_sample_count = 0.0
     actor_trust_region_argmax_change_frac = 0.0
+    actor_trust_region_vehicle_argmax_change_max = 0.0
+    actor_trust_region_vehicle_argmax_change_mean = 0.0
+    actor_trust_region_vehicle_argmax_change_p95 = 0.0
+    actor_trust_region_vehicle_group_count = 0.0
     actor_trust_region_argmax_max_route_frac = 0.0
+    actor_trust_region_argmax_route0_frac = 0.0
     actor_trust_region_top1_prob = 0.0
     actor_anchor_active = 0.0
     actor_anchor_accepted = 0.0
     actor_anchor_kl = 0.0
     actor_anchor_argmax_change_frac = 0.0
+    actor_anchor_vehicle_argmax_change_max = 0.0
+    actor_anchor_vehicle_argmax_change_mean = 0.0
+    actor_anchor_vehicle_argmax_change_p95 = 0.0
+    actor_anchor_vehicle_group_count = 0.0
     actor_anchor_argmax_max_route_frac = 0.0
+    actor_anchor_argmax_route0_frac = 0.0
     actor_anchor_top1_prob = 0.0
     actor_anchor_sample_count = 0.0
 
@@ -4960,14 +5239,22 @@ def dreamer_update(
         trust_region_argmax_change_limit = float(
             getattr(cfg, "dreamer_actor_trust_region_max_argmax_change_frac", 0.0)
         )
+        trust_region_vehicle_argmax_change_limit = float(
+            getattr(cfg, "dreamer_actor_trust_region_max_vehicle_argmax_change_frac", 0.0)
+        )
         trust_region_max_route_limit = float(
             getattr(cfg, "dreamer_actor_trust_region_max_route_frac", 0.0)
+        )
+        trust_region_route0_limit = float(
+            getattr(cfg, "dreamer_actor_trust_region_max_route0_frac", 0.0)
         )
         if (
             (
                 trust_region_kl_limit > 0.0
                 or trust_region_argmax_change_limit > 0.0
+                or trust_region_vehicle_argmax_change_limit > 0.0
                 or trust_region_max_route_limit > 0.0
+                or trust_region_route0_limit > 0.0
             )
             and use_discrete_actor_critic
         ):
@@ -5039,25 +5326,49 @@ def dreamer_update(
                         actor,
                         trust_region_snapshot,
                         temperature=float(getattr(cfg, "dreamer_action_temperature", 1.0)),
+                        group_min_samples=1,
                     )
                     actor_trust_region_kl = float(shift_stats.get("kl", 0.0))
                     actor_trust_region_argmax_change_frac = float(
                         shift_stats.get("argmax_change_frac", 0.0)
                     )
+                    actor_trust_region_vehicle_argmax_change_max = float(
+                        shift_stats.get("vehicle_argmax_change_max", 0.0)
+                    )
+                    actor_trust_region_vehicle_argmax_change_mean = float(
+                        shift_stats.get("vehicle_argmax_change_mean", 0.0)
+                    )
+                    actor_trust_region_vehicle_argmax_change_p95 = float(
+                        shift_stats.get("vehicle_argmax_change_p95", 0.0)
+                    )
+                    actor_trust_region_vehicle_group_count = float(
+                        shift_stats.get("vehicle_group_count", 0.0)
+                    )
                     actor_trust_region_argmax_max_route_frac = float(
                         shift_stats.get("argmax_max_route_frac", 0.0)
+                    )
+                    actor_trust_region_argmax_route0_frac = float(
+                        shift_stats.get("argmax_route0_frac", 0.0)
                     )
                     actor_trust_region_top1_prob = float(shift_stats.get("top1_prob_mean", 0.0))
                     trust_accepted = _actor_trust_region_accepts(
                         kl=actor_trust_region_kl,
                         argmax_change_frac=actor_trust_region_argmax_change_frac,
+                        vehicle_argmax_change_max=actor_trust_region_vehicle_argmax_change_max,
+                        vehicle_group_count=actor_trust_region_vehicle_group_count,
                         new_argmax_max_route_frac=actor_trust_region_argmax_max_route_frac,
                         old_argmax_max_route_frac=float(
                             trust_region_snapshot.get("old_argmax_max_route_frac", 0.0)
                         ),
+                        new_argmax_route0_frac=actor_trust_region_argmax_route0_frac,
+                        old_argmax_route0_frac=float(
+                            trust_region_snapshot.get("old_argmax_route0_frac", 0.0)
+                        ),
                         kl_limit=trust_region_kl_limit,
                         argmax_change_limit=trust_region_argmax_change_limit,
+                        vehicle_argmax_change_limit=trust_region_vehicle_argmax_change_limit,
                         max_route_frac_limit=trust_region_max_route_limit,
+                        route0_frac_limit=trust_region_route0_limit,
                     )
                 else:
                     trust_accepted = True
@@ -5067,28 +5378,56 @@ def dreamer_update(
                         actor,
                         anchor_snapshot,
                         temperature=float(getattr(cfg, "dreamer_action_temperature", 1.0)),
+                        group_min_samples=1,
                     )
                     actor_anchor_kl = float(anchor_shift_stats.get("kl", 0.0))
                     actor_anchor_argmax_change_frac = float(
                         anchor_shift_stats.get("argmax_change_frac", 0.0)
                     )
+                    actor_anchor_vehicle_argmax_change_max = float(
+                        anchor_shift_stats.get("vehicle_argmax_change_max", 0.0)
+                    )
+                    actor_anchor_vehicle_argmax_change_mean = float(
+                        anchor_shift_stats.get("vehicle_argmax_change_mean", 0.0)
+                    )
+                    actor_anchor_vehicle_argmax_change_p95 = float(
+                        anchor_shift_stats.get("vehicle_argmax_change_p95", 0.0)
+                    )
+                    actor_anchor_vehicle_group_count = float(
+                        anchor_shift_stats.get("vehicle_group_count", 0.0)
+                    )
                     actor_anchor_argmax_max_route_frac = float(
                         anchor_shift_stats.get("argmax_max_route_frac", 0.0)
+                    )
+                    actor_anchor_argmax_route0_frac = float(
+                        anchor_shift_stats.get("argmax_route0_frac", 0.0)
                     )
                     actor_anchor_top1_prob = float(anchor_shift_stats.get("top1_prob_mean", 0.0))
                     anchor_accepted = _actor_trust_region_accepts(
                         kl=actor_anchor_kl,
                         argmax_change_frac=actor_anchor_argmax_change_frac,
+                        vehicle_argmax_change_max=actor_anchor_vehicle_argmax_change_max,
+                        vehicle_group_count=actor_anchor_vehicle_group_count,
                         new_argmax_max_route_frac=actor_anchor_argmax_max_route_frac,
                         old_argmax_max_route_frac=float(
                             anchor_snapshot.get("old_argmax_max_route_frac", 0.0)
+                        ),
+                        new_argmax_route0_frac=actor_anchor_argmax_route0_frac,
+                        old_argmax_route0_frac=float(
+                            anchor_snapshot.get("old_argmax_route0_frac", 0.0)
                         ),
                         kl_limit=float(getattr(cfg, "dreamer_actor_anchor_kl", 0.0)),
                         argmax_change_limit=float(
                             getattr(cfg, "dreamer_actor_anchor_max_argmax_change_frac", 0.0)
                         ),
+                        vehicle_argmax_change_limit=float(
+                            getattr(cfg, "dreamer_actor_anchor_max_vehicle_argmax_change_frac", 0.0)
+                        ),
                         max_route_frac_limit=float(
                             getattr(cfg, "dreamer_actor_anchor_max_route_frac", 0.0)
+                        ),
+                        route0_frac_limit=float(
+                            getattr(cfg, "dreamer_actor_anchor_max_route0_frac", 0.0)
                         ),
                     )
                     last_anchor_accepted = bool(anchor_accepted)
@@ -5244,13 +5583,23 @@ def dreamer_update(
         "dreamer_actor_trust_region_retries": actor_trust_region_retries,
         "dreamer_actor_trust_region_sample_count": actor_trust_region_sample_count,
         "dreamer_actor_trust_region_argmax_change_frac": actor_trust_region_argmax_change_frac,
+        "dreamer_actor_trust_region_vehicle_argmax_change_max": actor_trust_region_vehicle_argmax_change_max,
+        "dreamer_actor_trust_region_vehicle_argmax_change_mean": actor_trust_region_vehicle_argmax_change_mean,
+        "dreamer_actor_trust_region_vehicle_argmax_change_p95": actor_trust_region_vehicle_argmax_change_p95,
+        "dreamer_actor_trust_region_vehicle_group_count": actor_trust_region_vehicle_group_count,
         "dreamer_actor_trust_region_argmax_max_route_frac": actor_trust_region_argmax_max_route_frac,
+        "dreamer_actor_trust_region_argmax_route0_frac": actor_trust_region_argmax_route0_frac,
         "dreamer_actor_trust_region_top1_prob": actor_trust_region_top1_prob,
         "dreamer_actor_anchor_active": actor_anchor_active,
         "dreamer_actor_anchor_accepted": actor_anchor_accepted,
         "dreamer_actor_anchor_kl": actor_anchor_kl,
         "dreamer_actor_anchor_argmax_change_frac": actor_anchor_argmax_change_frac,
+        "dreamer_actor_anchor_vehicle_argmax_change_max": actor_anchor_vehicle_argmax_change_max,
+        "dreamer_actor_anchor_vehicle_argmax_change_mean": actor_anchor_vehicle_argmax_change_mean,
+        "dreamer_actor_anchor_vehicle_argmax_change_p95": actor_anchor_vehicle_argmax_change_p95,
+        "dreamer_actor_anchor_vehicle_group_count": actor_anchor_vehicle_group_count,
         "dreamer_actor_anchor_argmax_max_route_frac": actor_anchor_argmax_max_route_frac,
+        "dreamer_actor_anchor_argmax_route0_frac": actor_anchor_argmax_route0_frac,
         "dreamer_actor_anchor_top1_prob": actor_anchor_top1_prob,
         "dreamer_actor_anchor_sample_count": actor_anchor_sample_count,
         "dreamer_ac_sample_count": float(np.mean(dreamer_ac_sample_counts)) if dreamer_ac_sample_counts else 0.0,
@@ -5317,6 +5666,22 @@ def dreamer_update(
         "vehicle_route_credit_reward_std": (
             float(np.mean(vehicle_route_credit_reward_stds))
             if vehicle_route_credit_reward_stds else 0.0
+        ),
+        "vehicle_route_credit_gate_frac": (
+            float(np.mean([
+                float(traj.get("vehicle_route_credit_gate_frac", 0.0))
+                for traj in trajectories
+                if "vehicle_route_credit_gate_frac" in traj
+            ]))
+            if any("vehicle_route_credit_gate_frac" in traj for traj in trajectories) else 0.0
+        ),
+        "vehicle_route_credit_selected_gate_frac": (
+            float(np.mean([
+                float(traj.get("vehicle_route_credit_selected_gate_frac", 0.0))
+                for traj in trajectories
+                if "vehicle_route_credit_selected_gate_frac" in traj
+            ]))
+            if any("vehicle_route_credit_selected_gate_frac" in traj for traj in trajectories) else 0.0
         ),
         "vehicle_social_reward_mean": (
             float(np.mean(vehicle_social_reward_means)) if vehicle_social_reward_means else 0.0
@@ -6234,6 +6599,12 @@ def train(cfg: TrainConfig) -> None:
             stats_history["hdv_response_av_pressure_sum"].append(ep_metrics.get("hdv_response_av_pressure_sum", 0.0))
             stats_history["hdv_response_background_sum"].append(ep_metrics.get("hdv_response_background_sum", 0.0))
             stats_history["hdv_response_background_active_edges"].append(ep_metrics.get("hdv_response_background_active_edges", 0.0))
+            stats_history["vehicle_route_credit_gate_frac"].append(
+                ep_metrics.get("vehicle_route_credit_gate_frac", 0.0)
+            )
+            stats_history["vehicle_route_credit_selected_gate_frac"].append(
+                ep_metrics.get("vehicle_route_credit_selected_gate_frac", 0.0)
+            )
             rollout_rewards.append_rollout_reward_stats(stats_history, ep_metrics)
             stats_history["traj_diagnostics"].append({
                 "traj_id": int(traj.get("traj_id", episode)),
@@ -6292,6 +6663,12 @@ def train(cfg: TrainConfig) -> None:
                 ),
                 "vehicle_route_credit_reward_std": float(
                     ep_metrics.get("vehicle_route_credit_reward_std", 0.0)
+                ),
+                "vehicle_route_credit_gate_frac": float(
+                    ep_metrics.get("vehicle_route_credit_gate_frac", 0.0)
+                ),
+                "vehicle_route_credit_selected_gate_frac": float(
+                    ep_metrics.get("vehicle_route_credit_selected_gate_frac", 0.0)
                 ),
                 "vehicle_social_reward_mean": float(ep_metrics.get("vehicle_social_reward_mean", 0.0)),
                 "vehicle_social_reward_std": float(ep_metrics.get("vehicle_social_reward_std", 0.0)),
@@ -6362,11 +6739,23 @@ def train(cfg: TrainConfig) -> None:
                     "actor_trust_region_accepted": bool(last_update_stats.get("dreamer_actor_trust_region_accepted", 0.0)),
                     "actor_trust_region_kl": float(last_update_stats.get("dreamer_actor_trust_region_kl", 0.0)),
                     "actor_trust_region_retries": float(last_update_stats.get("dreamer_actor_trust_region_retries", 0.0)),
+                    "actor_trust_region_argmax_route0_frac": float(
+                        last_update_stats.get("dreamer_actor_trust_region_argmax_route0_frac", 0.0)
+                    ),
+                    "actor_trust_region_vehicle_argmax_change_max": float(
+                        last_update_stats.get("dreamer_actor_trust_region_vehicle_argmax_change_max", 0.0)
+                    ),
                     "actor_anchor_active": bool(last_update_stats.get("dreamer_actor_anchor_active", 0.0)),
                     "actor_anchor_accepted": bool(last_update_stats.get("dreamer_actor_anchor_accepted", 0.0)),
                     "actor_anchor_kl": float(last_update_stats.get("dreamer_actor_anchor_kl", 0.0)),
                     "actor_anchor_argmax_change_frac": float(
                         last_update_stats.get("dreamer_actor_anchor_argmax_change_frac", 0.0)
+                    ),
+                    "actor_anchor_vehicle_argmax_change_max": float(
+                        last_update_stats.get("dreamer_actor_anchor_vehicle_argmax_change_max", 0.0)
+                    ),
+                    "actor_anchor_argmax_route0_frac": float(
+                        last_update_stats.get("dreamer_actor_anchor_argmax_route0_frac", 0.0)
                     ),
                     "skipped_actor_trajs": float(last_update_stats.get("skipped_actor_trajs", 0.0)),
                     "consumed_fresh_traj_count": int(last_update_stats.get("consumed_fresh_traj_count", 0)),
@@ -6430,10 +6819,14 @@ def train(cfg: TrainConfig) -> None:
                 recent_actor_tr_kl = np.mean(stats_history["dreamer_actor_trust_region_kl"][-cfg.log_every:]) if stats_history["dreamer_actor_trust_region_kl"] else 0.0
                 recent_actor_tr_retries = np.mean(stats_history["dreamer_actor_trust_region_retries"][-cfg.log_every:]) if stats_history["dreamer_actor_trust_region_retries"] else 0.0
                 recent_actor_tr_argmax_change = np.mean(stats_history["dreamer_actor_trust_region_argmax_change_frac"][-cfg.log_every:]) if stats_history["dreamer_actor_trust_region_argmax_change_frac"] else 0.0
+                recent_actor_tr_vehicle_change = np.mean(stats_history["dreamer_actor_trust_region_vehicle_argmax_change_max"][-cfg.log_every:]) if stats_history["dreamer_actor_trust_region_vehicle_argmax_change_max"] else 0.0
+                recent_actor_tr_route0 = np.mean(stats_history["dreamer_actor_trust_region_argmax_route0_frac"][-cfg.log_every:]) if stats_history["dreamer_actor_trust_region_argmax_route0_frac"] else 0.0
                 recent_actor_anchor_active = np.mean(stats_history["dreamer_actor_anchor_active"][-cfg.log_every:]) if stats_history["dreamer_actor_anchor_active"] else 0.0
                 recent_actor_anchor_accept = np.mean(stats_history["dreamer_actor_anchor_accepted"][-cfg.log_every:]) if stats_history["dreamer_actor_anchor_accepted"] else 0.0
                 recent_actor_anchor_kl = np.mean(stats_history["dreamer_actor_anchor_kl"][-cfg.log_every:]) if stats_history["dreamer_actor_anchor_kl"] else 0.0
                 recent_actor_anchor_change = np.mean(stats_history["dreamer_actor_anchor_argmax_change_frac"][-cfg.log_every:]) if stats_history["dreamer_actor_anchor_argmax_change_frac"] else 0.0
+                recent_actor_anchor_vehicle_change = np.mean(stats_history["dreamer_actor_anchor_vehicle_argmax_change_max"][-cfg.log_every:]) if stats_history["dreamer_actor_anchor_vehicle_argmax_change_max"] else 0.0
+                recent_actor_anchor_route0 = np.mean(stats_history["dreamer_actor_anchor_argmax_route0_frac"][-cfg.log_every:]) if stats_history["dreamer_actor_anchor_argmax_route0_frac"] else 0.0
                 recent_ac_samples = np.mean(stats_history["dreamer_ac_sample_count"][-cfg.log_every:]) if stats_history["dreamer_ac_sample_count"] else 0.0
                 recent_ac_kl = np.mean(stats_history["dreamer_ac_policy_kl"][-cfg.log_every:]) if stats_history["dreamer_ac_policy_kl"] else 0.0
                 recent_ac_clip = np.mean(stats_history["dreamer_ac_clip_frac"][-cfg.log_every:]) if stats_history["dreamer_ac_clip_frac"] else 0.0
@@ -6451,6 +6844,8 @@ def train(cfg: TrainConfig) -> None:
                 recent_vehicle_route_progress_std = np.mean(stats_history["vehicle_route_progress_reward_std"][-cfg.log_every:]) if stats_history["vehicle_route_progress_reward_std"] else 0.0
                 recent_vehicle_route_credit_mean = np.mean(stats_history["vehicle_route_credit_reward_mean"][-cfg.log_every:]) if stats_history["vehicle_route_credit_reward_mean"] else 0.0
                 recent_vehicle_route_credit_std = np.mean(stats_history["vehicle_route_credit_reward_std"][-cfg.log_every:]) if stats_history["vehicle_route_credit_reward_std"] else 0.0
+                recent_vehicle_route_credit_gate = np.mean(stats_history["vehicle_route_credit_gate_frac"][-cfg.log_every:]) if stats_history["vehicle_route_credit_gate_frac"] else 0.0
+                recent_vehicle_route_credit_selected_gate = np.mean(stats_history["vehicle_route_credit_selected_gate_frac"][-cfg.log_every:]) if stats_history["vehicle_route_credit_selected_gate_frac"] else 0.0
                 recent_vehicle_social_mean = np.mean(stats_history["vehicle_social_reward_mean"][-cfg.log_every:]) if stats_history["vehicle_social_reward_mean"] else 0.0
                 recent_vehicle_social_std = np.mean(stats_history["vehicle_social_reward_std"][-cfg.log_every:]) if stats_history["vehicle_social_reward_std"] else 0.0
                 recent_vehicle_ret_std = np.mean(stats_history["vehicle_return_norm_std"][-cfg.log_every:]) if stats_history["vehicle_return_norm_std"] else 1.0
@@ -6503,8 +6898,8 @@ def train(cfg: TrainConfig) -> None:
                     f"ac_r={recent_ac_route0:.2f}/{recent_ac_route1:.2f}/{recent_ac_route2:.2f}/{recent_ac_route3:.2f} "
                     f"ac_policy_argmax={recent_ac_policy_argmax_max:.2f}/r0={recent_ac_policy_argmax_route0:.2f}/non0={recent_ac_policy_argmax_nonzero:.2f} "
                     f"top1={recent_ac_policy_top1:.2f} gate={recent_actor_gate:.1f}/{recent_actor_gate_latched:.1f} "
-                    f"trust={recent_actor_tr_accept:.1f}/kl={recent_actor_tr_kl:.4f}/retry={recent_actor_tr_retries:.1f}/chg={recent_actor_tr_argmax_change:.3f} "
-                    f"anchor={recent_actor_anchor_active:.1f}/{recent_actor_anchor_accept:.1f}/kl={recent_actor_anchor_kl:.4f}/chg={recent_actor_anchor_change:.3f} "
+                    f"trust={recent_actor_tr_accept:.1f}/kl={recent_actor_tr_kl:.4f}/retry={recent_actor_tr_retries:.1f}/chg={recent_actor_tr_argmax_change:.3f}/vchg={recent_actor_tr_vehicle_change:.3f}/r0={recent_actor_tr_route0:.2f} "
+                    f"anchor={recent_actor_anchor_active:.1f}/{recent_actor_anchor_accept:.1f}/kl={recent_actor_anchor_kl:.4f}/chg={recent_actor_anchor_change:.3f}/vchg={recent_actor_anchor_vehicle_change:.3f}/r0={recent_actor_anchor_route0:.2f} "
                     f"ac_n={recent_ac_samples:.1f} "
                     f"ac_kl/clip/w/sample_adv={recent_ac_kl:.4f}/{recent_ac_clip:.3f}/{recent_ac_weight:.3f}/{recent_ac_sample_adv:.1f} "
                     f"ent_floor={recent_ac_entropy_floor:.4f}/{recent_ac_entropy_target:.3f}/k={recent_ac_entropy_routes:.2f}/mask={recent_ac_entropy_mask:.2f} "
@@ -6512,6 +6907,7 @@ def train(cfg: TrainConfig) -> None:
                     f"veh_vf={recent_vehicle_vf:.4f} veh_rew={recent_vehicle_reward_mean:.2f}/{recent_vehicle_reward_std:.2f} "
                     f"veh_route_progress={recent_vehicle_route_progress_mean:.2f}/{recent_vehicle_route_progress_std:.2f} "
                     f"veh_route_credit={recent_vehicle_route_credit_mean:.2f}/{recent_vehicle_route_credit_std:.2f} "
+                    f"credit_gate={recent_vehicle_route_credit_gate:.2f}/{recent_vehicle_route_credit_selected_gate:.2f} "
                     f"veh_social={recent_vehicle_social_mean:.2f}/{recent_vehicle_social_std:.2f} "
                     f"veh_tgt_std={recent_vehicle_target_std:.2f} veh_ret_std={recent_vehicle_ret_std:.2f} | "
                     f"hdv_resp_bg={recent_hdv_response_bg:.4f} | "
@@ -6584,11 +6980,23 @@ def train(cfg: TrainConfig) -> None:
                 "actor_trust_region_accepted": bool(last_update_stats.get("dreamer_actor_trust_region_accepted", 0.0)),
                 "actor_trust_region_kl": float(last_update_stats.get("dreamer_actor_trust_region_kl", 0.0)),
                 "actor_trust_region_retries": float(last_update_stats.get("dreamer_actor_trust_region_retries", 0.0)),
+                "actor_trust_region_argmax_route0_frac": float(
+                    last_update_stats.get("dreamer_actor_trust_region_argmax_route0_frac", 0.0)
+                ),
+                "actor_trust_region_vehicle_argmax_change_max": float(
+                    last_update_stats.get("dreamer_actor_trust_region_vehicle_argmax_change_max", 0.0)
+                ),
                 "actor_anchor_active": bool(last_update_stats.get("dreamer_actor_anchor_active", 0.0)),
                 "actor_anchor_accepted": bool(last_update_stats.get("dreamer_actor_anchor_accepted", 0.0)),
                 "actor_anchor_kl": float(last_update_stats.get("dreamer_actor_anchor_kl", 0.0)),
                 "actor_anchor_argmax_change_frac": float(
                     last_update_stats.get("dreamer_actor_anchor_argmax_change_frac", 0.0)
+                ),
+                "actor_anchor_vehicle_argmax_change_max": float(
+                    last_update_stats.get("dreamer_actor_anchor_vehicle_argmax_change_max", 0.0)
+                ),
+                "actor_anchor_argmax_route0_frac": float(
+                    last_update_stats.get("dreamer_actor_anchor_argmax_route0_frac", 0.0)
                 ),
                 "skipped_actor_trajs": float(last_update_stats.get("skipped_actor_trajs", 0.0)),
                 "consumed_fresh_traj_count": int(last_update_stats.get("consumed_fresh_traj_count", 0)),
@@ -6829,10 +7237,23 @@ def build_arg_parser() -> argparse.ArgumentParser:
                        "If >0, reject/retry actor steps whose deterministic route argmax changes "
                        "for more than this weighted fraction of AC snapshot samples."
                    ))
+    p.add_argument("--dreamer_actor_trust_region_max_vehicle_argmax_change_frac", type=float, default=0.0,
+                   help=(
+                       "If >0, reject/retry actor steps when any vehicle group changes its "
+                       "deterministic route argmax on more than this fraction of sampled AC "
+                       "states. This constrains fine-grained policy drift without adding a "
+                       "reward or actor-only loss."
+                   ))
     p.add_argument("--dreamer_actor_trust_region_max_route_frac", type=float, default=0.0,
                    help=(
                        "If >0, reject/retry actor steps whose post-step deterministic argmax "
                        "distribution places any route at or above this fraction."
+                   ))
+    p.add_argument("--dreamer_actor_trust_region_max_route0_frac", type=float, default=0.0,
+                   help=(
+                       "If >0, reject/retry actor steps whose post-step deterministic argmax "
+                       "distribution places route0 at or above this fraction. This constrains "
+                       "route0 collapse without adding any actor-only reward term."
                    ))
     p.add_argument("--dreamer_actor_trust_region_max_retries", type=int, default=0,
                    help="Number of smaller-LR retries after a trust-region KL violation.")
@@ -6861,10 +7282,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    ))
     p.add_argument("--dreamer_actor_anchor_max_argmax_change_frac", type=float, default=0.0,
                    help="If >0, reject actor steps whose argmax differs from the actor anchor on more than this weighted sample fraction.")
+    p.add_argument("--dreamer_actor_anchor_max_vehicle_argmax_change_frac", type=float, default=0.0,
+                   help=(
+                       "If >0, reject actor steps when any vehicle group differs from the "
+                       "frozen anchor argmax on more than this fraction of sampled AC states. "
+                       "Use this to preserve a SUMO-validated checkpoint while critics keep "
+                       "training."
+                   ))
     p.add_argument("--dreamer_actor_anchor_max_route_frac", type=float, default=0.0,
                    help=(
                        "If >0, reject actor steps whose post-step deterministic argmax "
                        "distribution places any route above this fraction relative to the anchor samples."
+                   ))
+    p.add_argument("--dreamer_actor_anchor_max_route0_frac", type=float, default=0.0,
+                   help=(
+                       "If >0, reject actor steps whose post-step deterministic argmax "
+                       "distribution places route0 above this fraction relative to the anchor samples."
                    ))
     p.add_argument("--dreamer_critic_lr", type=float, default=0.0,
                    help="Critic learning rate override for Dreamer CTDE. <=0 uses --lr.")
@@ -7138,6 +7571,25 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help=(
                        "Include the base route cost in critic-routed pressure route credit. "
                        "Default false makes this a pure action-conditioned social externality."
+                   ))
+    p.add_argument("--dreamer_vehicle_route_credit_cost_gate_max_seconds", type=float, default=-1.0,
+                   help=(
+                       "Enable a local route-cost gate for critic-routed route-credit reward. "
+                       "When >=0, externality credit is only assigned to candidates within this "
+                       "many seconds of the fastest valid candidate, so pressure can break near "
+                       "ties but cannot reward clearly slower routes."
+                   ))
+    p.add_argument("--dreamer_vehicle_route_credit_cost_gate_max_ratio", type=float, default=0.0,
+                   help=(
+                       "Optional relative route-cost gate for critic-routed route-credit reward. "
+                       "A value of 0.10 keeps candidates within 10%% of the fastest local route. "
+                       "The effective gate uses the looser of seconds and ratio thresholds."
+                   ))
+    p.add_argument("--dreamer_vehicle_route_credit_cost_gate_min_routes", type=int, default=1,
+                   help=(
+                       "Minimum number of valid candidates kept by the route-credit cost gate. "
+                       "Use 1 to keep only near-tie routes; larger values preserve more "
+                       "externality exploration while still ordering by local route cost."
                    ))
     p.add_argument("--dreamer_vehicle_social_reward_weight", type=float, default=0.0,
                    help=(

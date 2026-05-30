@@ -91,6 +91,76 @@ def _policy_distribution_stats(log_probs: torch.Tensor, sample_weight: torch.Ten
     }
 
 
+def _grouped_argmax_change_stats(
+    *,
+    old_argmax: torch.Tensor,
+    new_argmax: torch.Tensor,
+    sample_weight: torch.Tensor,
+    group_id: torch.Tensor,
+    min_samples: int = 1,
+) -> Dict[str, float]:
+    """Measure deterministic policy flips within stable sample groups."""
+    empty = {
+        "group_argmax_change_max": 0.0,
+        "group_argmax_change_mean": 0.0,
+        "group_argmax_change_p95": 0.0,
+        "group_count": 0.0,
+    }
+    if not (
+        torch.is_tensor(old_argmax)
+        and torch.is_tensor(new_argmax)
+        and torch.is_tensor(sample_weight)
+        and torch.is_tensor(group_id)
+    ):
+        return empty
+    n = min(
+        int(old_argmax.reshape(-1).numel()),
+        int(new_argmax.reshape(-1).numel()),
+        int(sample_weight.reshape(-1).numel()),
+        int(group_id.reshape(-1).numel()),
+    )
+    if n <= 0:
+        return empty
+    old_n = old_argmax.reshape(-1)[:n].to(device=new_argmax.device)
+    new_n = new_argmax.reshape(-1)[:n]
+    weights = sample_weight.reshape(-1)[:n].to(device=new_n.device, dtype=torch.float32).clamp_min(0.0)
+    groups = group_id.reshape(-1)[:n].to(device=new_n.device, dtype=torch.long)
+    finite = torch.isfinite(weights) & (groups >= 0)
+    if not bool(finite.any().detach().cpu().item()):
+        return empty
+
+    groups_f = groups[finite]
+    unique_groups = torch.unique(groups_f, sorted=True)
+    min_count = max(int(min_samples), 1)
+    group_changes: List[torch.Tensor] = []
+    group_weights: List[torch.Tensor] = []
+    changed = (new_n[finite] != old_n[finite]).to(dtype=torch.float32)
+    weights_f = weights[finite]
+    for gid in unique_groups:
+        mask = groups_f == gid
+        count = int(mask.to(dtype=torch.long).sum().detach().cpu().item())
+        if count < min_count:
+            continue
+        denom = weights_f[mask].sum().clamp_min(1e-6)
+        frac = (changed[mask] * weights_f[mask]).sum() / denom
+        group_changes.append(frac)
+        group_weights.append(denom)
+    if not group_changes:
+        return empty
+
+    change_tensor = torch.stack(group_changes)
+    weight_tensor = torch.stack(group_weights).clamp_min(0.0)
+    weight_sum = weight_tensor.sum().clamp_min(1e-6)
+    sorted_changes = torch.sort(change_tensor).values
+    p95_idx = min(max(int(0.95 * (int(sorted_changes.numel()) - 1)), 0), int(sorted_changes.numel()) - 1)
+    return {
+        "group_argmax_change_max": float(change_tensor.max().detach().cpu().item()),
+        "group_argmax_change_mean": float(((change_tensor * weight_tensor).sum() / weight_sum).detach().cpu().item()),
+        "group_argmax_change_p95": float(sorted_changes[p95_idx].detach().cpu().item()),
+        "group_count": float(int(change_tensor.numel())),
+    }
+
+
 def discrete_ac_policy_snapshot(
     actor,
     trajectories: List[Dict[str, object]],
@@ -102,6 +172,7 @@ def discrete_ac_policy_snapshot(
     obs_parts: List[torch.Tensor] = []
     valid_parts: List[torch.Tensor] = []
     weight_parts: List[torch.Tensor] = []
+    vehicle_id_parts: List[torch.Tensor] = []
     for traj in trajectories:
         obs = traj.get("dreamer_ac_obs")
         valid = traj.get("dreamer_ac_valid")
@@ -121,12 +192,22 @@ def discrete_ac_policy_snapshot(
                 weight_parts.append(torch.ones((n,), device=obs.device, dtype=obs.dtype))
         else:
             weight_parts.append(torch.ones((n,), device=obs.device, dtype=obs.dtype))
+        vehicle_id = traj.get("dreamer_ac_vehicle_id")
+        if torch.is_tensor(vehicle_id) and vehicle_id.numel() > 0:
+            vehicle_id_n = vehicle_id.reshape(-1)[:n].detach()
+            if int(vehicle_id_n.numel()) == n:
+                vehicle_id_parts.append(vehicle_id_n.to(device=obs.device, dtype=torch.long))
+            else:
+                vehicle_id_parts.append(torch.full((n,), -1, device=obs.device, dtype=torch.long))
+        else:
+            vehicle_id_parts.append(torch.full((n,), -1, device=obs.device, dtype=torch.long))
     if not obs_parts:
         return {"sample_count": 0.0}
 
     obs_cat = torch.cat(obs_parts, dim=0)
     valid_cat = torch.cat(valid_parts, dim=0).to(device=obs_cat.device)
     weight_cat = torch.cat(weight_parts, dim=0).to(device=obs_cat.device, dtype=obs_cat.dtype)
+    vehicle_id_cat = torch.cat(vehicle_id_parts, dim=0).to(device=obs_cat.device, dtype=torch.long)
     n_total = int(obs_cat.shape[0])
     max_n = int(max_samples)
     if max_n > 0 and n_total > max_n:
@@ -136,6 +217,7 @@ def discrete_ac_policy_snapshot(
         obs_cat = obs_cat.index_select(0, idx)
         valid_cat = valid_cat.index_select(0, idx)
         weight_cat = weight_cat.index_select(0, idx)
+        vehicle_id_cat = vehicle_id_cat.index_select(0, idx)
 
     with torch.no_grad():
         logits = actor.forward_logits(obs_cat)
@@ -145,6 +227,7 @@ def discrete_ac_policy_snapshot(
         "obs": obs_cat.detach(),
         "valid": valid_cat.detach(),
         "sample_weight": weight_cat.detach(),
+        "vehicle_id": vehicle_id_cat.detach(),
         "old_log_probs": log_probs,
         "old_argmax": torch.argmax(log_probs, dim=-1).detach(),
         "sample_count": float(int(obs_cat.shape[0])),
@@ -163,6 +246,7 @@ def discrete_ac_policy_shift_from_snapshot(
     snapshot: Dict[str, object],
     *,
     temperature: float,
+    group_min_samples: int = 1,
 ) -> Dict[str, float]:
     """Measure post-update policy drift from a pre-update AC snapshot."""
     obs = snapshot.get("obs")
@@ -189,6 +273,10 @@ def discrete_ac_policy_shift_from_snapshot(
             "argmax_route2_frac": 0.0,
             "argmax_route3_frac": 0.0,
             "argmax_max_route_frac": 0.0,
+            "vehicle_argmax_change_max": 0.0,
+            "vehicle_argmax_change_mean": 0.0,
+            "vehicle_argmax_change_p95": 0.0,
+            "vehicle_group_count": 0.0,
         }
     with torch.no_grad():
         logits = actor.forward_logits(obs)
@@ -213,11 +301,22 @@ def discrete_ac_policy_shift_from_snapshot(
         else:
             argmax_change = torch.zeros((), device=new_log_probs.device, dtype=new_log_probs.dtype)
     stats = _policy_distribution_stats(new_log_probs, weights)
+    vehicle_group_stats = _grouped_argmax_change_stats(
+        old_argmax=old_argmax if torch.is_tensor(old_argmax) else torch.zeros_like(new_argmax),
+        new_argmax=new_argmax,
+        sample_weight=weights,
+        group_id=snapshot.get("vehicle_id"),
+        min_samples=int(group_min_samples),
+    )
     stats.update(
         {
             "sample_count": float(int(new_log_probs.shape[0])),
             "kl": float(kl.detach().cpu().item()),
             "argmax_change_frac": float(argmax_change.detach().cpu().item()),
+            "vehicle_argmax_change_max": vehicle_group_stats["group_argmax_change_max"],
+            "vehicle_argmax_change_mean": vehicle_group_stats["group_argmax_change_mean"],
+            "vehicle_argmax_change_p95": vehicle_group_stats["group_argmax_change_p95"],
+            "vehicle_group_count": vehicle_group_stats["group_count"],
         }
     )
     return stats
