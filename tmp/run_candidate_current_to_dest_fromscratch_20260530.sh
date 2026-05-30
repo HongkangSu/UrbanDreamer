@@ -4,14 +4,35 @@ set -euo pipefail
 # Generic current_to_dest/free-flow-candidate full-cycle entry for networks that
 # pass the smoke runner. Keep this separate from the active Gretz run: use a
 # distinct TAG, output roots, tmux session, and usually CUDA_VISIBLE_DEVICES=1.
+# By default this refuses to start while the protected Gretz full-cycle is still
+# collecting, because a second SUMO collection can slow or destabilize that run.
 
 ROOT="/home/wangwenrui/shk/UrbanDreamer"
 PY="${PYTHON_BIN:-/home/wangwenrui/opt/miniconda3/envs/URB/bin/python}"
-NETWORK_NAME="${NETWORK_NAME:-fontainebleau}"
+NETWORK_NAME="${NETWORK_NAME:-plaisir}"
 NETWORK_DIR="${NETWORK_DIR:-networks/${NETWORK_NAME}}"
 TAG="${TAG:-${NETWORK_NAME}_current_to_dest_noincident_20260530}"
+GRETZ_STATUS_FILE="${GRETZ_STATUS_FILE:-logs/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/urb_fair_full_cycle.status.env}"
 
 cd "$ROOT"
+
+if [[ -f "$GRETZ_STATUS_FILE" ]]; then
+  if grep -q "STATE='running'" "$GRETZ_STATUS_FILE"; then
+    _gretz_stage="$(grep "^STAGE=" "$GRETZ_STATUS_FILE" | head -1 | cut -d= -f2 | tr -d "'\"")"
+    if [[ "${ALLOW_WHILE_GRETZ_RUNNING:-${ALLOW_WHILE_GRETZ_COLLECT:-0}}" != "1" ]]; then
+      echo "[candidate-full-cycle] protected Gretz is still running (stage=${_gretz_stage:-unknown}); refusing to start." >&2
+      echo "[candidate-full-cycle] Set ALLOW_WHILE_GRETZ_RUNNING=1 only if you intentionally accept that risk." >&2
+      exit 1
+    fi
+    echo "[candidate-full-cycle] warning: starting while protected Gretz is running (stage=${_gretz_stage:-unknown})." >&2
+  fi
+else
+  if [[ "${ALLOW_MISSING_GRETZ_STATUS:-0}" != "1" ]]; then
+    echo "[candidate-full-cycle] missing Gretz status file: $GRETZ_STATUS_FILE" >&2
+    echo "[candidate-full-cycle] Refusing to start unless ALLOW_MISSING_GRETZ_STATUS=1 is set." >&2
+    exit 1
+  fi
+fi
 
 env CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-1}" WANDB_MODE=offline MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib}" "$PY" -u scripts/run_urb_fair_full_cycle.py \
   --network-dir "$NETWORK_DIR" \
