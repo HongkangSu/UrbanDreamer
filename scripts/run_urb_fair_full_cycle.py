@@ -240,10 +240,12 @@ def _base_settings(args: argparse.Namespace, paths: dict[str, object], n_av: int
         "PATH_GEN_BETA": args.path_gen_beta,
         "PATH_NUM_SAMPLES": args.path_num_samples,
         "AV_CANDIDATE_SOURCE": args.route_candidate_source,
-        "HDV_GAWRON_MODE": "routerl",
-        "HDV_GAWRON_ALPHA_ZERO": "0.2",
-        "HDV_GAWRON_BETA": "-1.5",
-        "HDV_GAWRON_UPDATE_MODE": "expected",
+        "HDV_GAWRON_MODE": args.hdv_gawron_mode,
+        "HDV_GAWRON_LR": args.hdv_gawron_lr,
+        "HDV_GAWRON_ALPHA_ZERO": args.hdv_gawron_alpha_zero,
+        "HDV_GAWRON_BETA": args.hdv_gawron_beta,
+        "HDV_GAWRON_UPDATE_MODE": args.hdv_gawron_update_mode,
+        "HDV_MIN_PROB": args.hdv_min_prob,
         "DISABLE_HUMAN_LEARNING_AFTER_MUTATION": "1",
         "FLOW_DATA_DIR": paths["collect_output_dir"],
         "FLOW_TASK_NAME": paths["collect_task_name"],
@@ -958,6 +960,12 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--collect-sumo-time-to-teleport", default="600", help=hidden)
     p.add_argument("--collect-post-mutation-state-in", default="", help=hidden)
     p.add_argument("--collect-hdv-state-in", default="", help=hidden)
+    p.add_argument("--hdv-gawron-mode", choices=["replicator", "routerl", "routerl_blackbox"], default="routerl", help=hidden)
+    p.add_argument("--hdv-gawron-lr", type=float, default=0.1, help=hidden)
+    p.add_argument("--hdv-gawron-alpha-zero", type=float, default=0.2, help=hidden)
+    p.add_argument("--hdv-gawron-beta", type=float, default=-1.5, help=hidden)
+    p.add_argument("--hdv-gawron-update-mode", choices=["expected", "sample"], default="expected", help=hidden)
+    p.add_argument("--hdv-min-prob", type=float, default=0.0, help=hidden)
     p.add_argument("--num-workers", type=int, default=0, help=hidden)
     p.add_argument("--wm-batch-size", type=int, default=2, help=hidden)
     p.add_argument("--wm-seq-len", type=int, default=16, help=hidden)
