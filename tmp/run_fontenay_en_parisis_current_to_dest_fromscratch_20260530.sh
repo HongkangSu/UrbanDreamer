@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "[deprecated] Fontenay is no longer the default second-network candidate." >&2
+echo "[deprecated] Screen candidate networks with tmp/screen_current_to_dest_networks.py before starting a full cycle." >&2
+echo "[deprecated] Prefer tmp/run_candidate_current_to_dest_fromscratch_20260530.sh with NETWORK_NAME=<network>." >&2
+
 ROOT="/home/wangwenrui/shk/UrbanDreamer"
 PY="/home/wangwenrui/opt/miniconda3/envs/URB/bin/python"
 TAG="${TAG:-fontenay_en_parisis_current_to_dest_noincident_20260530}"
