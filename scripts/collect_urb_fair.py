@@ -383,6 +383,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output_dir", type=str, default="")
     p.add_argument("--task_name", type=str, default="")
     p.add_argument("--records_dir", type=str, default="")
+    p.add_argument("--reuse_artifacts_dir", type=str, default="",
+                   help="Optional existing route artifact bundle to copy into --records_dir before collection.")
     p.add_argument("--num_episodes", type=int, default=100)
     p.add_argument("--warmup_episodes", type=int, default=-1,
                    help="Human adaptation episodes before mutation. Default: HDV_ADAPT_EP from settings unless post_mutation_state_in is provided.")
@@ -527,7 +529,7 @@ def main() -> int:
             if state_ref:
                 loaded_hdv_state = _load_hdv_learning_state(Path(str(state_ref)))
     else:
-        reuse_dir = cfg.get("ROUTE_ARTIFACTS_DIR", "")
+        reuse_dir = args.reuse_artifacts_dir or cfg.get("ROUTE_ARTIFACTS_DIR", "")
         if reuse_dir:
             reused_artifacts = _reuse_route_artifacts(Path(reuse_dir).resolve(), records_dir)
         else:
