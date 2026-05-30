@@ -7,7 +7,7 @@ Both are trained jointly with the CFM dynamics model (no separate pretraining).
 """
 import json
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -343,10 +343,11 @@ class RouteRegistry:
 
     Attributes:
         origins, destinations: List[str] edge IDs
-        n_od: int  (N_origins * N_destinations)
+        n_od: int  (N_origins * N_destinations for dense registries, or the
+              number of active demand pairs for lightweight vehicle topologies)
         K: int     (routes per OD pair)
         route_edge_indices: List[List[List[int]]]  [od_idx][k] = [edge indices]
-        route_masks: np.ndarray (N_od, K, E)  1/route_len for edges on route
+        route_masks: optional np.ndarray (N_od, K, E)  1/route_len for edges on route
         od_av_counts, od_hdv_counts: np.ndarray (N_od,)
     """
 
@@ -356,18 +357,40 @@ class RouteRegistry:
         destinations: List[str],
         K: int,
         route_edge_indices: List[List[List[int]]],
-        route_masks: np.ndarray,
+        route_masks: Optional[np.ndarray],
         od_av_counts: np.ndarray,
         od_hdv_counts: np.ndarray,
         n_edges: int,
         route_indicators: Optional[np.ndarray] = None,  # (N_od, K, E) binary
+        n_od: Optional[int] = None,
+        od_pairs: Optional[List[Tuple[int, int]]] = None,
+        od_index_map: Optional[Dict[Tuple[int, int], int]] = None,
     ):
         self.origins = origins
         self.destinations = destinations
-        self.n_od = len(origins) * len(destinations)
+        self.n_od = int(n_od) if n_od is not None else len(origins) * len(destinations)
         self.K = K
         self.route_edge_indices = route_edge_indices
-        self.route_masks = route_masks.astype(np.float32)     # (N_od, K, E)
+        self.od_pairs = (
+            [(int(o), int(d)) for o, d in od_pairs]
+            if od_pairs is not None
+            else None
+        )
+        if od_index_map is not None:
+            self.od_index_map = {
+                (int(k[0]), int(k[1])): int(v)
+                for k, v in od_index_map.items()
+            }
+        elif self.od_pairs is not None:
+            self.od_index_map = {
+                (int(o), int(d)): int(i)
+                for i, (o, d) in enumerate(self.od_pairs)
+            }
+        else:
+            self.od_index_map = None
+        self.route_masks = (
+            route_masks.astype(np.float32) if route_masks is not None else None
+        )  # (N_od, K, E), optional for lightweight vehicle-mode topologies
         self.od_av_counts = od_av_counts.astype(np.float32)   # (N_od,)
         self.od_hdv_counts = od_hdv_counts.astype(np.float32) # (N_od,)
         self.n_edges = n_edges
@@ -375,6 +398,8 @@ class RouteRegistry:
         # Binary route indicators for Stackelberg layer
         if route_indicators is not None:
             self.route_indicators = route_indicators.astype(np.float32)
+        elif route_masks is None:
+            self.route_indicators = None
         else:
             self.route_indicators = self._build_route_indicators()
         self._route_indicators_tensor: Optional[torch.Tensor] = None
@@ -593,10 +618,16 @@ class RouteRegistry:
             "K": self.K,
             "n_edges": self.n_edges,
             "route_edge_indices": self.route_edge_indices,
-            "route_masks": self.route_masks.tolist(),
+            "route_masks": self.route_masks.tolist() if self.route_masks is not None else None,
             "od_av_counts": self.od_av_counts.tolist(),
             "od_hdv_counts": self.od_hdv_counts.tolist(),
-            "route_indicators": self.route_indicators.tolist(),
+            "route_indicators": (
+                self.route_indicators.tolist()
+                if self.route_indicators is not None
+                else None
+            ),
+            "n_od": int(self.n_od),
+            "od_pairs": self.od_pairs,
         }
         with open(path_obj, "w") as f:
             json.dump(data, f)
@@ -607,19 +638,37 @@ class RouteRegistry:
         with open(path, "r") as f:
             data = json.load(f)
         route_indicators = None
-        if "route_indicators" in data:
+        if "route_indicators" in data and data["route_indicators"] is not None:
             route_indicators = np.array(data["route_indicators"], dtype=np.float32)
+        route_masks_data = data.get("route_masks")
         return cls(
             origins=data["origins"],
             destinations=data["destinations"],
             K=data["K"],
             route_edge_indices=data["route_edge_indices"],
-            route_masks=np.array(data["route_masks"], dtype=np.float32),
+            route_masks=(
+                np.array(route_masks_data, dtype=np.float32)
+                if route_masks_data is not None else None
+            ),
             od_av_counts=np.array(data["od_av_counts"], dtype=np.float32),
             od_hdv_counts=np.array(data["od_hdv_counts"], dtype=np.float32),
             n_edges=data["n_edges"],
             route_indicators=route_indicators,
+            n_od=data.get("n_od"),
+            od_pairs=data.get("od_pairs"),
         )
+
+    def od_index(self, origin_idx: int, dest_idx: int) -> int:
+        """Return the internal OD row for an origin/destination index pair."""
+        oi = int(origin_idx)
+        di = int(dest_idx)
+        if self.od_index_map is not None:
+            return int(self.od_index_map.get((oi, di), -1))
+        n_dest = max(1, len(self.destinations))
+        od_idx = oi * n_dest + di
+        if 0 <= od_idx < int(self.n_od):
+            return int(od_idx)
+        return -1
 
     def _build_route_indicators(self) -> np.ndarray:
         """Build binary (N_od, K, E) indicators from route_edge_indices."""
@@ -632,6 +681,10 @@ class RouteRegistry:
 
     def get_route_indicators_tensor(self, device: str = "cpu") -> torch.Tensor:
         """Return cached (N_od, K, E) binary tensor."""
+        if self.route_indicators is None:
+            raise RuntimeError(
+                "route_indicators are not available for this lightweight path topology"
+            )
         if self._route_indicators_tensor is None or \
            str(self._route_indicators_tensor.device) != str(device):
             self._route_indicators_tensor = torch.from_numpy(
@@ -641,6 +694,10 @@ class RouteRegistry:
 
     def get_route_masks_tensor(self, device: str = "cpu") -> torch.Tensor:
         """Return cached (N_od, K, E) tensor."""
+        if self.route_masks is None:
+            raise RuntimeError(
+                "route_masks are not available for this lightweight path topology"
+            )
         if self._route_masks_tensor is None or \
            str(self._route_masks_tensor.device) != str(device):
             self._route_masks_tensor = torch.from_numpy(

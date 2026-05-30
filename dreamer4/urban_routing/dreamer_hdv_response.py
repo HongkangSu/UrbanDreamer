@@ -50,7 +50,6 @@ def load_hdv_route_fracs_from_state(
         logger.warning("HDV background state has no route_policy list: %s", path)
         return out
 
-    n_dest = max(1, len(route_registry.destinations))
     loaded = 0
     loaded_active = 0
     active_od_mask = np.asarray(route_registry.od_hdv_counts, dtype=np.float32).reshape(-1) > 0.0
@@ -63,7 +62,11 @@ def load_hdv_route_fracs_from_state(
             di = int(row.get("destination", -1))
         except (TypeError, ValueError):
             continue
-        od_idx = oi * n_dest + di
+        if hasattr(route_registry, "od_index"):
+            od_idx = int(route_registry.od_index(oi, di))
+        else:
+            n_dest = max(1, len(route_registry.destinations))
+            od_idx = oi * n_dest + di
         if not (0 <= od_idx < n_od):
             continue
         probs = np.asarray(row.get("probs", []), dtype=np.float32).reshape(-1)

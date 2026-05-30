@@ -6573,12 +6573,18 @@ def train(cfg: TrainConfig) -> None:
     route_topology_av_count = int(route_registry.od_av_counts.sum())
     route_topology_hdv_count = int(route_registry.od_hdv_counts.sum())
     logger.info(
-        "Built lightweight vehicle path topology: N_od=%d, K=%d, AVs=%d, HDVs=%d, route_edges=%d",
+        "Built lightweight vehicle path topology: N_od=%d, K=%d, AVs=%d, HDVs=%d, route_edges=%d, dense_route_masks=%s",
         route_registry.n_od,
         route_registry.K,
         route_topology_av_count,
         route_topology_hdv_count,
-        int(np.count_nonzero(route_registry.route_masks)),
+        int(sum(
+            len(route)
+            for od_routes in route_registry.route_edge_indices
+            for route in od_routes
+            if route
+        )),
+        str(route_registry.route_masks is not None),
     )
 
     obs_dim = vehicle_mode_obs_dim(
@@ -6902,6 +6908,7 @@ def train(cfg: TrainConfig) -> None:
                 n_edges=int(wm.n_edges),
                 max_av_count=_max_av_count,
                 max_hdv_count=_max_hdv_count,
+                od_index_map=getattr(route_registry, "od_index_map", None),
             )
             _sched_av_count = sum(int(d.get("n_av", 0)) for d in _departure_schedule.values())
             _sched_hdv_count = sum(int(d.get("n_hdv", 0)) for d in _departure_schedule.values())

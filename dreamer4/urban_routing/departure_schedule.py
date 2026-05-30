@@ -22,6 +22,7 @@ def build_departure_schedule(
     ratio_machines: float = 0.6,
     max_av_count: Optional[int] = None,
     max_hdv_count: Optional[int] = None,
+    od_index_map: Optional[Dict[Tuple[int, int], int]] = None,
 ) -> Dict[int, Dict]:
     """Build per-step departure schedule from agents.csv.
 
@@ -82,7 +83,10 @@ def build_departure_schedule(
         dest_name = destinations[di] if di < len(destinations) else destinations[0]
         origin_edge = edge_to_idx.get(origin_name, 0)
         dest_edge = edge_to_idx.get(dest_name, 0)
-        od_idx = oi * n_dest + di
+        if od_index_map is not None:
+            od_idx = int(od_index_map.get((oi, di), -1))
+        else:
+            od_idx = oi * n_dest + di
 
         if step not in schedule:
             schedule[step] = {

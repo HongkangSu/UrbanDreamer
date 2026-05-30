@@ -28,9 +28,46 @@ def build_lightweight_vehicle_path_topology(
     """Build the lightweight OD path topology used by vehicle-mode Dreamer."""
     n_orig = len(origins)
     n_dest = len(destinations)
-    n_od = n_orig * n_dest
+    od_pairs: List[Tuple[int, int]] = []
+    seen_pairs: set = set()
+
+    def _add_pair(oi_raw: int, di_raw: int) -> None:
+        if not (0 <= int(oi_raw) < n_orig and 0 <= int(di_raw) < n_dest):
+            return
+        key = (int(oi_raw), int(di_raw))
+        if key in seen_pairs:
+            return
+        seen_pairs.add(key)
+        od_pairs.append(key)
+
+    if agents_csv and os.path.exists(agents_csv):
+        with open(agents_csv, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    _add_pair(int(row["origin"]), int(row["destination"]))
+                except (KeyError, TypeError, ValueError):
+                    continue
+
+    if routes_csv and os.path.exists(routes_csv):
+        with open(routes_csv, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    _add_pair(
+                        int(row.get("origins", row.get("origin", -1))),
+                        int(row.get("destinations", row.get("destination", -1))),
+                    )
+                except (TypeError, ValueError):
+                    continue
+
+    if not od_pairs:
+        od_pairs = [(oi, di) for oi in range(n_orig) for di in range(n_dest)]
+        seen_pairs = set(od_pairs)
+
+    od_index_map = {pair: idx for idx, pair in enumerate(od_pairs)}
+    n_od = len(od_pairs)
     route_edge_indices = [[[] for _ in range(int(K))] for _ in range(n_od)]
-    route_masks = np.zeros((n_od, int(K), int(n_edges)), dtype=np.float32)
     od_av_counts = np.zeros((n_od,), dtype=np.float32)
     od_hdv_counts = np.zeros((n_od,), dtype=np.float32)
 
@@ -44,9 +81,9 @@ def build_lightweight_vehicle_path_topology(
                     di_raw = int(row.get("destinations", row.get("destination", -1)))
                 except (TypeError, ValueError):
                     continue
-                if not (0 <= oi_raw < n_orig and 0 <= di_raw < n_dest):
+                od_idx = od_index_map.get((oi_raw, di_raw))
+                if od_idx is None:
                     continue
-                od_idx = oi_raw * n_dest + di_raw
                 k = int(route_offsets.get(od_idx, 0))
                 if k >= int(K):
                     continue
@@ -58,10 +95,6 @@ def build_lightweight_vehicle_path_topology(
                 if not idxs:
                     continue
                 route_edge_indices[od_idx][k] = idxs
-                w = 1.0 / float(len(idxs))
-                for idx in idxs:
-                    if 0 <= int(idx) < int(n_edges):
-                        route_masks[od_idx, k, int(idx)] = w
                 route_offsets[od_idx] = k + 1
 
     if agents_csv and os.path.exists(agents_csv):
@@ -70,8 +103,8 @@ def build_lightweight_vehicle_path_topology(
             for row in reader:
                 oi_raw = int(row["origin"])
                 di_raw = int(row["destination"])
-                if oi_raw < n_orig and di_raw < n_dest:
-                    od_idx = oi_raw * n_dest + di_raw
+                od_idx = od_index_map.get((oi_raw, di_raw))
+                if od_idx is not None:
                     od_hdv_counts[od_idx] += 1.0
 
         if float(od_hdv_counts.sum()) > 0.0:
@@ -85,10 +118,13 @@ def build_lightweight_vehicle_path_topology(
         destinations=destinations,
         K=int(K),
         route_edge_indices=route_edge_indices,
-        route_masks=route_masks,
+        route_masks=None,
         od_av_counts=od_av_counts,
         od_hdv_counts=od_hdv_counts,
         n_edges=int(n_edges),
+        n_od=int(n_od),
+        od_pairs=od_pairs,
+        od_index_map=od_index_map,
     )
 
 
