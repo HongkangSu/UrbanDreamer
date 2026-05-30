@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "[deprecated] tmp/run_gretz_armainvilliers_current_to_dest_full_cycle_20260528.sh uses pre-refactor AC defaults." >&2
+echo "[deprecated] Use tmp/run_gretz_armainvilliers_current_to_dest_fromscratch_20260530.sh for the current per-vehicle-critic mainline." >&2
+exit 2
+
 ROOT="/home/wangwenrui/shk/UrbanDreamer"
 PY="/home/wangwenrui/opt/miniconda3/envs/URB/bin/python"
 TAG="gretz_armainvilliers_current_to_dest_incident_20260528"

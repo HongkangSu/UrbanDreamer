@@ -198,8 +198,20 @@ def _eval_candidate_source(args: argparse.Namespace) -> str:
     if route_source == "od_suffix":
         return "od_suffix"
     if route_source == "current_to_dest":
-        return "current_shortest_wm"
+        return "current_shortest_freeflow"
     raise ValueError(f"Unsupported route candidate source: {args.route_candidate_source!r}")
+
+
+def _wm_candidate_edge_cost_source(args: argparse.Namespace) -> str:
+    source = str(getattr(args, "wm_candidate_edge_cost_source", "freeflow") or "freeflow").strip().lower()
+    source = {
+        "free_flow": "freeflow",
+        "free-flow": "freeflow",
+        "ff": "freeflow",
+    }.get(source, source)
+    if source not in {"auto", "freeflow", "bpr_volume", "decoded_speed", "route_head"}:
+        raise ValueError(f"Unsupported wm_candidate_edge_cost_source={source!r}")
+    return source
 
 
 def _base_settings(args: argparse.Namespace, paths: dict[str, object], n_av: int, n_hdv: int) -> dict[str, object]:
@@ -252,7 +264,7 @@ def _base_settings(args: argparse.Namespace, paths: dict[str, object], n_av: int
         "WM_CFM_INIT_MODE": "zero",
         "WM_POLICY_OBS_SOURCE": "decoder_volume_tt",
         "WM_EDGE_COST_SOURCE": "decoded_speed",
-        "WM_CANDIDATE_EDGE_COST_SOURCE": "decoded_speed",
+        "WM_CANDIDATE_EDGE_COST_SOURCE": _wm_candidate_edge_cost_source(args),
         "VEHICLE_REWARD_SCALE": "1.0",
         "TERMINAL_TALL_REWARD_WEIGHT": "0.0",
         "DREAMER_BATCH_EPISODES": "8",
@@ -440,7 +452,7 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
         "--wm_edge_cost_source",
         "decoded_speed",
         "--wm_candidate_edge_cost_source",
-        "decoded_speed",
+        _wm_candidate_edge_cost_source(args),
         "--vehicle_candidate_source",
         args.route_candidate_source,
         "--vehicle_path_cache_mode",
@@ -473,6 +485,10 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
         str(args.marl_remaining_time_progress_weight),
         "--dreamer_route_cost_reward_weight",
         str(args.marl_route_cost_reward_weight),
+        "--dreamer_route_cost_reward_scope",
+        str(args.marl_route_cost_reward_scope),
+        "--dreamer_route_cost_reward_state",
+        str(args.marl_route_cost_reward_state),
         "--dreamer_grpo_route_cost_weight",
         str(args.marl_grpo_route_cost_weight),
         "--dreamer_grpo_rollout_weight",
@@ -525,6 +541,24 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
         str(args.marl_critic_aggregation),
         "--dreamer_critic_attention_heads",
         str(args.marl_critic_attention_heads),
+        "--dreamer_critic_context",
+        "--dreamer_critic_context_dim",
+        str(args.marl_critic_context_dim),
+        "--dreamer_slow_critic_tau",
+        str(args.marl_slow_critic_tau),
+        "--dreamer_return_normalizer",
+        "--dreamer_return_normalizer_decay",
+        str(args.marl_return_normalizer_decay),
+        "--dreamer_vehicle_critic",
+        "--dreamer_vehicle_critic_architecture",
+        "self_attention",
+        "--dreamer_vehicle_critic_context",
+        "--dreamer_vehicle_critic_return_normalizer",
+        "--no-dreamer_vehicle_route_q_critic",
+        "--dreamer_vehicle_route_q_actor_weight",
+        "0.0",
+        "--dreamer_vehicle_route_q_target_discount",
+        "0.0",
         "--dreamer_route_cost_aux_weight",
         str(args.marl_route_cost_aux_weight),
         "--dreamer_route_cost_aux_temperature",
@@ -534,9 +568,67 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
         "--n_total_episodes",
         str(args.marl_episodes),
         "--dreamer_batch_episodes",
-        "8",
+        str(args.marl_batch_episodes),
+        "--dreamer_actor_lr",
+        str(args.marl_actor_lr),
+        "--dreamer_actor_lr_decay_start_episode",
+        str(args.marl_actor_lr_decay_start_episode),
+        "--dreamer_actor_lr_decay_end_episode",
+        str(args.marl_actor_lr_decay_end_episode),
+        "--dreamer_actor_lr_final_scale",
+        str(args.marl_actor_lr_final_scale),
         "--dreamer_actor_horizon",
         str(args.marl_dreamer_actor_horizon),
+        "--dreamer_ac_advantage_clip",
+        str(args.marl_ac_advantage_clip),
+        "--dreamer_ac_ppo_clip_ratio",
+        str(args.marl_ac_ppo_clip_ratio),
+        "--dreamer_ac_entropy_target_frac",
+        str(args.marl_ac_entropy_target_frac),
+        "--dreamer_ac_entropy_floor_coef",
+        str(args.marl_ac_entropy_floor_coef),
+        "--dreamer_ac_entropy_cost_gap_max",
+        str(args.marl_ac_entropy_cost_gap_max),
+        "--dreamer_ac_entropy_cost_min_routes",
+        str(args.marl_ac_entropy_cost_min_routes),
+        "--dreamer_ac_rollout_action_mode",
+        str(args.marl_ac_rollout_action_mode),
+        "--dreamer_ac_rollout_argmax_warmup_episodes",
+        str(args.marl_ac_rollout_argmax_warmup_episodes),
+        "--dreamer_ac_rollout_argmax_ramp_episodes",
+        str(args.marl_ac_rollout_argmax_ramp_episodes),
+        "--dreamer_ac_rollout_argmax_final_mix",
+        str(args.marl_ac_rollout_argmax_final_mix),
+        "--dreamer_actor_trust_region_kl",
+        str(args.marl_actor_trust_region_kl),
+        "--dreamer_actor_trust_region_max_argmax_change_frac",
+        str(args.marl_actor_trust_region_max_argmax_change_frac),
+        "--dreamer_actor_trust_region_max_vehicle_argmax_change_frac",
+        str(args.marl_actor_trust_region_max_vehicle_argmax_change_frac),
+        "--dreamer_actor_trust_region_max_route_frac",
+        str(args.marl_actor_trust_region_max_route_frac),
+        "--dreamer_actor_trust_region_max_route0_frac",
+        str(args.marl_actor_trust_region_max_route0_frac),
+        "--dreamer_actor_trust_region_max_retries",
+        str(args.marl_actor_trust_region_max_retries),
+        "--dreamer_actor_trust_region_lr_shrink",
+        str(args.marl_actor_trust_region_lr_shrink),
+        "--dreamer_actor_trust_region_min_samples",
+        str(args.marl_actor_trust_region_min_samples),
+        "--dreamer_actor_trust_region_max_samples",
+        str(args.marl_actor_trust_region_max_samples),
+        "--dreamer_actor_anchor_start_episode",
+        str(args.marl_actor_anchor_start_episode),
+        "--dreamer_actor_anchor_kl",
+        str(args.marl_actor_anchor_kl),
+        "--dreamer_actor_anchor_max_argmax_change_frac",
+        str(args.marl_actor_anchor_max_argmax_change_frac),
+        "--dreamer_actor_anchor_max_vehicle_argmax_change_frac",
+        str(args.marl_actor_anchor_max_vehicle_argmax_change_frac),
+        "--dreamer_actor_anchor_max_route_frac",
+        str(args.marl_actor_anchor_max_route_frac),
+        "--dreamer_actor_anchor_max_route0_frac",
+        str(args.marl_actor_anchor_max_route0_frac),
         "--dreamer_departure_cap_mode",
         "none",
         "--seed",
@@ -558,6 +650,10 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
         marl_command.append("--dreamer_route_cost_aux_balance")
     if bool(args.marl_route_cost_aux_hard_target):
         marl_command.append("--dreamer_route_cost_aux_hard_target")
+    if bool(args.marl_ac_normalize_combined_advantages):
+        marl_command.append("--dreamer_ac_normalize_combined_advantages")
+    if bool(args.marl_ac_weight_by_active_agents):
+        marl_command.append("--dreamer_ac_weight_by_active_agents")
     eval_commands: list[list[str]] = []
     eval_dirs: list[Path] = []
     current_post_mutation_state = paths["collect_records_dir"] / "post_mutation_state.json"
@@ -593,7 +689,7 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
                 "--wm_edge_cost_source",
                 "decoded_speed",
                 "--wm_candidate_edge_cost_source",
-                "decoded_speed",
+                _wm_candidate_edge_cost_source(args),
                 "--av_candidate_source",
                 _eval_candidate_source(args),
             ]
@@ -832,10 +928,21 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--route-generator", default="dijkstra", help=hidden)
     p.add_argument("--path-gen-beta", type=float, default=-5.0, help=hidden)
     p.add_argument("--path-num-samples", type=int, default=10, help=hidden)
-    p.add_argument("--route-candidate-source", choices=["current_to_dest", "od_suffix"], default="current_to_dest", help=hidden)
+    p.add_argument(
+        "--route-candidate-source",
+        choices=["current_to_dest", "od_suffix"],
+        default="current_to_dest",
+        help=hidden,
+    )
+    p.add_argument(
+        "--wm-candidate-edge-cost-source",
+        choices=["auto", "freeflow", "bpr_volume", "decoded_speed", "route_head"],
+        default="freeflow",
+        help=hidden,
+    )
     p.add_argument(
         "--eval-candidate-source",
-        choices=["auto", "od_suffix", "current_shortest_live", "current_shortest_wm"],
+        choices=["auto", "od_suffix", "current_shortest_live", "current_shortest_wm", "current_shortest_freeflow"],
         default="auto",
         help=hidden,
     )
@@ -882,8 +989,8 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--marl-actor-objective", choices=["direct_return", "critic_q", "direct_plus_q", "discrete_actor_critic", "discrete_ac", "score_function", "reinforce"], default="discrete_actor_critic", help=hidden)
     p.add_argument("--marl-gamma", type=float, default=1.0, help=hidden)
     p.add_argument("--marl-gae-lambda", type=float, default=1.0, help=hidden)
-    p.add_argument("--marl-ac-step-advantage-weight", type=float, default=0.1, help=hidden)
-    p.add_argument("--marl-ac-route-advantage-weight", type=float, default=1.0, help=hidden)
+    p.add_argument("--marl-ac-step-advantage-weight", type=float, default=1.0, help=hidden)
+    p.add_argument("--marl-ac-route-advantage-weight", type=float, default=0.0, help=hidden)
     p.add_argument("--marl-ac-route-credit-mode", choices=[
         "route_cost", "planned_pressure", "marginal_pressure",
         "sequential_marginal", "counterfactual_pressure",
@@ -899,12 +1006,22 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--marl-vehicle-path-cache-mode", choices=["lazy", "precompute"], default="lazy", help=hidden)
     p.add_argument("--marl-critic-aggregation", choices=["mean", "global_attention", "attention", "transformer"], default="global_attention", help=hidden)
     p.add_argument("--marl-critic-attention-heads", type=int, default=4, help=hidden)
-    p.add_argument("--marl-dreamer-entropy-coef", type=float, default=1e-3, help=hidden)
+    p.add_argument("--marl-critic-context-dim", type=int, default=8, help=hidden)
+    p.add_argument("--marl-slow-critic-tau", type=float, default=0.01, help=hidden)
+    p.add_argument("--marl-return-normalizer-decay", type=float, default=0.99, help=hidden)
+    p.add_argument("--marl-dreamer-entropy-coef", type=float, default=0.002, help=hidden)
     p.add_argument("--marl-dreamer-action-mode", choices=["expected", "straight_through_sample", "straight_through_argmax", "st_sample", "st_argmax"], default="expected", help=hidden)
     p.add_argument("--marl-dreamer-action-temperature", type=float, default=1.0, help=hidden)
     p.add_argument("--marl-dreamer-actor-horizon", type=int, default=8, help=hidden)
     p.add_argument("--marl-seed", type=int, default=42, help=hidden)
-    p.add_argument("--marl-route-cost-reward-weight", type=float, default=0.0, help=hidden)
+    p.add_argument("--marl-batch-episodes", type=int, default=1, help=hidden)
+    p.add_argument("--marl-actor-lr", type=float, default=2.0e-4, help=hidden)
+    p.add_argument("--marl-actor-lr-decay-start-episode", type=int, default=-1, help=hidden)
+    p.add_argument("--marl-actor-lr-decay-end-episode", type=int, default=-1, help=hidden)
+    p.add_argument("--marl-actor-lr-final-scale", type=float, default=1.0, help=hidden)
+    p.add_argument("--marl-route-cost-reward-weight", type=float, default=1.0, help=hidden)
+    p.add_argument("--marl-route-cost-reward-scope", choices=["both", "actor", "global", "vehicle", "vehicle_critic", "per_vehicle"], default="vehicle_critic", help=hidden)
+    p.add_argument("--marl-route-cost-reward-state", choices=["post", "next", "current", "pre"], default="current", help=hidden)
     p.add_argument("--marl-remaining-time-progress-weight", type=float, default=0.0, help=hidden)
     p.add_argument("--marl-expected-cost-weight", type=float, default=0.0, help=hidden)
     p.add_argument("--marl-expected-cost-temperature", type=float, default=60.0, help=hidden)
@@ -932,6 +1049,33 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--marl-route-cost-aux-hard-target", action="store_true", help=hidden)
     p.add_argument("--marl-route-cost-aux-nonzero-margin", type=float, default=0.0, help=hidden)
     p.add_argument("--marl-route-cost-aux-temperature", type=float, default=30.0, help=hidden)
+    p.add_argument("--marl-ac-advantage-clip", type=float, default=2.5, help=hidden)
+    p.add_argument("--marl-ac-ppo-clip-ratio", type=float, default=0.075, help=hidden)
+    p.add_argument("--marl-ac-normalize-combined-advantages", action=argparse.BooleanOptionalAction, default=True, help=hidden)
+    p.add_argument("--marl-ac-entropy-target-frac", type=float, default=0.65, help=hidden)
+    p.add_argument("--marl-ac-entropy-floor-coef", type=float, default=0.02, help=hidden)
+    p.add_argument("--marl-ac-entropy-cost-gap-max", type=float, default=-1.0, help=hidden)
+    p.add_argument("--marl-ac-entropy-cost-min-routes", type=int, default=1, help=hidden)
+    p.add_argument("--marl-ac-rollout-action-mode", choices=["sample", "argmax", "policy", "greedy"], default="sample", help=hidden)
+    p.add_argument("--marl-ac-rollout-argmax-warmup-episodes", type=int, default=0, help=hidden)
+    p.add_argument("--marl-ac-rollout-argmax-ramp-episodes", type=int, default=0, help=hidden)
+    p.add_argument("--marl-ac-rollout-argmax-final-mix", type=float, default=1.0, help=hidden)
+    p.add_argument("--marl-ac-weight-by-active-agents", action=argparse.BooleanOptionalAction, default=True, help=hidden)
+    p.add_argument("--marl-actor-trust-region-kl", type=float, default=0.02, help=hidden)
+    p.add_argument("--marl-actor-trust-region-max-argmax-change-frac", type=float, default=0.2, help=hidden)
+    p.add_argument("--marl-actor-trust-region-max-vehicle-argmax-change-frac", type=float, default=0.0, help=hidden)
+    p.add_argument("--marl-actor-trust-region-max-route-frac", type=float, default=0.0, help=hidden)
+    p.add_argument("--marl-actor-trust-region-max-route0-frac", type=float, default=0.9, help=hidden)
+    p.add_argument("--marl-actor-trust-region-max-retries", type=int, default=3, help=hidden)
+    p.add_argument("--marl-actor-trust-region-lr-shrink", type=float, default=0.5, help=hidden)
+    p.add_argument("--marl-actor-trust-region-min-samples", type=int, default=128, help=hidden)
+    p.add_argument("--marl-actor-trust-region-max-samples", type=int, default=4096, help=hidden)
+    p.add_argument("--marl-actor-anchor-start-episode", type=int, default=60, help=hidden)
+    p.add_argument("--marl-actor-anchor-kl", type=float, default=0.05, help=hidden)
+    p.add_argument("--marl-actor-anchor-max-argmax-change-frac", type=float, default=0.0, help=hidden)
+    p.add_argument("--marl-actor-anchor-max-vehicle-argmax-change-frac", type=float, default=0.0, help=hidden)
+    p.add_argument("--marl-actor-anchor-max-route-frac", type=float, default=0.0, help=hidden)
+    p.add_argument("--marl-actor-anchor-max-route0-frac", type=float, default=0.9, help=hidden)
     p.add_argument("--marl-vehicle-obs-include-route-costs", action="store_true", help=hidden)
     p.add_argument("--marl-vehicle-obs-include-fleet-pressure", action="store_true", help=hidden)
     p.add_argument("--checkpoint-episodes", default=os.environ.get("CHECKPOINT_EPISODES", "100"), help=hidden)
