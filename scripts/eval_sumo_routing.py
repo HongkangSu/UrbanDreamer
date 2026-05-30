@@ -317,17 +317,27 @@ def _route_cost_matrix_summary(
     return means, best_counts, int(total)
 
 
-def _build_edge_adj_list(adjacency: Optional[np.ndarray]) -> List[List[int]]:
+def _build_edge_adj_list(
+    adjacency: Optional[np.ndarray],
+    allowed_edges: Optional[np.ndarray] = None,
+) -> List[List[int]]:
     if adjacency is None:
         return []
     arr = np.asarray(adjacency)
     if arr.ndim != 2 or arr.shape[0] != arr.shape[1]:
         return []
+    allowed = None
+    if allowed_edges is not None:
+        allowed = np.asarray(allowed_edges, dtype=bool).reshape(-1)
+        if allowed.shape[0] != arr.shape[0]:
+            allowed = None
     adj: List[List[int]] = [[] for _ in range(int(arr.shape[0]))]
     rows, cols = np.nonzero(arr)
     for r, c in zip(rows.tolist(), cols.tolist()):
         ri = int(r)
         ci = int(c)
+        if allowed is not None and (not bool(allowed[ri]) or not bool(allowed[ci])):
+            continue
         if 0 <= ri < len(adj):
             adj[ri].append(ci)
     return adj

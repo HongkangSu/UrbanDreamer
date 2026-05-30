@@ -18,9 +18,9 @@ import numpy as np
 import pandas as pd
 
 try:
-    from .flow_projector import EdgeRegistry, RouteRegistry, build_edge_registry
+    from .flow_projector import RouteRegistry, build_edge_registry
 except ImportError:
-    from flow_projector import EdgeRegistry, RouteRegistry, build_edge_registry
+    from flow_projector import RouteRegistry, build_edge_registry
 
 
 def load_od_data(network_folder: str, network_name: str) -> Dict[str, Any]:
@@ -156,22 +156,21 @@ def generate_dijkstra_routes(
     if not od_pairs:
         od_pairs = [(oi, di) for oi in range(len(origins)) for di in range(len(destinations))]
     expected_rows = int(len(od_pairs)) * int(n_routes)
+
+    er_path = os.path.join(network_folder, "edge_registry.json")
+    edge_registry = build_edge_registry(network_folder, network_name)
     cached_df = _cached_routes_match(
         records_folder,
-        generator="dijkstra",
+        generator="dijkstra_passenger",
         expected_rows=expected_rows,
     )
     if cached_df is not None:
         return cached_df
 
-    er_path = os.path.join(network_folder, "edge_registry.json")
-    if os.path.exists(er_path):
-        edge_registry = EdgeRegistry.load(er_path)
-    else:
-        edge_registry = build_edge_registry(network_folder, network_name)
-        edge_registry.save(er_path)
-
-    adj_list = RouteRegistry._build_adj_list(edge_registry.adjacency)
+    adj_list = RouteRegistry._build_vehicle_adj_list(
+        edge_registry.adjacency,
+        getattr(edge_registry, "passenger_allowed", None),
+    )
     lengths = edge_registry.lengths
     speed_limits = edge_registry.speed_limits
     base_weights = lengths / np.maximum(speed_limits, 0.1)
@@ -243,7 +242,7 @@ def generate_dijkstra_routes(
         f.write("</routes>\n")
     _write_routes_meta(
         records_folder,
-        generator="dijkstra",
+        generator="dijkstra_passenger",
         network_name=network_name,
         n_routes=n_routes,
         n_origins=len(origins),

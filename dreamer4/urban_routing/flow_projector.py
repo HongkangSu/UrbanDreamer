@@ -108,6 +108,7 @@ class EdgeRegistry:
         lengths: Optional[np.ndarray] = None,  # (E,) float32 raw meters
         from_node_idx: Optional[np.ndarray] = None,  # (E,) int — PCFM Kirchhoff
         to_node_idx: Optional[np.ndarray] = None,    # (E,) int — PCFM Kirchhoff
+        passenger_allowed: Optional[np.ndarray] = None,  # (E,) bool — ordinary car routing mask
     ):
         self.edge_ids = edge_ids
         self.static_features = static_features.astype(np.float32)
@@ -120,6 +121,12 @@ class EdgeRegistry:
         self.lengths = lengths.astype(np.float32) if lengths is not None else None
         self.from_node_idx = from_node_idx.astype(np.int64) if from_node_idx is not None else None
         self.to_node_idx = to_node_idx.astype(np.int64) if to_node_idx is not None else None
+        self.passenger_allowed = (
+            passenger_allowed.astype(bool)
+            if passenger_allowed is not None
+            else np.ones((len(edge_ids),), dtype=bool)
+        )
+        self._has_passenger_allowed = passenger_allowed is not None
 
     @classmethod
     def build(cls, net_xml_path: str, network: str = "") -> "EdgeRegistry":
@@ -141,6 +148,13 @@ class EdgeRegistry:
         lengths    = np.array([e.getLength()     for e in raw_edges], dtype=np.float32)
         speed_lims = np.array([e.getSpeed()      for e in raw_edges], dtype=np.float32)
         num_lanes  = np.array([e.getLaneNumber() for e in raw_edges], dtype=np.float32)
+        passenger_allowed = np.array(
+            [
+                any(lane.allows("passenger") for lane in e.getLanes())
+                for e in raw_edges
+            ],
+            dtype=bool,
+        )
 
         # Road type → normalized integer
         type_strs    = [e.getType() for e in raw_edges]
@@ -187,7 +201,8 @@ class EdgeRegistry:
 
         return cls(edge_ids, static, speed_lims, capacities, network=network,
                    adjacency=adjacency, lengths=lengths,
-                   from_node_idx=from_node_idx, to_node_idx=to_node_idx)
+                   from_node_idx=from_node_idx, to_node_idx=to_node_idx,
+                   passenger_allowed=passenger_allowed)
 
     @staticmethod
     def _build_adjacency(raw_edges, edge_to_idx):
@@ -256,6 +271,8 @@ class EdgeRegistry:
             data["from_node_idx"] = self.from_node_idx.tolist()
         if self.to_node_idx is not None:
             data["to_node_idx"] = self.to_node_idx.tolist()
+        if self.passenger_allowed is not None:
+            data["passenger_allowed"] = self.passenger_allowed.astype(bool).tolist()
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
         print(f"[EdgeRegistry] Saved → {path}  ({self.n_edges} edges)")
@@ -304,6 +321,9 @@ class EdgeRegistry:
         to_node_idx = None
         if "to_node_idx" in data:
             to_node_idx = np.array(data["to_node_idx"], dtype=np.int64)
+        passenger_allowed = None
+        if "passenger_allowed" in data:
+            passenger_allowed = np.array(data["passenger_allowed"], dtype=bool)
         return cls(
             edge_ids        = data["edge_ids"],
             static_features = np.array(data["static_features"], dtype=np.float32),
@@ -314,6 +334,7 @@ class EdgeRegistry:
             lengths         = lengths,
             from_node_idx   = from_node_idx,
             to_node_idx     = to_node_idx,
+            passenger_allowed = passenger_allowed,
         )
 
 
@@ -367,6 +388,25 @@ class RouteRegistry:
         for r, c in zip(rows.tolist(), cols.tolist()):
             adj[r].append(c)
         return adj
+
+    @staticmethod
+    def _build_vehicle_adj_list(
+        adjacency: np.ndarray,
+        allowed_edges: Optional[np.ndarray],
+    ) -> List[List[int]]:
+        """Build an edge adjacency list constrained to ordinary passenger edges."""
+        base = RouteRegistry._build_adj_list(adjacency)
+        if allowed_edges is None:
+            return base
+        allowed = np.asarray(allowed_edges, dtype=bool).reshape(-1)
+        if allowed.shape[0] != len(base):
+            return base
+        out: List[List[int]] = [[] for _ in range(len(base))]
+        for src, neighbors in enumerate(base):
+            if not bool(allowed[src]):
+                continue
+            out[src] = [int(dst) for dst in neighbors if bool(allowed[int(dst)])]
+        return out
 
     @staticmethod
     def _dijkstra(adj_list: List[List[int]], weights: np.ndarray,
@@ -428,7 +468,10 @@ class RouteRegistry:
         # Build adjacency list from EdgeRegistry
         if edge_registry.adjacency is None:
             raise ValueError("EdgeRegistry must have adjacency for route building")
-        adj_list = cls._build_adj_list(edge_registry.adjacency)
+        adj_list = cls._build_vehicle_adj_list(
+            edge_registry.adjacency,
+            getattr(edge_registry, "passenger_allowed", None),
+        )
 
         # Base weights: travel time = length / speed_limit (seconds)
         if edge_registry.lengths is not None:
@@ -988,8 +1031,19 @@ def build_edge_registry(network_folder: str, network_name: str) -> "EdgeRegistry
     """
     cache = Path(network_folder) / "edge_registry.json"
     if cache.exists():
-        print(f"[EdgeRegistry] Loading cached registry from {cache}")
-        return EdgeRegistry.load(str(cache))
+        reg = EdgeRegistry.load(str(cache))
+        passenger_allowed = getattr(reg, "passenger_allowed", None)
+        if (
+            bool(getattr(reg, "_has_passenger_allowed", False))
+            and passenger_allowed is not None
+            and np.asarray(passenger_allowed).shape[0] == int(reg.n_edges)
+        ):
+            print(f"[EdgeRegistry] Loading cached registry from {cache}")
+            return reg
+        print(
+            f"[EdgeRegistry] Cached registry at {cache} lacks passenger edge permissions; "
+            "rebuilding from network files."
+        )
     net_xml = Path(network_folder) / f"{network_name}.net.xml"
     if not net_xml.exists():
         raise FileNotFoundError(f"Network file not found: {net_xml}")
