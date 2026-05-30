@@ -111,20 +111,23 @@ def test_full_cycle_runner_translates_public_network_flags(tmp_path):
     assert plan.marl_command[plan.marl_command.index("--network_folder") + 1] == str(network.resolve())
     assert plan.marl_command[plan.marl_command.index("--network_name") + 1] == "toy_net"
     assert plan.marl_command[plan.marl_command.index("--training_family") + 1] == "dreamer_ctde"
-    assert plan.marl_command[plan.marl_command.index("--vehicle_candidate_source") + 1] == "od_suffix"
+    assert plan.marl_command[plan.marl_command.index("--vehicle_candidate_source") + 1] == "current_to_dest"
     assert plan.marl_command[plan.marl_command.index("--vehicle_routes_csv") + 1] == str((network / "routes.csv").resolve())
     assert plan.dynamics_command[plan.dynamics_command.index("--action_key") + 1] == "av_planned_edge_flow"
     assert plan.dynamics_command[plan.dynamics_command.index("--action_encoder_type") + 1] == "graph_cond"
     assert "--edge_action_injection" in plan.dynamics_command
     assert plan.marl_command[plan.marl_command.index("--wm_edge_cost_source") + 1] == "decoded_speed"
-    assert plan.marl_command[plan.marl_command.index("--dreamer_entropy_coef") + 1] == "0.001"
+    assert plan.marl_command[plan.marl_command.index("--wm_candidate_edge_cost_source") + 1] == "freeflow"
+    assert plan.marl_command[plan.marl_command.index("--dreamer_entropy_coef") + 1] == "0.002"
     assert plan.marl_command[plan.marl_command.index("--dreamer_action_mode") + 1] == "expected"
     assert plan.marl_command[plan.marl_command.index("--dreamer_action_temperature") + 1] == "1.0"
     assert plan.marl_command[plan.marl_command.index("--dreamer_actor_horizon") + 1] == "8"
     assert plan.marl_command[plan.marl_command.index("--seed") + 1] == "42"
-    assert plan.marl_command[plan.marl_command.index("--dreamer_route_cost_reward_weight") + 1] == "0.0"
-    assert plan.marl_command[plan.marl_command.index("--dreamer_grpo_route_cost_weight") + 1] == "0.05"
-    assert plan.marl_command[plan.marl_command.index("--dreamer_grpo_rollout_weight") + 1] == "1.0"
+    assert plan.marl_command[plan.marl_command.index("--dreamer_all_reward_weight") + 1] == "0.0"
+    assert plan.marl_command[plan.marl_command.index("--dreamer_route_cost_reward_weight") + 1] == "1.0"
+    assert plan.marl_command[plan.marl_command.index("--dreamer_route_cost_reward_scope") + 1] == "vehicle_critic"
+    assert plan.marl_command[plan.marl_command.index("--dreamer_grpo_route_cost_weight") + 1] == "0.0"
+    assert plan.marl_command[plan.marl_command.index("--dreamer_grpo_rollout_weight") + 1] == "0.0"
     assert plan.marl_command[plan.marl_command.index("--dreamer_grpo_policy_clip_ratio") + 1] == "0.2"
     assert plan.marl_command[plan.marl_command.index("--dreamer_grpo_policy_kl_coef") + 1] == "0.0"
     assert plan.marl_command[plan.marl_command.index("--dreamer_grpo_combined_advantage_clip") + 1] == "5.0"
@@ -135,9 +138,12 @@ def test_full_cycle_runner_translates_public_network_flags(tmp_path):
     assert plan.marl_command[plan.marl_command.index("--dreamer_route_cost_aux_nonzero_margin") + 1] == "0.0"
     assert "--dreamer_route_cost_aux_balance" not in plan.marl_command
     assert "--dreamer_route_cost_aux_hard_target" not in plan.marl_command
+    assert "--dreamer_vehicle_critic" in plan.marl_command
+    assert "--no-dreamer_vehicle_route_q_critic" in plan.marl_command
     assert "--vehicle_obs_include_route_costs" not in plan.marl_command
     assert plan.eval_commands[0][plan.eval_commands[0].index("--wm_edge_cost_source") + 1] == "decoded_speed"
-    assert plan.eval_commands[0][plan.eval_commands[0].index("--av_candidate_source") + 1] == "od_suffix"
+    assert plan.eval_commands[0][plan.eval_commands[0].index("--wm_candidate_edge_cost_source") + 1] == "freeflow"
+    assert plan.eval_commands[0][plan.eval_commands[0].index("--av_candidate_source") + 1] == "current_shortest_freeflow"
     assert "--av_route_cost_policy" not in plan.eval_commands[0]
     assert plan.eval_commands[0][plan.eval_commands[0].index("--post_mutation_state_in") + 1] == str(state_in.resolve())
     assert "--keep_human_learning_after_mutation" not in plan.eval_commands[0]
@@ -154,7 +160,8 @@ def test_full_cycle_runner_translates_public_network_flags(tmp_path):
     assert "INCIDENT_SPEED=\"1.0\"" in generated
     assert "TRAINING_FAMILY=\"dreamer_ctde\"" in generated
     assert "WM_EDGE_COST_SOURCE=\"decoded_speed\"" in generated
-    assert "AV_CANDIDATE_SOURCE=\"od_suffix\"" in generated
+    assert "WM_CANDIDATE_EDGE_COST_SOURCE=\"freeflow\"" in generated
+    assert "AV_CANDIDATE_SOURCE=\"current_to_dest\"" in generated
 
 
 def test_full_cycle_runner_allows_overriding_marl_actor_horizon(tmp_path):
@@ -177,13 +184,22 @@ def test_full_cycle_runner_allows_overriding_marl_actor_horizon(tmp_path):
             str(tmp_path / "results"),
             "--python-bin",
             "python",
+            "--incident-edge",
+            "201201950#0",
+            "--marl-batch-episodes",
+            "3",
             "--marl-dreamer-actor-horizon",
             "12",
         ]
     )
     plan = build_plan(args)
+    write_plan_settings(args, plan)
 
+    assert plan.marl_command[plan.marl_command.index("--dreamer_batch_episodes") + 1] == "3"
     assert plan.marl_command[plan.marl_command.index("--dreamer_actor_horizon") + 1] == "12"
+    generated = plan.marl_settings.read_text(encoding="utf-8")
+    assert "DREAMER_BATCH_EPISODES=\"3\"" in generated
+    assert "DREAMER_ACTOR_HORIZON=\"12\"" in generated
 
 
 def test_full_cycle_runner_allows_overriding_marl_seed(tmp_path):
@@ -206,6 +222,8 @@ def test_full_cycle_runner_allows_overriding_marl_seed(tmp_path):
             str(tmp_path / "results"),
             "--python-bin",
             "python",
+            "--incident-edge",
+            "201201950#0",
             "--marl-seed",
             "9621",
         ]
@@ -235,6 +253,8 @@ def test_full_cycle_runner_forwards_eval_route_cost_policy(tmp_path):
             str(tmp_path / "results"),
             "--python-bin",
             "python",
+            "--incident-edge",
+            "201201950#0",
             "--eval-av-route-cost-policy",
             "wm_current_bpr",
             "--eval-av-route-cost-length-norm",

@@ -269,8 +269,8 @@ def _base_settings(args: argparse.Namespace, paths: dict[str, object], n_av: int
         "WM_CANDIDATE_EDGE_COST_SOURCE": _wm_candidate_edge_cost_source(args),
         "VEHICLE_REWARD_SCALE": "1.0",
         "TERMINAL_TALL_REWARD_WEIGHT": "0.0",
-        "DREAMER_BATCH_EPISODES": "8",
-        "DREAMER_ACTOR_HORIZON": "8",
+        "DREAMER_BATCH_EPISODES": args.marl_batch_episodes,
+        "DREAMER_ACTOR_HORIZON": args.marl_dreamer_actor_horizon,
         "EVAL_RESULTS_DIR": paths["eval_results_dir"],
         "EVAL_TEST_EPISODES": args.eval_test_eps,
     }
