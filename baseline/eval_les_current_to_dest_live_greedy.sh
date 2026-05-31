@@ -19,6 +19,7 @@ SEED="${SEED:-42}"
 TEST_EPS="${TEST_EPS:-1}"
 WAIT_POLL_SECONDS="${WAIT_POLL_SECONDS:-120}"
 WAIT_TIMEOUT_SECONDS="${WAIT_TIMEOUT_SECONDS:-0}"
+POLICY_FREE="${POLICY_FREE:-1}"
 
 cd "$ROOT"
 
@@ -40,22 +41,26 @@ wait_for_file() {
   done
 }
 
-wait_for_status_done() {
-  while [[ -s "$STATUS_FILE" ]] && grep -q "STATE='running'" "$STATUS_FILE"; do
-    echo "[les-live-greedy] waiting for Les full-cycle to leave running state: ${STATUS_FILE}" >&2
+wait_for_collection_done() {
+  while [[ -s "$STATUS_FILE" ]]; do
+    local stage=""
+    local state=""
+    stage="$(sed -n "s/^STAGE='\(.*\)'$/\1/p" "$STATUS_FILE" | tail -1)"
+    state="$(sed -n "s/^STATE='\(.*\)'$/\1/p" "$STATUS_FILE" | tail -1)"
+    if [[ "$state" != "running" || "$stage" != "collect_urb_fair" ]]; then
+      return
+    fi
+    echo "[les-live-greedy] waiting for Les collection to finish: ${STATUS_FILE}" >&2
     if [[ "$deadline" != "0" && "$(date +%s)" -ge "$deadline" ]]; then
-      echo "[les-live-greedy] timed out waiting for Les full-cycle status" >&2
+      echo "[les-live-greedy] timed out waiting for Les collection status" >&2
       exit 1
     fi
     sleep "$WAIT_POLL_SECONDS"
   done
 }
 
-wait_for_status_done
+wait_for_collection_done
 wait_for_file ".urbandreamer/generated/${ROOT_TAG}/urb_fair_marl.env" "generated MARL env"
-wait_for_file "${WM_DIR}/flow_projector_latest.pt" "flow projector checkpoint"
-wait_for_file "${WM_DIR}/latest.pt" "world model checkpoint"
-wait_for_file "${POLICY}" "policy checkpoint"
 wait_for_file "${NETWORK_DIR}/edge_registry.json" "edge registry"
 wait_for_file "${REUSE_DIR}/post_mutation_state.json" "post-mutation state"
 
@@ -65,6 +70,29 @@ else
   HDV_STATE="${REUSE_DIR}/post_mutation_hdv_learning_state.json"
 fi
 wait_for_file "$HDV_STATE" "HDV learning state"
+
+if [[ "$POLICY_FREE" == "1" ]]; then
+  echo "[les-live-greedy] running policy-free live_current_tt baseline into results/${ROOT_TAG}/${RESULT_NAME}" >&2
+  env CUDA_VISIBLE_DEVICES="$GPU" PYTORCH_ALLOC_CONF=expandable_segments:True \
+    "$PY" baseline/eval_policy_free_live_greedy.py \
+      --settings ".urbandreamer/generated/${ROOT_TAG}/urb_fair_marl.env" \
+      --network "$NETWORK" \
+      --network_folder "$NETWORK_DIR" \
+      --ratio_machines 0.4 \
+      --test_eps "$TEST_EPS" \
+      --results_dir "results/${ROOT_TAG}/${RESULT_NAME}" \
+      --reuse_artifacts_dir "$REUSE_DIR" \
+      --post_mutation_state_in "$REUSE_DIR/post_mutation_state.json" \
+      --seed "$SEED" \
+      --sumo_time_to_teleport 600 \
+      --completion_drain_steps 1200 \
+      --completion_drain_patience_steps 120
+  exit $?
+fi
+
+wait_for_file "${WM_DIR}/flow_projector_latest.pt" "flow projector checkpoint"
+wait_for_file "${WM_DIR}/latest.pt" "world model checkpoint"
+wait_for_file "${POLICY}" "policy checkpoint"
 
 echo "[les-live-greedy] running live_current_tt baseline into results/${ROOT_TAG}/${RESULT_NAME}" >&2
 
