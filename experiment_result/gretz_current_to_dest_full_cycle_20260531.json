@@ -119,10 +119,71 @@
       }
     ]
   },
+  "baseline_comparison": {
+    "script": "baseline/eval_gretz_current_to_dest_freeflow_candidates.sh",
+    "candidate_semantics": {
+      "eval_candidate_source": "current_shortest_freeflow",
+      "wm_candidate_edge_cost_source": "freeflow",
+      "wm_edge_cost_source": "decoded_speed",
+      "reuse_artifacts_dir": "results/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/collect_urb_fair_eval_postmutation_records"
+    },
+    "test_eps": 1,
+    "runs": [
+      {
+        "name": "baseline_live_current_greedy",
+        "summary": "results/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/baseline_gretz_ep200_ref_policy_freeflow_candidates_live_current_greedy/collector_eval_summary.json",
+        "t_all": 2.7317034700315457,
+        "t_CAV": 2.563910761154856,
+        "t_HDV": 2.8438596491228068,
+        "completion_rate": 0.9968553459119497,
+        "route_counts": {
+          "route0": 1029,
+          "route1": 11,
+          "route2": 1,
+          "route3": 0
+        },
+        "route0_share": 0.9884726224783862,
+        "delta_t_all_vs_learned_ep200": -0.004942166140904259
+      },
+      {
+        "name": "baseline_freeflow_greedy",
+        "summary": "results/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/baseline_gretz_ep200_ref_policy_freeflow_candidates_freeflow_greedy/collector_eval_summary.json",
+        "t_all": 2.7324921135646685,
+        "t_CAV": 2.566666666666667,
+        "t_HDV": 2.8433333333333333,
+        "completion_rate": 0.9968553459119497,
+        "route_counts": {
+          "route0": 1032,
+          "route1": 0,
+          "route2": 0,
+          "route3": 0
+        },
+        "route0_share": 1.0,
+        "delta_t_all_vs_learned_ep200": -0.004153522607781537
+      },
+      {
+        "name": "learned_ep200",
+        "summary": "results/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/eval_urb_fair_mainline_sweep/checkpoint_ep00200/collector_eval_summary.json",
+        "t_all": 2.73664563617245,
+        "t_CAV": 2.5756561679790027,
+        "t_HDV": 2.844254385964912,
+        "completion_rate": 0.9968553459119497,
+        "route_counts": {
+          "route0": 1017,
+          "route1": 10,
+          "route2": 0,
+          "route3": 1
+        },
+        "route0_share": 0.9892996108949417,
+        "delta_t_all_vs_learned_ep200": 0.0
+      }
+    ],
+    "conclusion": "Both requested Gretz greedy baselines are slightly better than the best learned checkpoint in the current single-episode eval."
+  },
   "interpretation": {
     "primary": "Gretz completed new collection -> new WM -> per-vehicle critic MARL -> SUMO eval with the actor-only reward path disabled.",
     "checkpoint_selection": "ep200 is best; ep400 regresses, mostly through CAV degradation.",
-    "caveat": "The numeric t_all <= 4.35 gate is met on Gretz, but Gretz-specific baselines are still needed before claiming network-level SOTA."
+    "caveat": "The numeric t_all <= 4.35 gate is met on Gretz, but the two requested Gretz greedy baselines are slightly better than learned ep200, so Gretz does not prove learned-policy SOTA."
   },
   "source_evidence": {
     "status": "logs/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/urb_fair_full_cycle.status.env",

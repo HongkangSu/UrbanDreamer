@@ -149,9 +149,44 @@ checkpoint_ep00200.pt
 t_all = 2.73664563617245
 ```
 
-The numeric `t_all <= 4.35` gate is met for Gretz, but this should not be
-reported as cross-network SOTA without a Gretz-specific baseline comparison.
-The scale is different from the Ingolstadt `t_all ~= 4.3` setting.
+The numeric `t_all <= 4.35` gate is met for Gretz, but this is not SOTA on
+Gretz after adding the two requested greedy baselines below.
+
+## Gretz Baseline Comparison
+
+Baseline script:
+`baseline/eval_gretz_current_to_dest_freeflow_candidates.sh`
+
+Both baselines use the same free-flow generated candidate paths as the learned
+policy:
+
+- `--av_candidate_source current_shortest_freeflow`
+- `--wm_candidate_edge_cost_source freeflow`
+- `--wm_edge_cost_source decoded_speed`
+- reused Gretz post-mutation and HDV learning state
+- `test_eps=1`
+
+| Run | t_all | t_CAV | t_HDV | Route counts | Route0 share |
+| --- | ---: | ---: | ---: | --- | ---: |
+| `baseline_live_current_greedy` | 2.7317034700 | 2.5639107612 | 2.8438596491 | r0=1029, r1=11, r2=1, r3=0 | 98.85% |
+| `baseline_freeflow_greedy` | 2.7324921136 | 2.5666666667 | 2.8433333333 | r0=1032, r1=0, r2=0, r3=0 | 100.00% |
+| `learned_ep200` | 2.7366456362 | 2.5756561680 | 2.8442543860 | r0=1017, r1=10, r2=0, r3=1 | 98.93% |
+| `learned_ep100` | 2.7379600421 | 2.5793963255 | 2.8439473684 | r0=1003, r1=19, r2=0, r3=3 | 97.85% |
+| `learned_ep400` | 2.9672712934 | 3.1448818898 | 2.8485526316 | r0=704, r1=231, r2=160, r3=130 | 57.47% |
+
+Differences versus the best learned checkpoint:
+
+- `baseline_live_current_greedy` is better than `learned_ep200` by
+  `0.0049421661` t_all.
+- `baseline_freeflow_greedy` is better than `learned_ep200` by
+  `0.0041535226` t_all.
+
+Interpretation: on Gretz, the current learned policy is valid and close to the
+greedy baselines, but it does not beat either requested baseline in the
+single-episode eval. Because the best baseline is mostly route0, Gretz appears
+to be a weak learning benchmark under this candidate/incident setting: there is
+little room for the actor to improve over greedy route0-like behavior, and late
+training drift at ep400 is harmful.
 
 ## Current Conclusion
 
@@ -169,15 +204,18 @@ degradation (`t_CAV` rises from about 2.58 to 3.14), so checkpoint selection is
 important. This is not the old fast-collapse failure mode; it looks more like
 late training drift/overtraining under the current trust/anchor/reward schedule.
 
+After the Gretz baseline comparison, the stronger conclusion is narrower:
+Gretz verifies pipeline health and near-greedy policy quality, but it does not
+show learned-policy superiority over the two requested greedy baselines.
+
 ## Remaining Risks
 
-- Gretz baseline comparisons are still needed before claiming network-level
-  SOTA on Gretz.
+- Gretz should not be used alone to claim SOTA; the requested baselines are
+  slightly better than the learned policy in the current single-episode eval.
 - The eval uses `test_eps=1`, so the result is a valid smoke/full-cycle signal
   but not a strong statistical estimate.
-- Plaisir is currently running the same full-cycle setting; Les is queued
-  behind Plaisir. Their results are needed before claiming robustness across
-  networks.
+- Les is the next full-cycle network to run. Plaisir was stopped per user
+  instruction and should not be included in the current validation set.
 
 ## Source Evidence
 
@@ -194,3 +232,6 @@ late training drift/overtraining under the current trust/anchor/reward schedule.
   `results/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/eval_urb_fair_mainline_sweep/checkpoint_ep00100/collector_eval_summary.json`
   `results/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/eval_urb_fair_mainline_sweep/checkpoint_ep00200/collector_eval_summary.json`
   `results/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/eval_urb_fair_mainline_sweep/checkpoint_ep00400/collector_eval_summary.json`
+- Baseline eval summaries:
+  `results/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/baseline_gretz_ep200_ref_policy_freeflow_candidates_freeflow_greedy/collector_eval_summary.json`
+  `results/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/baseline_gretz_ep200_ref_policy_freeflow_candidates_live_current_greedy/collector_eval_summary.json`
