@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -73,38 +74,99 @@ def _missing_pids(pids: Sequence[int]) -> list[int]:
     return missing
 
 
-def assert_protected_gretz_can_be_bypassed(args: argparse.Namespace) -> None:
-    """Raise before any candidate run can compete with the protected Gretz job."""
-
+def _protected_status_path(args: argparse.Namespace) -> Path:
     status_path = Path(args.protected_gretz_status_file)
     if not status_path.is_absolute():
         status_path = REPO_ROOT / status_path
-    status = _read_status_env(status_path)
-    if not status:
-        if bool(args.allow_missing_gretz_status):
+    return status_path
+
+
+def _raise_missing_status(status_path: Path) -> None:
+    raise RuntimeError(
+        f"Protected Gretz status file is missing or empty: {status_path}. "
+        "Refusing to start another SUMO/full-cycle job unless "
+        "--allow-missing-gretz-status is explicit."
+    )
+
+
+def _raise_missing_pids(pids: Sequence[int]) -> None:
+    joined = ", ".join(str(pid) for pid in pids)
+    raise RuntimeError(
+        f"Protected Gretz PID(s) are missing: {joined}. Refusing to start a "
+        "candidate job until the protected run state is understood."
+    )
+
+
+def _positive_float(value: object, name: str) -> float:
+    parsed = float(value)
+    if parsed <= 0.0:
+        raise ValueError(f"{name} must be > 0, got {value!r}")
+    return parsed
+
+
+def _nonnegative_float(value: object, name: str) -> float:
+    parsed = float(value)
+    if parsed < 0.0:
+        raise ValueError(f"{name} must be >= 0, got {value!r}")
+    return parsed
+
+
+def assert_protected_gretz_can_be_bypassed(args: argparse.Namespace) -> None:
+    """Raise before any candidate run can compete with the protected Gretz job."""
+
+    status_path = _protected_status_path(args)
+    poll_seconds = _positive_float(args.gretz_wait_poll_seconds, "--gretz-wait-poll-seconds")
+    timeout_seconds = _nonnegative_float(args.gretz_wait_timeout_seconds, "--gretz-wait-timeout-seconds")
+    deadline = time.monotonic() + timeout_seconds if timeout_seconds > 0.0 else None
+    wait_notice_printed = False
+
+    while True:
+        status = _read_status_env(status_path)
+        if not status:
+            if bool(args.allow_missing_gretz_status):
+                return
+            _raise_missing_status(status_path)
+
+        pids = _parse_protected_pids(str(args.protected_gretz_pids or ""))
+        missing = _missing_pids(pids)
+        if missing and status.get("STATE") == "running":
+            _raise_missing_pids(missing)
+
+        if status.get("STATE") != "running":
             return
-        raise RuntimeError(
-            f"Protected Gretz status file is missing or empty: {status_path}. "
-            "Refusing to start another SUMO/full-cycle job unless "
-            "--allow-missing-gretz-status is explicit."
-        )
 
-    if status.get("STATE") == "running" and not bool(args.allow_while_gretz_running):
-        raise RuntimeError(
-            "Protected Gretz is still running "
-            f"(stage={status.get('STAGE', 'unknown')}, status={status_path}). "
-            "Refusing to start another SUMO/full-cycle job. Use "
-            "--allow-while-gretz-running only for an intentional override."
-        )
+        if bool(args.allow_while_gretz_running):
+            return
 
-    pids = _parse_protected_pids(str(args.protected_gretz_pids or ""))
-    missing = _missing_pids(pids)
-    if missing:
-        joined = ", ".join(str(pid) for pid in missing)
-        raise RuntimeError(
-            f"Protected Gretz PID(s) are missing: {joined}. Refusing to start a "
-            "candidate job until the protected run state is understood."
-        )
+        if not bool(args.wait_for_gretz):
+            raise RuntimeError(
+                "Protected Gretz is still running "
+                f"(stage={status.get('STAGE', 'unknown')}, status={status_path}). "
+                "Refusing to start another SUMO/full-cycle job. Use "
+                "--wait-for-gretz to queue safely, or --allow-while-gretz-running "
+                "only for an intentional override."
+            )
+
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError(
+                "Timed out waiting for protected Gretz to leave STATE='running' "
+                f"(stage={status.get('STAGE', 'unknown')}, status={status_path})."
+            )
+
+        if not wait_notice_printed:
+            print(
+                "Protected Gretz is still running "
+                f"(stage={status.get('STAGE', 'unknown')}); waiting before "
+                "starting candidate full-cycle.",
+                file=sys.stderr,
+                flush=True,
+            )
+            wait_notice_printed = True
+
+        sleep_seconds = poll_seconds
+        if deadline is not None:
+            sleep_seconds = min(sleep_seconds, max(0.0, deadline - time.monotonic()))
+        time.sleep(sleep_seconds)
 
 
 def _default_tag(network_name: str, incident_edge: str) -> str:
@@ -382,6 +444,26 @@ def parse_args(argv: Iterable[str] | None = None) -> tuple[argparse.Namespace, l
         "--allow-while-gretz-running",
         action=argparse.BooleanOptionalAction,
         default=_env("ALLOW_WHILE_GRETZ_RUNNING", "0") == "1",
+    )
+    parser.add_argument(
+        "--wait-for-gretz",
+        action=argparse.BooleanOptionalAction,
+        default=_env("WAIT_FOR_GRETZ", "0") == "1",
+        help=(
+            "Queue the candidate full-cycle by polling the protected Gretz status "
+            "file until it is no longer STATE='running'. No SUMO or training "
+            "process is started while waiting."
+        ),
+    )
+    parser.add_argument(
+        "--gretz-wait-poll-seconds",
+        default=_env("GRETZ_WAIT_POLL_SECONDS", "60"),
+        help="Polling interval used with --wait-for-gretz.",
+    )
+    parser.add_argument(
+        "--gretz-wait-timeout-seconds",
+        default=_env("GRETZ_WAIT_TIMEOUT_SECONDS", "0"),
+        help="Optional timeout for --wait-for-gretz; 0 waits indefinitely.",
     )
     parser.add_argument(
         "--allow-missing-gretz-status",

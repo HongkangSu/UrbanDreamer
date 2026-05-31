@@ -52,8 +52,10 @@ the training/eval candidate semantics on the current mainline:
 - route-Q actor/critic experiments remain outside the default full-cycle path.
 
 The wrapper also refuses to start while the protected Gretz full-cycle status is
-`STATE='running'`, unless the override flag is explicit. This prevents
-second-network screening from competing with the protected long Gretz run.
+`STATE='running'`, unless the override flag is explicit. Use
+`--wait-for-gretz` for background queues that should poll the status file and
+start only after Gretz leaves `STATE='running'`. This prevents second-network
+screening from competing with the protected long Gretz run.
 
 `od_suffix` remains available only for old checkpoint reproduction. It is not a
 candidate-network or actor-critic mainline setting.
