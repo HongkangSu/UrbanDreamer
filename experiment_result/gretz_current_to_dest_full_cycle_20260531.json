@@ -1,0 +1,135 @@
+{
+  "created_at_utc": "2026-05-31",
+  "network": "gretz_armainvilliers",
+  "tag": "gretz_armainvilliers_current_to_dest_incident_20260530_odcompact",
+  "full_cycle_status": {
+    "stage": "complete",
+    "state": "succeeded"
+  },
+  "mainline_semantics": {
+    "train_vehicle_candidate_source": "current_to_dest",
+    "eval_candidate_source": "current_shortest_freeflow",
+    "wm_candidate_edge_cost_source": "freeflow",
+    "actor_objective": "discrete_actor_critic",
+    "route_cost_reward_scope": "vehicle_critic",
+    "vehicle_critic": true,
+    "vehicle_route_q_critic": false,
+    "gamma": 1.0,
+    "gae_lambda": 1.0,
+    "legacy_actor_only_enabled": false
+  },
+  "collection": {
+    "warmup_done": true,
+    "warmup_current": 200,
+    "warmup_total": 200,
+    "saved_collect_current": 50,
+    "saved_collect_total": 50,
+    "unique_episode_count": 50,
+    "reward_mean": -4.2555365562438965,
+    "reward_std": 0.35660478472709656,
+    "av_active_edge_frac": 0.4251950979232788,
+    "av_row_sum_mean": 5.004493713378906,
+    "hdv_active_edge_frac": 0.23099219799041748,
+    "od_group_count": 629,
+    "routes_per_od_group": 4,
+    "route0_is_freeflow_best_frac": 1.0,
+    "nonmonotonic_freeflow_group_frac": 0.5771065182829889,
+    "warnings": []
+  },
+  "world_model": {
+    "status": "healthy_so_far",
+    "warnings": [],
+    "completed_step": 8000,
+    "expected_max_step": 8000,
+    "final_checkpoint_saved": true,
+    "latest_exists": true,
+    "projector_latest_exists": true,
+    "last_metrics": {
+      "loss": 1.699115,
+      "flow_mse": 1.035574,
+      "hdv_ce": 8.313459,
+      "dec_mh": 0.066397,
+      "pred_next_dec": 0.14195,
+      "pred_next_speed_mse": 0.108122,
+      "t_all_mse": 0.183474,
+      "t_all_raw_mse": 3.195169
+    },
+    "best_metrics": {
+      "loss": 1.681939,
+      "flow_mse": 1.035574,
+      "hdv_ce": 8.313459,
+      "dec_mh": 0.058912,
+      "pred_next_dec": 0.108828,
+      "pred_next_speed_mse": 0.061456,
+      "t_all_mse": 0.183474,
+      "t_all_raw_mse": 3.195169
+    }
+  },
+  "marl_convergence": {
+    "status": "healthy_so_far",
+    "warnings": [],
+    "episodes_logged": 41,
+    "last_episode": 390,
+    "first50_mean_entropy": 1.3861400000000001,
+    "recent20_mean_entropy": 1.37586,
+    "last_entropy": 1.3722,
+    "last_policy_argmax_route0_frac": 0.73,
+    "last_policy_argmax_nonzero_frac": 0.27,
+    "recent20_policy_argmax_route0_frac": 0.8015,
+    "last_vehicle_reward_mean": 0.13,
+    "last_vehicle_reward_std": 0.11,
+    "last_vehicle_target_std": 0.28,
+    "last_vehicle_return_std": 0.27,
+    "legacy_actor_only_enabled": false
+  },
+  "sumo_eval": {
+    "target_t_all": 4.35,
+    "target_met": true,
+    "test_eps": 1,
+    "best_checkpoint": "checkpoint_ep00200",
+    "best_policy_ckpt": "logs/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/marl_urb_fair_mainline_500ep/checkpoint_ep00200.pt",
+    "best_t_all": 2.73664563617245,
+    "runs": [
+      {
+        "checkpoint": "checkpoint_ep00100",
+        "policy_ckpt": "logs/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/marl_urb_fair_mainline_500ep/checkpoint_ep00100.pt",
+        "summary": "results/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/eval_urb_fair_mainline_sweep/checkpoint_ep00100/collector_eval_summary.json",
+        "t_all": 2.7379600420609886,
+        "t_CAV": 2.5793963254593177,
+        "t_HDV": 2.843947368421053,
+        "rank": 2
+      },
+      {
+        "checkpoint": "checkpoint_ep00200",
+        "policy_ckpt": "logs/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/marl_urb_fair_mainline_500ep/checkpoint_ep00200.pt",
+        "summary": "results/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/eval_urb_fair_mainline_sweep/checkpoint_ep00200/collector_eval_summary.json",
+        "t_all": 2.73664563617245,
+        "t_CAV": 2.5756561679790027,
+        "t_HDV": 2.844254385964912,
+        "rank": 1
+      },
+      {
+        "checkpoint": "checkpoint_ep00400",
+        "policy_ckpt": "logs/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/marl_urb_fair_mainline_500ep/checkpoint_ep00400.pt",
+        "summary": "results/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/eval_urb_fair_mainline_sweep/checkpoint_ep00400/collector_eval_summary.json",
+        "t_all": 2.9672712933753944,
+        "t_CAV": 3.14488188976378,
+        "t_HDV": 2.8485526315789476,
+        "rank": 3
+      }
+    ]
+  },
+  "interpretation": {
+    "primary": "Gretz completed new collection -> new WM -> per-vehicle critic MARL -> SUMO eval with the actor-only reward path disabled.",
+    "checkpoint_selection": "ep200 is best; ep400 regresses, mostly through CAV degradation.",
+    "caveat": "The numeric t_all <= 4.35 gate is met on Gretz, but Gretz-specific baselines are still needed before claiming network-level SOTA."
+  },
+  "source_evidence": {
+    "status": "logs/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/urb_fair_full_cycle.status.env",
+    "collection_dir": "data/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/collect_urb_fair_eval_postmutation",
+    "records_dir": "results/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/collect_urb_fair_eval_postmutation_records",
+    "wm_dir": "logs/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/dynamics_urb_fair_mainline_8k",
+    "marl_dir": "logs/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/marl_urb_fair_mainline_500ep",
+    "eval_dir": "results/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/eval_urb_fair_mainline_sweep"
+  }
+}
