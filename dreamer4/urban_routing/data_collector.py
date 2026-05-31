@@ -339,6 +339,7 @@ class DataCollector:
         safe_reroute_min_remaining_m: float = 35.0,
         completion_drain_steps: int = 0,
         completion_drain_patience_steps: int = 0,
+        min_arrival_fraction_for_incomplete: float = 1.0,
         fixed_av_route_index: int = -1,
         fixed_av_route_probs: Optional[np.ndarray] = None,
         sim_buffer_after_last_depart: int = 1000,
@@ -414,6 +415,10 @@ class DataCollector:
             completion_drain_patience_steps: Stop the completion drain early
                                  after this many consecutive ticks without any
                                  new arrivals. Set <=0 to disable patience.
+            min_arrival_fraction_for_incomplete: If <1.0, stop completion drain
+                                 once this arrived/total fraction is observed.
+                                 This is intended for explicit incomplete-episode
+                                 collection on heavily congested networks.
             fixed_av_route_index: If >= 0, override AV routing to always choose
                                   this candidate route index. Used only for
                                   SUMO counterfactual screening, not learning.
@@ -443,6 +448,9 @@ class DataCollector:
         self._safe_reroute_min_remaining_m = float(safe_reroute_min_remaining_m)
         self._completion_drain_steps = max(int(completion_drain_steps), 0)
         self._completion_drain_patience_steps = max(int(completion_drain_patience_steps), 0)
+        self._min_arrival_fraction_for_incomplete = float(
+            np.clip(float(min_arrival_fraction_for_incomplete), 0.0, 1.0)
+        )
         self._fixed_av_route_index = int(fixed_av_route_index)
         self._fixed_av_route_probs: Optional[np.ndarray] = None
         if fixed_av_route_probs is not None:
@@ -784,6 +792,11 @@ class DataCollector:
             print(f"  completion_drain_steps={self._completion_drain_steps}")
             if self._completion_drain_patience_steps > 0:
                 print(f"  completion_drain_patience_steps={self._completion_drain_patience_steps}")
+            if self._min_arrival_fraction_for_incomplete < 1.0:
+                print(
+                    "  min_arrival_fraction_for_incomplete="
+                    f"{self._min_arrival_fraction_for_incomplete:.3f}"
+                )
         if self._sumo_time_to_teleport:
             print(f"  sumo_time_to_teleport={self._sumo_time_to_teleport}")
         if self._dagger_active:
@@ -1832,6 +1845,12 @@ class DataCollector:
             return state, int(current_tick)
         if len(self._last_ep_travel_times) >= total_agents:
             return state, int(current_tick)
+        if (
+            self._min_arrival_fraction_for_incomplete < 1.0
+            and float(len(self._last_ep_travel_times)) / max(float(total_agents), 1.0)
+            >= self._min_arrival_fraction_for_incomplete
+        ):
+            return state, int(current_tick)
 
         deadline = int(current_tick) + int(self._completion_drain_steps)
         tick = int(current_tick)
@@ -1863,6 +1882,12 @@ class DataCollector:
             else:
                 stale_steps += int(step)
                 self._last_ep_completion_drain_stale_steps = int(stale_steps)
+            if (
+                self._min_arrival_fraction_for_incomplete < 1.0
+                and float(arrivals_after) / max(float(total_agents), 1.0)
+                >= self._min_arrival_fraction_for_incomplete
+            ):
+                break
             if (
                 self._completion_drain_patience_steps > 0
                 and stale_steps >= self._completion_drain_patience_steps

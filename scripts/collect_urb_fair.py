@@ -583,6 +583,9 @@ def main() -> int:
         safe_reroute_min_remaining_m=float(args.safe_reroute_min_remaining_m),
         completion_drain_steps=int(args.completion_drain_steps),
         completion_drain_patience_steps=int(args.completion_drain_patience_steps),
+        min_arrival_fraction_for_incomplete=(
+            float(args.min_arrival_fraction) if bool(args.allow_incomplete_episodes) else 1.0
+        ),
         sumo_time_to_teleport=str(args.sumo_time_to_teleport or ""),
         sim_buffer_after_last_depart=int(cfg.get("SIM_BUFFER_AFTER_LAST_DEPART", "1000") or 1000),
         incident_edge=incident_edge,
