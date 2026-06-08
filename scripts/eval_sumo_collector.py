@@ -1293,6 +1293,7 @@ class PolicyGuidedCollectorEval(DataCollector):
 
         veh_depart: Dict[str, float] = {}
         veh_travel_times: Dict[str, float] = {}
+        self._seed_depart_times_from_agents(veh_depart)
 
         ep_ids: List[int] = []
         ep_av_edge_acts: List[np.ndarray] = []
@@ -1333,8 +1334,19 @@ class PolicyGuidedCollectorEval(DataCollector):
                 ep_sim_steps,
             )
 
+        if self._fixed_machine_ids or self._fixed_human_ids:
+            fixed_ids = list(self._fixed_machine_ids | self._fixed_human_ids)
+            self._assign_roles(fixed_ids, rng)
         self._register_vehicles(list(state.get("vehicles", {}).keys()), rng)
         self._record_depart_times(state, veh_depart)
+        reset_arrivals = getattr(self.connector, "_last_reset_arrival_events", None)
+        if reset_arrivals:
+            self._record_arrivals(
+                veh_depart,
+                veh_travel_times,
+                track_role_breakdown=True,
+                arrival_events=reset_arrivals,
+            )
 
         decision_ticks = sorted(self._decision_tick_map(max_steps).keys())
         if not decision_ticks:

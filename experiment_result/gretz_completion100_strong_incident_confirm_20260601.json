@@ -1,0 +1,75 @@
+{
+  "current_eval": "live_current_tt_planned_pressure_1eps_p120",
+  "evals": [
+    {
+      "candidate_dynamic_total": 1291,
+      "candidate_fallback_total": 0,
+      "completion_rate": 1.0,
+      "dynamic_selected_route_counts": {
+        "route0": 1271,
+        "route1": 17,
+        "route2": 3,
+        "route3": 0
+      },
+      "label": "live_current_tt_1eps_existing",
+      "live_route_best_counts": {
+        "route0": 1271,
+        "route1": 17,
+        "route2": 3,
+        "route3": 0
+      },
+      "out_dir": "results/gretz_armainvilliers_current_to_dest_incident_completion100_probe_20260601/neg_986733117_1_S0b_s500_e2500_v0p1/live_current_tt_1eps",
+      "policy": "live_current_tt",
+      "route0_share": 0.9845081332300543,
+      "summary_path": "results/gretz_armainvilliers_current_to_dest_incident_completion100_probe_20260601/neg_986733117_1_S0b_s500_e2500_v0p1/live_current_tt_1eps/collector_eval_summary.json",
+      "t_CAV": 3.970734908136483,
+      "t_HDV": 5.167408376963351,
+      "t_all": 4.689491614255766,
+      "test_eps": 1
+    },
+    {
+      "candidate_dynamic_total": 1280,
+      "candidate_fallback_total": 0,
+      "completion_rate": 1.0,
+      "dynamic_selected_route_counts": {
+        "route0": 1122,
+        "route1": 109,
+        "route2": 36,
+        "route3": 13
+      },
+      "label": "live_current_tt_planned_pressure_1eps_p120",
+      "live_route_best_counts": {
+        "route0": 1257,
+        "route1": 17,
+        "route2": 5,
+        "route3": 1
+      },
+      "out_dir": "results/gretz_armainvilliers_current_to_dest_incident_completion100_confirm_20260601/live_current_tt_planned_pressure_1eps_p120",
+      "policy": "live_current_tt",
+      "route0_share": 0.8765625,
+      "summary_path": "results/gretz_armainvilliers_current_to_dest_incident_completion100_confirm_20260601/live_current_tt_planned_pressure_1eps_p120/collector_eval_summary.json",
+      "t_CAV": 3.788517060367454,
+      "t_HDV": 5.1625654450261775,
+      "t_all": 4.613810272536687,
+      "test_eps": 1
+    }
+  ],
+  "full_cycle_pid": 1154491,
+  "full_cycle_script": "tmp/run_gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_noteleport_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1.sh",
+  "full_cycle_tag": "gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_noteleport_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1",
+  "incident": {
+    "edge": "-986733117#1",
+    "end": 2500,
+    "key": "neg_986733117_1_S0b_s500_e2500_v0p1",
+    "speed": 0.1,
+    "start": 500
+  },
+  "sanity_gate": {
+    "live_current_tt_1eps_existing_t_all": 4.689491614255766,
+    "required": "at least one planned-pressure route-cost sanity must complete, avoid fallback, and beat existing live_current_tt_1eps t_all",
+    "winner_labels": [
+      "live_current_tt_planned_pressure_1eps_p120"
+    ]
+  },
+  "status": "full_cycle_launched"
+}

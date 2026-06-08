@@ -93,6 +93,12 @@ def test_full_cycle_runner_translates_public_network_flags(tmp_path):
             "python",
             "--collect-post-mutation-state-in",
             str(state_in),
+            "--collect-sumo-extra-args",
+            "--collision.action warn",
+            "--eval-sumo-time-to-teleport",
+            "-1",
+            "--eval-sumo-extra-args",
+            "--collision.action warn",
         ]
     )
     plan = build_plan(args)
@@ -107,7 +113,8 @@ def test_full_cycle_runner_translates_public_network_flags(tmp_path):
     assert plan.collect_command[plan.collect_command.index("--safe_reroute_min_remaining_m") + 1] == "35.0"
     assert plan.collect_command[plan.collect_command.index("--completion_drain_steps") + 1] == "7200"
     assert plan.collect_command[plan.collect_command.index("--completion_drain_patience_steps") + 1] == "600"
-    assert plan.collect_command[plan.collect_command.index("--sumo_time_to_teleport") + 1] == "600"
+    assert plan.collect_command[plan.collect_command.index("--sumo_time_to_teleport") + 1] == "-1"
+    assert plan.collect_command[plan.collect_command.index("--sumo_extra_args") + 1] == "--collision.action warn"
     assert plan.marl_command[plan.marl_command.index("--network_folder") + 1] == str(network.resolve())
     assert plan.marl_command[plan.marl_command.index("--network_name") + 1] == "toy_net"
     assert plan.marl_command[plan.marl_command.index("--training_family") + 1] == "dreamer_ctde"
@@ -146,6 +153,8 @@ def test_full_cycle_runner_translates_public_network_flags(tmp_path):
     assert plan.eval_commands[0][plan.eval_commands[0].index("--av_candidate_source") + 1] == "current_shortest_freeflow"
     assert "--av_route_cost_policy" not in plan.eval_commands[0]
     assert plan.eval_commands[0][plan.eval_commands[0].index("--post_mutation_state_in") + 1] == str(state_in.resolve())
+    assert plan.eval_commands[0][plan.eval_commands[0].index("--sumo_time_to_teleport") + 1] == "-1"
+    assert plan.eval_commands[0][plan.eval_commands[0].index("--sumo_extra_args") + 1] == "--collision.action warn"
     assert "--keep_human_learning_after_mutation" not in plan.eval_commands[0]
     assert plan.eval_commands[0][plan.eval_commands[0].index("--policy_ckpt") + 1].endswith("checkpoint_ep00100.pt")
     assert plan.eval_commands[1][plan.eval_commands[1].index("--policy_ckpt") + 1].endswith("checkpoint_ep00200.pt")

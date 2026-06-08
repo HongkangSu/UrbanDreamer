@@ -306,6 +306,8 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
         str(args.collect_max_steps),
         "--max_runtime_episodes",
         str(args.collect_max_runtime_episodes or max(int(args.collect_episodes) * 20, int(args.collect_episodes))),
+        "--episode_wall_timeout_seconds",
+        str(args.collect_episode_wall_timeout_seconds),
         "--random_av_fraction",
         str(args.collect_random_av_fraction),
         "--epsilon",
@@ -319,6 +321,8 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
     ]
     if str(args.collect_sumo_time_to_teleport or "").strip():
         collect_command.extend(["--sumo_time_to_teleport", str(args.collect_sumo_time_to_teleport)])
+    if str(args.collect_sumo_extra_args or "").strip():
+        collect_command.extend(["--sumo_extra_args", str(args.collect_sumo_extra_args)])
     if bool(args.collect_allow_incomplete_episodes):
         collect_command.append("--allow_incomplete_episodes")
         collect_command.extend(["--min_arrival_fraction", str(args.collect_min_arrival_fraction)])
@@ -694,6 +698,10 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
                 _eval_candidate_source(args),
             ]
         )
+        if str(args.eval_sumo_time_to_teleport or "").strip():
+            eval_commands[-1].extend(["--sumo_time_to_teleport", str(args.eval_sumo_time_to_teleport)])
+        if str(args.eval_sumo_extra_args or "").strip():
+            eval_commands[-1].extend(["--sumo_extra_args", str(args.eval_sumo_extra_args)])
         if str(args.eval_av_route_cost_policy).strip().lower() != "none":
             eval_commands[-1].extend(
                 [
@@ -799,6 +807,16 @@ def _write_status(path: Path, stage: str, state: str) -> None:
     )
 
 
+def _read_status_stage(path: Path) -> str:
+    if not path.exists():
+        return "unknown"
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if line.startswith("STAGE="):
+            return line.split("=", 1)[1].strip().strip("'\"") or "unknown"
+    return "unknown"
+
+
 def _run(command: Sequence[str], env: dict[str, str]) -> None:
     print("+ " + " ".join(command), flush=True)
     subprocess.run(command, cwd=str(REPO_ROOT), env=env, check=True)
@@ -866,37 +884,41 @@ def execute_plan(args: argparse.Namespace, plan: FullCyclePlan) -> None:
     start_stage = str(getattr(args, "start_stage", "collect") or "collect")
     start_idx = int(stage_order[start_stage])
 
-    if start_idx <= stage_order["collect"]:
-        _write_status(plan.status_file, "collect_urb_fair", "running")
-        _run(plan.collect_command, env)
-    if start_idx <= stage_order["train_dynamics"]:
-        _write_status(plan.status_file, "train_dynamics", "running")
-        _run(plan.dynamics_command, env)
-    if start_idx <= stage_order["train_marl"]:
-        _write_status(plan.status_file, "train_marl", "running")
-        _run(plan.marl_command, env)
+    try:
+        if start_idx <= stage_order["collect"]:
+            _write_status(plan.status_file, "collect_urb_fair", "running")
+            _run(plan.collect_command, env)
+        if start_idx <= stage_order["train_dynamics"]:
+            _write_status(plan.status_file, "train_dynamics", "running")
+            _run(plan.dynamics_command, env)
+        if start_idx <= stage_order["train_marl"]:
+            _write_status(plan.status_file, "train_marl", "running")
+            _run(plan.marl_command, env)
 
-    _write_status(plan.status_file, "eval_urb_fair", "running")
+        _write_status(plan.status_file, "eval_urb_fair", "running")
 
-    produced_eval_dirs: list[Path] = []
-    for command, out_dir in zip(plan.eval_commands, plan.eval_dirs):
-        ckpt_path = Path(command[command.index("--policy_ckpt") + 1])
-        if not ckpt_path.exists():
-            print(f"[warn] Missing checkpoint, skip SUMO probe: {ckpt_path}", file=sys.stderr)
-            continue
-        _run(command, env)
-        produced_eval_dirs.append(out_dir)
+        produced_eval_dirs: list[Path] = []
+        for command, out_dir in zip(plan.eval_commands, plan.eval_dirs):
+            ckpt_path = Path(command[command.index("--policy_ckpt") + 1])
+            if not ckpt_path.exists():
+                print(f"[warn] Missing checkpoint, skip SUMO probe: {ckpt_path}", file=sys.stderr)
+                continue
+            _run(command, env)
+            produced_eval_dirs.append(out_dir)
 
-    if not produced_eval_dirs:
-        raise RuntimeError("No SUMO eval probe directories were produced.")
+        if not produced_eval_dirs:
+            raise RuntimeError("No SUMO eval probe directories were produced.")
 
-    select_command = [
-        *plan.select_best_command[:3],
-        str(plan.select_best_command[3]),
-        *[str(path) for path in produced_eval_dirs],
-    ]
-    _run(select_command, env)
-    _write_status(plan.status_file, "complete", "succeeded")
+        select_command = [
+            *plan.select_best_command[:3],
+            str(plan.select_best_command[3]),
+            *[str(path) for path in produced_eval_dirs],
+        ]
+        _run(select_command, env)
+        _write_status(plan.status_file, "complete", "succeeded")
+    except BaseException:
+        _write_status(plan.status_file, _read_status_stage(plan.status_file), "failed")
+        raise
 
 
 def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
@@ -958,6 +980,7 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--collect-episodes", type=int, default=50, help=hidden)
     p.add_argument("--collect-max-steps", type=int, default=3600, help=hidden)
     p.add_argument("--collect-max-runtime-episodes", type=int, default=0, help=hidden)
+    p.add_argument("--collect-episode-wall-timeout-seconds", type=float, default=0.0, help=hidden)
     p.add_argument("--collect-random-av-fraction", type=float, default=0.6, help=hidden)
     p.add_argument("--collect-epsilon", type=float, default=0.4, help=hidden)
     p.add_argument("--collect-allow-incomplete-episodes", action="store_true", help=hidden)
@@ -965,7 +988,8 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--collect-safe-reroute-min-remaining-m", type=float, default=35.0, help=hidden)
     p.add_argument("--collect-completion-drain-steps", type=int, default=7200, help=hidden)
     p.add_argument("--collect-completion-drain-patience-steps", type=int, default=600, help=hidden)
-    p.add_argument("--collect-sumo-time-to-teleport", default="600", help=hidden)
+    p.add_argument("--collect-sumo-time-to-teleport", default="-1", help=hidden)
+    p.add_argument("--collect-sumo-extra-args", default="", help=hidden)
     p.add_argument("--collect-post-mutation-state-in", default="", help=hidden)
     p.add_argument("--collect-hdv-state-in", default="", help=hidden)
     p.add_argument("--hdv-gawron-mode", choices=["replicator", "routerl", "routerl_blackbox"], default="routerl", help=hidden)
@@ -1098,6 +1122,8 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--marl-vehicle-obs-include-fleet-pressure", action="store_true", help=hidden)
     p.add_argument("--checkpoint-episodes", default=os.environ.get("CHECKPOINT_EPISODES", "100"), help=hidden)
     p.add_argument("--eval-test-eps", type=int, default=3, help=hidden)
+    p.add_argument("--eval-sumo-time-to-teleport", default="", help=hidden)
+    p.add_argument("--eval-sumo-extra-args", default="", help=hidden)
     p.add_argument("--eval-av-route-cost-policy", choices=["none", "freeflow_greedy", "wm_current_bpr", "live_current_tt", "wm_live_blend"], default="none", help=hidden)
     p.add_argument("--eval-av-route-cost-length-norm", choices=["sum", "mean"], default="sum", help=hidden)
     p.add_argument("--eval-av-route-cost-temperature", type=float, default=0.0, help=hidden)

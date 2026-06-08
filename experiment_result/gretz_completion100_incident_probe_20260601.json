@@ -1,0 +1,92 @@
+{
+  "baseline_gate": {
+    "collisions": 0,
+    "completion_rate": 1.0,
+    "fallback": 0,
+    "freeflow_route0_share_gte": 0.98,
+    "live_non_route0_share_gte": 0.05,
+    "live_route0_share_lte": 0.95,
+    "live_t_all_vs_freeflow_t_all": "not constrained",
+    "sumo_running": 0,
+    "sumo_waiting": 0,
+    "teleports": 0,
+    "unfinished_all": 0
+  },
+  "generated_at": "2026-06-01T07:26:42.214400+00:00",
+  "selected_incident": null,
+  "selected_incident_key": null,
+  "status": "probing",
+  "trials": [
+    {
+      "incident": {
+        "edge": "986733117#1",
+        "end": 2700,
+        "key": "986733117_1_F1_s500_e2700_v0p2",
+        "speed": 0.2,
+        "start": 500,
+        "tier": "F1"
+      },
+      "passed": false,
+      "policy_results": {
+        "freeflow_greedy": {
+          "bad_sumo_stats": [
+            {
+              "collisions": 0,
+              "file": "sumo_stats_1.xml",
+              "inserted": 636,
+              "loaded": 636,
+              "running": 4,
+              "teleports": 0,
+              "trip_count": 632,
+              "waiting": 0
+            }
+          ],
+          "candidate_fallback_total": 0,
+          "completion_rate": 0.9937106918238994,
+          "dynamic_selected_route_counts": {
+            "route0": 1211,
+            "route1": 0,
+            "route2": 0,
+            "route3": 0
+          },
+          "dynamic_total": 1211,
+          "episodes": 1,
+          "live_route_best_counts": {
+            "route0": 1137,
+            "route1": 45,
+            "route2": 16,
+            "route3": 13
+          },
+          "non_route0_count": 0,
+          "out_dir": "results/gretz_armainvilliers_current_to_dest_incident_completion100_probe_20260601/986733117_1_F1_s500_e2700_v0p2/freeflow_greedy_1eps",
+          "pass_completion": false,
+          "route0_share": 1.0,
+          "summary_path": "results/gretz_armainvilliers_current_to_dest_incident_completion100_probe_20260601/986733117_1_F1_s500_e2700_v0p2/freeflow_greedy_1eps/collector_eval_summary.json",
+          "sumo_stats_files": 1,
+          "t_CAV": 3.248738379814077,
+          "t_HDV": 3.5103674540682417,
+          "t_all": 3.4064609704641353,
+          "unfinished_rows": [
+            {
+              "arrived_all": "632",
+              "arrived_av": "251",
+              "arrived_hdv": "381",
+              "completion_rate": "0.9937106918238994",
+              "dataset_collected": "0",
+              "episode": "201",
+              "phase": "test",
+              "steps": "60",
+              "t_CAV": "3.248738379814077",
+              "t_HDV": "3.5103674540682417",
+              "t_all": "3.4064609704641353",
+              "total_agents": "636",
+              "unfinished_all": "4"
+            }
+          ]
+        }
+      },
+      "reason": "freeflow_greedy failed completion gate",
+      "test_eps": 1
+    }
+  ]
+}

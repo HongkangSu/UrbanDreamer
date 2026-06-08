@@ -121,6 +121,7 @@ class RouteRLConnector:
         self._sumo_emergency_insert = bool(sumo_emergency_insert)
         self._sumo_extra_args = shlex.split(str(sumo_extra_args or ""))
         self._incident_edge = str(incident_edge or "").strip()
+        self._incident_edges = self._parse_incident_edges(self._incident_edge)
         self._incident_start = float(incident_start or 0.0)
         self._incident_end = float(incident_end or 0.0)
         self._incident_speed = float(incident_speed or 0.0)
@@ -198,6 +199,7 @@ class RouteRLConnector:
             print(
                 "  Incident: "
                 f"edge={self._incident_edge} "
+                f"edges={len(self._incident_edges)} "
                 f"window=[{self._incident_start:.1f}, {self._incident_end:.1f}) "
                 f"speed={self._incident_speed:.2f}m/s"
             )
@@ -233,32 +235,42 @@ class RouteRLConnector:
 
     def _incident_enabled(self) -> bool:
         return (
-            bool(self._incident_edge)
+            bool(self._incident_edges)
             and self._incident_end > self._incident_start
             and self._incident_speed > 0.0
         )
+
+    @staticmethod
+    def _parse_incident_edges(raw: str) -> List[str]:
+        return [part.strip() for part in str(raw or "").split(",") if part.strip()]
 
     def _capture_incident_lanes(self) -> None:
         self._incident_lane_speeds = {}
         self._incident_active = False
         if not self._incident_enabled():
             return
-        try:
-            edge_obj = self.network.getEdge(self._incident_edge)
-        except Exception as exc:
-            raise ValueError(f"Unknown incident edge: {self._incident_edge}") from exc
-        for lane in edge_obj.getLanes():
-            lane_id = str(lane.getID())
+        missing_edges: List[str] = []
+        for edge_id in self._incident_edges:
             try:
-                self._incident_lane_speeds[lane_id] = float(traci.lane.getMaxSpeed(lane_id))
+                edge_obj = self.network.getEdge(edge_id)
             except Exception:
+                missing_edges.append(edge_id)
+                continue
+            for lane in edge_obj.getLanes():
+                lane_id = str(lane.getID())
                 try:
-                    self._incident_lane_speeds[lane_id] = float(lane.getSpeed())
+                    self._incident_lane_speeds[lane_id] = float(traci.lane.getMaxSpeed(lane_id))
                 except Exception:
-                    self._incident_lane_speeds[lane_id] = 13.9
+                    try:
+                        self._incident_lane_speeds[lane_id] = float(lane.getSpeed())
+                    except Exception:
+                        self._incident_lane_speeds[lane_id] = 13.9
+        if missing_edges:
+            raise ValueError(f"Unknown incident edge(s): {','.join(missing_edges)}")
         logging.info(
-            "Configured SUMO incident edge=%s lanes=%d start=%.1f end=%.1f speed=%.2fm/s",
+            "Configured SUMO incident edge=%s edge_count=%d lanes=%d start=%.1f end=%.1f speed=%.2fm/s",
             self._incident_edge,
+            len(self._incident_edges),
             len(self._incident_lane_speeds),
             self._incident_start,
             self._incident_end,
@@ -851,10 +863,22 @@ class RouteRLConnector:
             self._restore_incident_lanes()
         except Exception:
             pass
+        simulator = getattr(self.env, "simulator", None)
+        sumo_id = getattr(simulator, "sumo_id", None) if simulator is not None else None
+        if sumo_id:
+            try:
+                traci.switch(sumo_id)
+            except Exception:
+                pass
         try:
             traci.close()
         except Exception:
             pass
+        if simulator is not None:
+            try:
+                simulator.sumo_connection = None
+            except Exception:
+                pass
         self._started = False
 
     def __del__(self):

@@ -57,6 +57,10 @@ from scripts.eval_sumo import (
 )
 
 
+class _EpisodeWallTimeout(BaseException):
+    """Raised by SIGALRM when one collection runtime episode exceeds wall time."""
+
+
 def _default_output_dir(cfg: Dict[str, str]) -> str:
     network = cfg.get("NETWORK_NAME", "network")
     return f"data/{network}/collect_urb_fair"
@@ -416,12 +420,16 @@ def parse_args() -> argparse.Namespace:
                    help="Stop completion drain after this many consecutive ticks without new arrivals. <=0 disables.")
     p.add_argument("--sumo_time_to_teleport", type=str, default="",
                    help="Override RouteRL's SUMO --time-to-teleport. Empty preserves the route artifact default.")
+    p.add_argument("--sumo_extra_args", type=str, default="",
+                   help="Extra SUMO CLI args parsed with shlex, e.g. '--collision.action warn'.")
     p.add_argument("--dagger_beta", type=float, default=0.5)
     p.add_argument("--dagger_noise", type=float, default=0.3)
     p.add_argument("--checkpoint_every", type=int, default=10,
                    help="Save an intermediate demo+flow snapshot every N collected episodes. 0 disables intermediate checkpoints.")
     p.add_argument("--max_runtime_episodes", type=int, default=0,
                    help="Optional cap on total runtime episodes attempted. 0 means equal to num_episodes.")
+    p.add_argument("--episode_wall_timeout_seconds", type=float, default=0.0,
+                   help="Optional wall-clock timeout per runtime episode. Timed-out episodes are skipped.")
     p.add_argument("--allow_incomplete_episodes", action="store_true",
                    help="Save episodes that meet --min_arrival_fraction even when not all vehicles arrive.")
     p.add_argument("--min_arrival_fraction", type=float, default=1.0,
@@ -587,6 +595,7 @@ def main() -> int:
             float(args.min_arrival_fraction) if bool(args.allow_incomplete_episodes) else 1.0
         ),
         sumo_time_to_teleport=str(args.sumo_time_to_teleport or ""),
+        sumo_extra_args=str(args.sumo_extra_args or ""),
         sim_buffer_after_last_depart=int(cfg.get("SIM_BUFFER_AFTER_LAST_DEPART", "1000") or 1000),
         incident_edge=incident_edge,
         incident_start=incident_start,
@@ -689,23 +698,61 @@ def main() -> int:
 
     old_sigint = signal.getsignal(signal.SIGINT)
     old_sigterm = signal.getsignal(signal.SIGTERM)
+    old_sigalrm = signal.getsignal(signal.SIGALRM) if hasattr(signal, "SIGALRM") else None
     signal.signal(signal.SIGINT, _interrupt_handler)
     signal.signal(signal.SIGTERM, _interrupt_handler)
+    episode_wall_timeout = max(float(args.episode_wall_timeout_seconds or 0.0), 0.0)
+
+    def _episode_timeout_handler(signum, frame):  # type: ignore[no-untyped-def]
+        raise _EpisodeWallTimeout(f"episode exceeded {episode_wall_timeout:.1f}s wall timeout")
+
+    if episode_wall_timeout > 0.0:
+        if not hasattr(signal, "SIGALRM") or not hasattr(signal, "setitimer"):
+            raise RuntimeError("--episode_wall_timeout_seconds requires SIGALRM/setitimer support")
+        signal.signal(signal.SIGALRM, _episode_timeout_handler)
+
+    def _close_connector_after_timeout() -> None:
+        connector = getattr(collector, "connector", None)
+        if connector is None:
+            return
+        try:
+            connector.close()
+        except Exception as exc:
+            print(f"  [timeout] connector close failed: {exc}", flush=True)
+
     try:
         runtime_attempt_id = 0
         saved_episode_id = 0
         while saved_episode_id < requested_num_episodes and runtime_attempt_id < max_runtime_episodes:
             runtime_episode_id = int(post_mutation_state.get("mutation_episode_index", warmup_episodes)) + 1 + runtime_attempt_id
-            (
-                ep_ids,
-                ep_av_edge_acts,
-                ep_hdv_edge_acts,
-                ep_joint_edge_acts,
-                ep_rews,
-                ep_frames,
-                ep_departs,
-                ep_contexts,
-            ) = collector._collect_single_episode(episode_id=runtime_episode_id, max_steps=int(args.max_steps))
+            try:
+                if episode_wall_timeout > 0.0:
+                    signal.setitimer(signal.ITIMER_REAL, episode_wall_timeout)
+                (
+                    ep_ids,
+                    ep_av_edge_acts,
+                    ep_hdv_edge_acts,
+                    ep_joint_edge_acts,
+                    ep_rews,
+                    ep_frames,
+                    ep_departs,
+                    ep_contexts,
+                ) = collector._collect_single_episode(episode_id=runtime_episode_id, max_steps=int(args.max_steps))
+            except _EpisodeWallTimeout as exc:
+                if episode_wall_timeout > 0.0:
+                    signal.setitimer(signal.ITIMER_REAL, 0.0)
+                _close_connector_after_timeout()
+                print(
+                    f"  timeout saved={saved_episode_id:3d}/{requested_num_episodes-1:3d} "
+                    f"runtime={runtime_attempt_id:3d}/{max_runtime_episodes-1:3d} | "
+                    f"episode={runtime_episode_id} | {exc}",
+                    flush=True,
+                )
+                runtime_attempt_id += 1
+                continue
+            finally:
+                if episode_wall_timeout > 0.0:
+                    signal.setitimer(signal.ITIMER_REAL, 0.0)
             selection_metrics = _episode_selection_metrics(
                 collector,
                 ep_frames,
@@ -805,6 +852,9 @@ def main() -> int:
     finally:
         signal.signal(signal.SIGINT, old_sigint)
         signal.signal(signal.SIGTERM, old_sigterm)
+        if episode_wall_timeout > 0.0 and old_sigalrm is not None:
+            signal.signal(signal.SIGALRM, old_sigalrm)
+            signal.setitimer(signal.ITIMER_REAL, 0.0)
 
     if interrupted is not None:
         manifest_path = _flush_partial_collection(

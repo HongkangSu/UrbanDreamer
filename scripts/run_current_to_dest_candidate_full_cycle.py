@@ -198,8 +198,7 @@ def build_full_cycle_argv(args: argparse.Namespace, passthrough: Sequence[str] =
         "current_shortest_freeflow",
         "--ratio-machines",
         str(args.ratio_machines),
-        "--incident-edge",
-        incident_edge,
+        f"--incident-edge={incident_edge}",
         "--incident-start",
         str(args.incident_start),
         "--incident-end",
@@ -222,10 +221,18 @@ def build_full_cycle_argv(args: argparse.Namespace, passthrough: Sequence[str] =
         str(args.collect_max_steps),
         "--collect-max-runtime-episodes",
         str(args.collect_max_runtime_episodes),
+        "--collect-episode-wall-timeout-seconds",
+        str(args.collect_episode_wall_timeout_seconds),
         "--sim-buffer-after-last-depart",
         str(args.sim_buffer_after_last_depart),
         "--collect-sumo-time-to-teleport",
         str(args.collect_sumo_time_to_teleport),
+        "--collect-completion-drain-steps",
+        str(args.collect_completion_drain_steps),
+        "--collect-completion-drain-patience-steps",
+        str(args.collect_completion_drain_patience_steps),
+        "--collect-sumo-extra-args",
+        str(args.collect_sumo_extra_args),
         "--wm-max-steps",
         str(args.wm_max_steps),
         "--wm-save-every",
@@ -320,6 +327,10 @@ def build_full_cycle_argv(args: argparse.Namespace, passthrough: Sequence[str] =
         str(args.marl_checkpoint_every),
         "--eval-test-eps",
         str(args.eval_test_eps),
+        "--eval-sumo-time-to-teleport",
+        str(args.eval_sumo_time_to_teleport),
+        "--eval-sumo-extra-args",
+        str(args.eval_sumo_extra_args),
         "--eval-av-route-cost-policy",
         "none",
         "--marl-seed",
@@ -390,8 +401,15 @@ def parse_args(argv: Iterable[str] | None = None) -> tuple[argparse.Namespace, l
     parser.add_argument("--warmup-episodes", default=_env("WARMUP_EPISODES", "200"))
     parser.add_argument("--collect-max-steps", default=_env("COLLECT_MAX_STEPS", "3600"))
     parser.add_argument("--collect-max-runtime-episodes", default=_env("COLLECT_MAX_RUNTIME_EPISODES", "1000"))
+    parser.add_argument("--collect-episode-wall-timeout-seconds", default=_env("COLLECT_EPISODE_WALL_TIMEOUT_SECONDS", "0"))
     parser.add_argument("--sim-buffer-after-last-depart", default=_env("SIM_BUFFER_AFTER_LAST_DEPART", "1000"))
-    parser.add_argument("--collect-sumo-time-to-teleport", default=_env("SUMO_TIME_TO_TELEPORT", "600"))
+    parser.add_argument("--collect-sumo-time-to-teleport", default=_env("SUMO_TIME_TO_TELEPORT", "-1"))
+    parser.add_argument("--collect-completion-drain-steps", default=_env("COLLECT_COMPLETION_DRAIN_STEPS", "7200"))
+    parser.add_argument(
+        "--collect-completion-drain-patience-steps",
+        default=_env("COLLECT_COMPLETION_DRAIN_PATIENCE_STEPS", "600"),
+    )
+    parser.add_argument("--collect-sumo-extra-args", default=_env("COLLECT_SUMO_EXTRA_ARGS", ""))
     parser.add_argument("--wm-max-steps", default=_env("WM_MAX_STEPS", "8000"))
     parser.add_argument("--wm-save-every", default=_env("WM_SAVE_EVERY", "1000"))
     parser.add_argument("--wm-eval-every", default=_env("WM_EVAL_EVERY", "1000"))
@@ -424,6 +442,8 @@ def parse_args(argv: Iterable[str] | None = None) -> tuple[argparse.Namespace, l
     parser.add_argument("--checkpoint-episodes", default=_env("CHECKPOINT_EPISODES", "100 200 400"))
     parser.add_argument("--marl-checkpoint-every", default=_env("MARL_CHECKPOINT_EVERY", "100"))
     parser.add_argument("--eval-test-eps", default=_env("EVAL_TEST_EPS", "1"))
+    parser.add_argument("--eval-sumo-time-to-teleport", default=_env("EVAL_SUMO_TIME_TO_TELEPORT", ""))
+    parser.add_argument("--eval-sumo-extra-args", default=_env("EVAL_SUMO_EXTRA_ARGS", ""))
     parser.add_argument("--marl-seed", default=_env("MARL_SEED", "98"))
     parser.add_argument("--device", default=_env("RUN_DEVICE", "cuda:0"))
     parser.add_argument("--start-stage", choices=["collect", "train_dynamics", "train_marl", "eval"], default=_env("START_STAGE", "collect"))
