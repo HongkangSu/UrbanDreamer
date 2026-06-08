@@ -6,6 +6,7 @@ FlowProjector: GNN-based projector Linear(d_feat→d_spatial) with EdgeGNNLayers
 Both are trained jointly with the CFM dynamics model (no separate pretraining).
 """
 import json
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -37,6 +38,24 @@ D_FEAT    = N_DYNAMIC + N_STATIC   # 8
 
 # Default free-flow speed (m/s) used when speed_limit is unknown
 _DEFAULT_SPEED = 13.89   # ~50 km/h
+
+_DIJKSTRA_EDGE_LENGTHS_BY_N: Dict[int, np.ndarray] = {}
+
+
+def _register_dijkstra_edge_lengths(lengths: Optional[np.ndarray]) -> None:
+    if lengths is None:
+        return
+    arr = np.asarray(lengths, dtype=np.float32).reshape(-1)
+    if arr.size > 0:
+        _DIJKSTRA_EDGE_LENGTHS_BY_N[int(arr.shape[0])] = arr.copy()
+
+
+def _dijkstra_hard_min_edge_length_m() -> float:
+    raw_value = os.environ.get("URB_DIJKSTRA_HARD_MIN_EDGE_LENGTH_M", "1.0")
+    try:
+        return max(float(raw_value), 0.0)
+    except (TypeError, ValueError):
+        return 1.0
 
 
 def decode_nonnegative_volume(raw_volume: torch.Tensor) -> torch.Tensor:
@@ -119,6 +138,7 @@ class EdgeRegistry:
         self.n_edges = len(edge_ids)
         self.adjacency = adjacency  # (E, E) float32 row-normalized, or None
         self.lengths = lengths.astype(np.float32) if lengths is not None else None
+        _register_dijkstra_edge_lengths(self.lengths)
         self.from_node_idx = from_node_idx.astype(np.int64) if from_node_idx is not None else None
         self.to_node_idx = to_node_idx.astype(np.int64) if to_node_idx is not None else None
         self.passenger_allowed = (
@@ -439,30 +459,51 @@ class RouteRegistry:
         """Shortest path on edge graph via Dijkstra. Returns edge index list or None."""
         import heapq
         n = len(adj_list)
-        dist = np.full(n, np.inf)
-        prev = np.full(n, -1, dtype=np.int64)
-        dist[src] = weights[src]
-        heap: List[tuple] = [(float(dist[src]), src)]
-        while heap:
-            d, u = heapq.heappop(heap)
-            if d > dist[u]:
-                continue
-            if u == dst:
-                break
-            for v in adj_list[u]:
-                nd = d + weights[v]
-                if nd < dist[v]:
-                    dist[v] = nd
-                    prev[v] = u
-                    heapq.heappush(heap, (nd, v))
-        if np.isinf(dist[dst]):
+        weights_arr = np.asarray(weights)
+        min_len = _dijkstra_hard_min_edge_length_m()
+        edge_lengths = _DIJKSTRA_EDGE_LENGTHS_BY_N.get(n)
+
+        def _run(blocked: Optional[np.ndarray]) -> Optional[List[int]]:
+            dist = np.full(n, np.inf)
+            prev = np.full(n, -1, dtype=np.int64)
+            dist[src] = weights_arr[src]
+            heap: List[tuple] = [(float(dist[src]), src)]
+            while heap:
+                d, u = heapq.heappop(heap)
+                if d > dist[u]:
+                    continue
+                if u == dst:
+                    break
+                for v in adj_list[u]:
+                    vi = int(v)
+                    if blocked is not None and bool(blocked[vi]):
+                        continue
+                    nd = d + weights_arr[vi]
+                    if nd < dist[vi]:
+                        dist[vi] = nd
+                        prev[vi] = u
+                        heapq.heappush(heap, (nd, vi))
+            if np.isinf(dist[dst]):
+                return None
+            path = []
+            u = dst
+            while u != -1:
+                path.append(u)
+                u = int(prev[u])
+            return path[::-1]
+
+        blocked_edges = None
+        if min_len > 0.0 and edge_lengths is not None and edge_lengths.shape[0] >= n:
+            blocked_edges = np.asarray(edge_lengths[:n] < min_len, dtype=bool)
+            blocked_edges[int(src)] = False
+            blocked_edges[int(dst)] = False
+
+        path = _run(blocked_edges)
+        if path is None and blocked_edges is not None:
+            path = _run(None)
+        if path is None:
             return None
-        path = []
-        u = dst
-        while u != -1:
-            path.append(u)
-            u = int(prev[u])
-        return path[::-1]
+        return path
 
     @classmethod
     def build(
