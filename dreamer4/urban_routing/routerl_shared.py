@@ -97,6 +97,25 @@ def _routes_meta_path(records_folder: str) -> str:
     return os.path.join(records_folder, "routes_meta.json")
 
 
+def _routerl_hard_min_edge_length_m() -> float:
+    raw_value = os.environ.get(
+        "URB_ROUTERL_HARD_MIN_EDGE_LENGTH_M",
+        os.environ.get("URB_STATIC_ROUTE_HARD_MIN_EDGE_LENGTH_M", "1.0"),
+    )
+    try:
+        return max(float(raw_value), 0.0)
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _static_route_hard_min_edge_length_m() -> float:
+    raw_value = os.environ.get("URB_STATIC_ROUTE_HARD_MIN_EDGE_LENGTH_M", "1.0")
+    try:
+        return max(float(raw_value), 0.0)
+    except (TypeError, ValueError):
+        return 1.0
+
+
 def _cached_routes_match(
     records_folder: str,
     *,
@@ -135,6 +154,7 @@ def _write_routes_meta(
     n_origins: int,
     n_destinations: int,
     od_pairs: Optional[Sequence[tuple[int, int]]] = None,
+    extra: Optional[Dict[str, Any]] = None,
 ) -> None:
     meta = {
         "generator": str(generator),
@@ -145,10 +165,277 @@ def _write_routes_meta(
     }
     if od_pairs is not None:
         meta["od_pairs"] = [[int(oi), int(di)] for oi, di in od_pairs]
+    if extra:
+        meta.update(dict(extra))
     Path(_routes_meta_path(records_folder)).write_text(
         json.dumps(meta, indent=2, sort_keys=True),
         encoding="utf-8",
     )
+
+
+def _write_routes_xml(
+    *,
+    routes_xml: str,
+    routes_df: pd.DataFrame,
+    od_pairs: Sequence[tuple[int, int]],
+) -> None:
+    with open(routes_xml, "w", encoding="utf-8") as f:
+        f.write("<routes>\n")
+        f.write('<vType id="Human" color="red" guiShape="passenger/sedan"/>\n')
+        f.write('<vType id="AV" color="yellow"/>\n')
+        for oi, di in od_pairs:
+            paths = routes_df[
+                (routes_df["origins"] == int(oi))
+                & (routes_df["destinations"] == int(di))
+            ]["path"].values
+            for idx, path in enumerate(paths):
+                f.write(f'<route id="{int(oi)}_{int(di)}_{idx}" edges="\n')
+                f.write(str(path) + "\n")
+                f.write('" />\n')
+        f.write("</routes>\n")
+
+
+def _route_has_short_intermediate_edge(
+    route_indices: Sequence[int],
+    *,
+    lengths: np.ndarray,
+    min_edge_length_m: float,
+) -> bool:
+    if float(min_edge_length_m) <= 0.0 or len(route_indices) <= 2:
+        return False
+    for idx in list(route_indices)[1:-1]:
+        ii = int(idx)
+        if 0 <= ii < int(lengths.shape[0]) and float(lengths[ii]) < float(min_edge_length_m):
+            return True
+    return False
+
+
+def _short_edge_filtered_adj_list(
+    adj_list: Sequence[Sequence[int]],
+    *,
+    lengths: np.ndarray,
+    min_edge_length_m: float,
+    src_idx: int,
+    dst_idx: int,
+) -> list[list[int]]:
+    if float(min_edge_length_m) <= 0.0:
+        return [[int(v) for v in neighbors] for neighbors in adj_list]
+    n = len(adj_list)
+    blocked = np.zeros((n,), dtype=bool)
+    n_lengths = min(n, int(lengths.shape[0]))
+    blocked[:n_lengths] = np.asarray(lengths[:n_lengths], dtype=np.float32) < float(min_edge_length_m)
+    if 0 <= int(src_idx) < n:
+        blocked[int(src_idx)] = False
+    if 0 <= int(dst_idx) < n:
+        blocked[int(dst_idx)] = False
+    return [
+        [int(v) for v in neighbors if 0 <= int(v) < n and not bool(blocked[int(v)])]
+        for neighbors in adj_list
+    ]
+
+
+def _repair_short_edge_routes(
+    *,
+    df: pd.DataFrame,
+    network_folder: str,
+    network_name: str,
+    origins: Sequence[str],
+    destinations: Sequence[str],
+    n_routes: int,
+    min_edge_length_m: float,
+    od_pairs: Optional[Sequence[tuple[int, int]]] = None,
+    penalty_factor: float = 3.0,
+) -> tuple[pd.DataFrame, Dict[str, int]]:
+    stats = {
+        "short_edge_routes_seen": 0,
+        "short_edge_routes_repaired": 0,
+        "short_edge_routes_dropped": 0,
+        "short_edge_routes_padded": 0,
+        "short_edge_od_pairs_unresolved": 0,
+        "short_edge_routes_missing": 0,
+    }
+    if float(min_edge_length_m) <= 0.0:
+        return df, stats
+
+    edge_registry = build_edge_registry(network_folder, network_name)
+    if edge_registry.lengths is None:
+        return df, stats
+    adj_list = RouteRegistry._build_vehicle_adj_list(
+        edge_registry.adjacency,
+        getattr(edge_registry, "passenger_allowed", None),
+    )
+    base_weights = edge_registry.lengths / np.maximum(edge_registry.speed_limits, 0.1)
+    edge_to_idx = edge_registry._edge_to_idx
+    edge_ids = edge_registry.edge_ids
+    lengths = np.asarray(edge_registry.lengths, dtype=np.float32)
+
+    rows: list[Dict[str, Any]] = []
+    grouped = {
+        (int(oi), int(di)): group
+        for (oi, di), group in df.groupby(["origins", "destinations"], sort=True)
+    }
+    target_od_pairs = (
+        [(int(oi), int(di)) for oi, di in od_pairs]
+        if od_pairs is not None
+        else sorted(grouped)
+    )
+    unresolved_od_pairs: list[tuple[int, int]] = []
+
+    for oi, di in target_od_pairs:
+        group = grouped.get((int(oi), int(di)))
+        original_rows = [] if group is None else [dict(row) for row in group.to_dict("records")]
+        safe_paths: list[list[int]] = []
+
+        for row in original_rows:
+            path_edges = [edge for edge in str(row.get("path", "")).split() if edge in edge_to_idx]
+            if not path_edges:
+                continue
+            path_indices = [int(edge_to_idx[edge]) for edge in path_edges]
+            if _route_has_short_intermediate_edge(
+                path_indices,
+                lengths=lengths,
+                min_edge_length_m=min_edge_length_m,
+            ):
+                stats["short_edge_routes_seen"] += 1
+            else:
+                safe_paths.append(path_indices)
+
+        routes_for_od: list[list[int]] = []
+        seen: set[tuple[int, ...]] = set()
+        for path in safe_paths:
+            key = tuple(int(idx) for idx in path)
+            if key in seen:
+                continue
+            routes_for_od.append([int(idx) for idx in path])
+            seen.add(key)
+            if len(routes_for_od) >= int(n_routes):
+                break
+
+        origin = origins[oi] if 0 <= oi < len(origins) else ""
+        dest = destinations[di] if 0 <= di < len(destinations) else ""
+        if origin in edge_to_idx and dest in edge_to_idx and len(routes_for_od) < int(n_routes):
+            src_idx = int(edge_to_idx[origin])
+            dst_idx = int(edge_to_idx[dest])
+            filtered_adj_list = _short_edge_filtered_adj_list(
+                adj_list,
+                lengths=lengths,
+                min_edge_length_m=min_edge_length_m,
+                src_idx=src_idx,
+                dst_idx=dst_idx,
+            )
+            weights = base_weights.copy()
+            for path in routes_for_od:
+                for idx in path:
+                    weights[int(idx)] *= float(penalty_factor)
+            tries = 0
+            max_tries = max(int(n_routes) * 4, 8)
+            while len(routes_for_od) < int(n_routes) and tries < max_tries:
+                path = RouteRegistry._dijkstra(filtered_adj_list, weights, src_idx, dst_idx)
+                tries += 1
+                if path is None:
+                    break
+                path_indices = [int(idx) for idx in path]
+                if _route_has_short_intermediate_edge(
+                    path_indices,
+                    lengths=lengths,
+                    min_edge_length_m=min_edge_length_m,
+                ):
+                    break
+                key = tuple(path_indices)
+                for idx in path_indices:
+                    weights[int(idx)] *= float(penalty_factor)
+                if key in seen:
+                    continue
+                routes_for_od.append(path_indices)
+                seen.add(key)
+
+        if len(routes_for_od) > len(safe_paths):
+            stats["short_edge_routes_repaired"] += int(len(routes_for_od) - len(safe_paths))
+
+        while len(routes_for_od) < int(n_routes):
+            if not routes_for_od:
+                break
+            routes_for_od.append(list(routes_for_od[0]))
+            stats["short_edge_routes_padded"] += 1
+
+        if len(routes_for_od) < int(n_routes):
+            unresolved_od_pairs.append((int(oi), int(di)))
+            stats["short_edge_od_pairs_unresolved"] += 1
+            stats["short_edge_routes_missing"] += int(n_routes) - len(routes_for_od)
+        stats["short_edge_routes_dropped"] += max(0, len(original_rows) - len(routes_for_od))
+
+        for route_indices in routes_for_od[: int(n_routes)]:
+            route_edge_ids = [edge_ids[int(i)] for i in route_indices]
+            fft = float(sum(float(base_weights[int(i)]) for i in route_indices) / 60.0)
+            rows.append({
+                "origins": oi,
+                "destinations": di,
+                "path": " ".join(route_edge_ids),
+                "free_flow_time": fft,
+            })
+
+    if unresolved_od_pairs:
+        sample = ", ".join(f"{oi}->{di}" for oi, di in unresolved_od_pairs[:10])
+        raise RuntimeError(
+            "No "
+            f"{float(min_edge_length_m):g}m-safe static routes for "
+            f"{len(unresolved_od_pairs)} OD pair(s); sample={sample}. "
+            "The static RouteRL artifact would otherwise reuse below-threshold "
+            "intermediate edges."
+        )
+
+    repaired = pd.DataFrame(rows, columns=["origins", "destinations", "path", "free_flow_time"])
+    if not repaired.empty:
+        repaired.sort_values(by=["origins", "destinations"], inplace=True)
+    return repaired, stats
+
+
+def _repair_cached_routes_if_needed(
+    *,
+    df: pd.DataFrame,
+    records_folder: str,
+    routes_csv: str,
+    routes_xml: str,
+    generator: str,
+    network_folder: str,
+    network_name: str,
+    origins: Sequence[str],
+    destinations: Sequence[str],
+    n_routes: int,
+    od_pairs: Optional[Sequence[tuple[int, int]]],
+    min_edge_length_m: float,
+) -> pd.DataFrame:
+    if float(min_edge_length_m) <= 0.0:
+        return df
+    repaired_df, repair_stats = _repair_short_edge_routes(
+        df=df,
+        network_folder=network_folder,
+        network_name=network_name,
+        origins=origins,
+        destinations=destinations,
+        n_routes=n_routes,
+        od_pairs=od_pairs,
+        min_edge_length_m=min_edge_length_m,
+    )
+    repaired_df.to_csv(routes_csv, index=False)
+    od_pairs_for_xml = od_pairs or [
+        (oi, di) for oi in range(len(origins)) for di in range(len(destinations))
+    ]
+    _write_routes_xml(routes_xml=routes_xml, routes_df=repaired_df, od_pairs=od_pairs_for_xml)
+    _write_routes_meta(
+        records_folder,
+        generator=generator,
+        network_name=network_name,
+        n_routes=n_routes,
+        n_origins=len(origins),
+        n_destinations=len(destinations),
+        od_pairs=od_pairs,
+        extra={
+            "hard_min_edge_length_m": float(min_edge_length_m),
+            **repair_stats,
+        },
+    )
+    return repaired_df
 
 
 def generate_dijkstra_routes(
@@ -185,7 +472,20 @@ def generate_dijkstra_routes(
         expected_od_pairs=od_pairs,
     )
     if cached_df is not None:
-        return cached_df
+        return _repair_cached_routes_if_needed(
+            df=cached_df,
+            records_folder=records_folder,
+            routes_csv=routes_csv,
+            routes_xml=routes_xml,
+            generator="dijkstra_passenger",
+            network_folder=network_folder,
+            network_name=network_name,
+            origins=origins,
+            destinations=destinations,
+            n_routes=n_routes,
+            od_pairs=od_pairs,
+            min_edge_length_m=_static_route_hard_min_edge_length_m(),
+        )
 
     adj_list = RouteRegistry._build_vehicle_adj_list(
         edge_registry.adjacency,
@@ -247,19 +547,21 @@ def generate_dijkstra_routes(
     if not df.empty:
         df.sort_values(by=["origins", "destinations"], inplace=True)
 
+    min_edge_length_m = _static_route_hard_min_edge_length_m()
+    repair_stats: Dict[str, int] = {}
+    if min_edge_length_m > 0.0:
+        df, repair_stats = _repair_short_edge_routes(
+            df=df,
+            network_folder=network_folder,
+            network_name=network_name,
+            origins=origins,
+            destinations=destinations,
+            n_routes=n_routes,
+            od_pairs=od_pairs,
+            min_edge_length_m=min_edge_length_m,
+        )
     df.to_csv(routes_csv, index=False)
-
-    with open(routes_xml, "w", encoding="utf-8") as f:
-        f.write("<routes>\n")
-        f.write('<vType id="Human" color="red" guiShape="passenger/sedan"/>\n')
-        f.write('<vType id="AV" color="yellow"/>\n')
-        for oi, di in od_pairs:
-            paths = df[(df["origins"] == oi) & (df["destinations"] == di)]["path"].values
-            for idx, path in enumerate(paths):
-                f.write(f'<route id="{oi}_{di}_{idx}" edges="\n')
-                f.write(path + "\n")
-                f.write('" />\n')
-        f.write("</routes>\n")
+    _write_routes_xml(routes_xml=routes_xml, routes_df=df, od_pairs=od_pairs)
     _write_routes_meta(
         records_folder,
         generator="dijkstra_passenger",
@@ -268,6 +570,10 @@ def generate_dijkstra_routes(
         n_origins=len(origins),
         n_destinations=len(destinations),
         od_pairs=od_pairs,
+        extra={
+            "hard_min_edge_length_m": float(min_edge_length_m),
+            **repair_stats,
+        } if min_edge_length_m > 0.0 else None,
     )
     return df
 
@@ -306,7 +612,20 @@ def generate_routerl_routes(
         expected_od_pairs=demand_od_pairs or None,
     )
     if cached_df is not None:
-        return cached_df
+        return _repair_cached_routes_if_needed(
+            df=cached_df,
+            records_folder=records_folder,
+            routes_csv=routes_csv,
+            routes_xml=routes_xml,
+            generator="routerl",
+            network_folder=network_folder,
+            network_name=network_name,
+            origins=origins,
+            destinations=destinations,
+            n_routes=n_routes,
+            od_pairs=demand_od_pairs or None,
+            min_edge_length_m=_routerl_hard_min_edge_length_m(),
+        )
 
     try:
         from routerl import TrafficEnvironment
@@ -354,6 +673,24 @@ def generate_routerl_routes(
                 pass
     if not os.path.exists(routes_xml):
         raise FileNotFoundError(f"RouteRL did not produce route.rou.xml at {routes_xml}")
+    min_edge_length_m = _routerl_hard_min_edge_length_m()
+    repair_stats: Dict[str, int] = {}
+    if min_edge_length_m > 0.0:
+        df, repair_stats = _repair_short_edge_routes(
+            df=df,
+            network_folder=network_folder,
+            network_name=network_name,
+            origins=origins,
+            destinations=destinations,
+            n_routes=n_routes,
+            od_pairs=demand_od_pairs or None,
+            min_edge_length_m=min_edge_length_m,
+        )
+        df.to_csv(routes_csv, index=False)
+        od_pairs_for_xml = demand_od_pairs or [
+            (oi, di) for oi in range(len(origins)) for di in range(len(destinations))
+        ]
+        _write_routes_xml(routes_xml=routes_xml, routes_df=df, od_pairs=od_pairs_for_xml)
     _write_routes_meta(
         records_folder,
         generator="routerl",
@@ -362,6 +699,10 @@ def generate_routerl_routes(
         n_origins=len(origins),
         n_destinations=len(destinations),
         od_pairs=demand_od_pairs or None,
+        extra={
+            "hard_min_edge_length_m": float(min_edge_length_m),
+            **repair_stats,
+        } if min_edge_length_m > 0.0 else None,
     )
     return df
 
