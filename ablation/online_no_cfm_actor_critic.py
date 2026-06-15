@@ -837,6 +837,18 @@ class OnlineNoCfmCollector(DataCollector):
             return False
         return True
 
+    def _should_apply_routerl_hdv_learning(
+        self,
+        desc: str,
+        veh_travel_times: Dict[str, float],
+    ) -> bool:
+        if not self._should_update_hdv_after_episode(desc):
+            return False
+        total_agents = int(getattr(self, "_num_agents", 0) or 0)
+        if total_agents <= 0:
+            return bool(veh_travel_times)
+        return len(veh_travel_times) >= total_agents
+
     def _wm_current_edge_tt(self, z_obs: torch.Tensor, edge_cost_source: Optional[str] = None) -> Optional[np.ndarray]:
         try:
             _edge_dyn, _v_e, _free_flow, edge_tt = edge_tt_from_latent_state(
@@ -1398,7 +1410,11 @@ class OnlineNoCfmCollector(DataCollector):
             if self.connector.is_done() or (len(state.get("vehicles", {})) == 0 and current_tick > 10):
                 break
 
-        if self._use_routerl_hdv_blackbox and hasattr(self.connector, "apply_routerl_hdv_learning"):
+        if (
+            self._use_routerl_hdv_blackbox
+            and hasattr(self.connector, "apply_routerl_hdv_learning")
+            and self._should_apply_routerl_hdv_learning("train", veh_travel_times)
+        ):
             self.connector.apply_routerl_hdv_learning(veh_travel_times)
 
         episode_reward = float(np.mean(ep_rewards)) if ep_rewards else 0.0

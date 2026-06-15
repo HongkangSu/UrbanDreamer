@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT))
 
 from ablation.online_no_cfm_actor_critic import (  # noqa: E402
     OnlineDecisionSample,
+    OnlineNoCfmCollector,
     OnlineNoCfmConfig,
     build_eval_command,
     build_gretz_ablation_plan,
@@ -97,6 +98,20 @@ def test_gretz_ablation_plan_exposes_capped_step_cost_reward(tmp_path):
     assert plan["reward_semantics"]["mode"] == "capped_step_cost"
     assert plan["reward_semantics"]["temperature"] == 60.0
     assert plan["training"]["return_horizon_steps"] == 0
+
+
+def test_routerl_hdv_learning_gate_requires_complete_episode():
+    collector = object.__new__(OnlineNoCfmCollector)
+    collector._hdv_route_probs = {"od": [1.0]}
+    collector._route_registry = {"routes": []}
+    collector._cfg = OnlineNoCfmConfig(disable_human_learning_after_mutation=False)
+    collector._num_agents = 3
+
+    assert collector._should_apply_routerl_hdv_learning("train", {"0": 1.0, "1": 2.0}) is False
+    assert collector._should_apply_routerl_hdv_learning("train", {"0": 1.0, "1": 2.0, "2": 3.0}) is True
+
+    collector._cfg = OnlineNoCfmConfig(disable_human_learning_after_mutation=True)
+    assert collector._should_apply_routerl_hdv_learning("train", {"0": 1.0, "1": 2.0, "2": 3.0}) is False
 
 
 def test_progress_fraction_reward_matches_offline_semantics():

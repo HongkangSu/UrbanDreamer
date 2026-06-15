@@ -692,7 +692,11 @@ class OnlineWmDreamerCollector(OnlineNoCfmCollector):
             if self.connector.is_done() or (len(state.get("vehicles", {})) == 0 and current_tick > 10):
                 break
 
-        if self._use_routerl_hdv_blackbox and hasattr(self.connector, "apply_routerl_hdv_learning"):
+        if (
+            self._use_routerl_hdv_blackbox
+            and hasattr(self.connector, "apply_routerl_hdv_learning")
+            and self._should_apply_routerl_hdv_learning("train", veh_travel_times)
+        ):
             self.connector.apply_routerl_hdv_learning(veh_travel_times)
 
         episode_reward = float(np.mean(ep_rewards)) if ep_rewards else 0.0
