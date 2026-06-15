@@ -88,6 +88,11 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--sim-buffer-after-last-depart", type=int, default=None)
     parser.add_argument("--max-steps-per-episode", type=int, default=None)
     parser.add_argument("--eval-python", default=sys.executable)
+    parser.add_argument(
+        "--sumo-extra-args",
+        default=None,
+        help="Extra SUMO arguments used during online training and appended to eval_sumo.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--skip-eval", action="store_true")
     parser.add_argument("--allow-missing", action="store_true")
@@ -137,6 +142,8 @@ def build_config(args: argparse.Namespace) -> OnlineWmDreamerConfig:
         "eval_python": str(args.eval_python),
         "extra_eval_args": tuple(passthrough),
     }
+    if args.sumo_extra_args is not None:
+        overrides["sumo_extra_args"] = str(args.sumo_extra_args)
     if args.episode_steps is not None:
         overrides["episode_steps"] = int(args.episode_steps)
     if args.sim_buffer_after_last_depart is not None:

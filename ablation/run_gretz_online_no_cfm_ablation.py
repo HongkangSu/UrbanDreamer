@@ -86,6 +86,11 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         help="Future real vehicle decisions included in online returns; <=0 uses the full remaining vehicle trajectory.",
     )
     parser.add_argument("--eval-python", default=sys.executable)
+    parser.add_argument(
+        "--sumo-extra-args",
+        default=None,
+        help="Extra SUMO arguments used during online training and appended to eval_sumo.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print resolved plan and exit.")
     parser.add_argument("--skip-eval", action="store_true", help="Train and save checkpoints, but do not run eval_sumo.")
     parser.add_argument(
@@ -132,6 +137,8 @@ def build_config(args: argparse.Namespace) -> OnlineNoCfmConfig:
         "eval_python": str(args.eval_python),
         "extra_eval_args": tuple(passthrough),
     }
+    if args.sumo_extra_args is not None:
+        overrides["sumo_extra_args"] = str(args.sumo_extra_args)
     if args.output_dir:
         overrides["output_dir"] = str(args.output_dir)
     if args.settings:

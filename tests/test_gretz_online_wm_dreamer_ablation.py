@@ -244,6 +244,8 @@ def test_online_wm_runner_dry_run_allows_missing(tmp_path):
             "5",
             "--sim-buffer-after-last-depart",
             "7200",
+            "--sumo-extra-args",
+            "--collision.action warn",
             "--imag-horizon",
             "8",
             "--dry-run",
@@ -259,5 +261,6 @@ def test_online_wm_runner_dry_run_allows_missing(tmp_path):
     assert cfg.wm_replay_require_completion is True
     assert cfg.wm_replay_completion_threshold == 1.0
     assert cfg.sim_buffer_after_last_depart == 7200
+    assert cfg.sumo_extra_args == "--collision.action warn"
     assert cfg.imag_horizon == 8
     assert cfg.reward_mode == "capped_step_cost"

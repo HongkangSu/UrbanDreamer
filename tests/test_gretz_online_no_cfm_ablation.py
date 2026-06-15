@@ -385,6 +385,30 @@ def test_eval_command_forces_no_rerank_and_policy_only(tmp_path):
     assert "--policy_ckpt" in cmd
 
 
+def test_no_cfm_runner_dry_run_accepts_sumo_extra_args(tmp_path):
+    from ablation.run_gretz_online_no_cfm_ablation import build_config, parse_args
+
+    args = parse_args(
+        [
+            "--output-dir",
+            str(tmp_path),
+            "--train-episodes",
+            "25",
+            "--checkpoint-episodes",
+            "25",
+            "--sumo-extra-args",
+            "--collision.action warn",
+            "--dry-run",
+            "--allow-missing",
+        ]
+    )
+    cfg = build_config(args)
+
+    assert cfg.train_episodes == 25
+    assert cfg.checkpoint_episodes == (25,)
+    assert cfg.sumo_extra_args == "--collision.action warn"
+
+
 def test_training_module_static_guard_has_no_forbidden_cfm_calls():
     text = (ROOT / "ablation" / "online_no_cfm_actor_critic.py").read_text(encoding="utf-8")
     forbidden = [
