@@ -280,6 +280,7 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
     py = args.python_bin
     n_av, n_hdv = derive_agent_counts(paths["agents_csv"], args.ratio_machines, args.n_av, args.n_hdv)
     effective_route_artifacts_dir = _effective_route_artifacts_dir(args, paths)
+    collect_hdv_final_state = Path(paths["collect_records_dir"]) / "hdv_learning_state_final.json"
 
     collect_settings = paths["generated_config_dir"] / "urb_fair_collect.env"
     dynamics_settings = paths["generated_config_dir"] / "urb_fair_dynamics.env"
@@ -493,6 +494,8 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
         str(args.marl_route_cost_reward_weight),
         "--dreamer_route_cost_reward_scope",
         str(args.marl_route_cost_reward_scope),
+        "--dreamer_route_cost_reward_mode",
+        str(args.marl_route_cost_reward_mode),
         "--dreamer_route_cost_reward_state",
         str(args.marl_route_cost_reward_state),
         "--dreamer_grpo_route_cost_weight",
@@ -522,7 +525,7 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
         "--dreamer_hdv_background_mode",
         str(args.marl_hdv_background_mode),
         "--dreamer_hdv_background_state",
-        str(effective_route_artifacts_dir / "hdv_learning_state_final.json"),
+        str(collect_hdv_final_state),
         "--dreamer_hdv_background_weight",
         str(args.marl_hdv_background_weight),
         "--dreamer_hdv_background_combine",
@@ -698,6 +701,8 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
                 _eval_candidate_source(args),
             ]
         )
+        if int(args.eval_max_steps_per_episode) > 0:
+            eval_commands[-1].extend(["--max_steps_per_episode", str(args.eval_max_steps_per_episode)])
         if str(args.eval_sumo_time_to_teleport or "").strip():
             eval_commands[-1].extend(["--sumo_time_to_teleport", str(args.eval_sumo_time_to_teleport)])
         if str(args.eval_sumo_extra_args or "").strip():
@@ -1063,6 +1068,11 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--marl-actor-lr-final-scale", type=float, default=1.0, help=hidden)
     p.add_argument("--marl-route-cost-reward-weight", type=float, default=1.0, help=hidden)
     p.add_argument("--marl-route-cost-reward-scope", choices=["both", "actor", "global", "vehicle", "vehicle_critic", "per_vehicle"], default="vehicle_critic", help=hidden)
+    p.add_argument("--marl-route-cost-reward-mode", choices=[
+        "progress_fraction", "step_progress", "trip_progress_fraction",
+        "capped_step_cost", "capped_cost", "step_cost", "min_step_remaining",
+        "route_tt", "remaining_tt", "full_path", "legacy",
+    ], default="progress_fraction", help=hidden)
     p.add_argument("--marl-route-cost-reward-state", choices=["post", "next", "current", "pre"], default="current", help=hidden)
     p.add_argument("--marl-remaining-time-progress-weight", type=float, default=0.0, help=hidden)
     p.add_argument("--marl-expected-cost-weight", type=float, default=0.0, help=hidden)
@@ -1122,6 +1132,7 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--marl-vehicle-obs-include-fleet-pressure", action="store_true", help=hidden)
     p.add_argument("--checkpoint-episodes", default=os.environ.get("CHECKPOINT_EPISODES", "100"), help=hidden)
     p.add_argument("--eval-test-eps", type=int, default=3, help=hidden)
+    p.add_argument("--eval-max-steps-per-episode", type=int, default=0, help=hidden)
     p.add_argument("--eval-sumo-time-to-teleport", default="", help=hidden)
     p.add_argument("--eval-sumo-extra-args", default="", help=hidden)
     p.add_argument("--eval-av-route-cost-policy", choices=["none", "freeflow_greedy", "wm_current_bpr", "live_current_tt", "wm_live_blend"], default="none", help=hidden)

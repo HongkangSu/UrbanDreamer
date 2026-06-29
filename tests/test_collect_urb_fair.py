@@ -25,6 +25,8 @@ from scripts.collect_urb_fair import (  # noqa: E402
 import dreamer4.urban_routing.data_collector as data_collector_module  # noqa: E402
 from dreamer4.urban_routing.data_collector import DataCollector  # noqa: E402
 from dreamer4.urban_routing.data_collector import _copy_agents_csv_to_records  # noqa: E402
+from dreamer4.urban_routing.routerl_connector import RouteRLConnector  # noqa: E402
+import dreamer4.urban_routing.routerl_connector as routerl_connector_module  # noqa: E402
 
 
 def _write_settings(tmp_path, records_dir):
@@ -229,6 +231,49 @@ def test_data_collector_seeds_departures_and_deduplicates_arrivals(monkeypatch):
 
     assert collector._last_ep_travel_times == [30.0, 60.0]
     assert veh_travel_times == {"1": 30.0, "2": 60.0}
+
+
+def test_routerl_bulk_advance_stops_when_sumo_has_no_expected_vehicles(monkeypatch):
+    class _FakeSimulation:
+        def __init__(self):
+            self.step = 0
+
+        def simulationStep(self):
+            self.step += 1
+
+        def getTime(self):
+            return float(self.step)
+
+        def getArrivedIDList(self):
+            return ["veh0"] if self.step == 2 else []
+
+        def getMinExpectedNumber(self):
+            return 0 if self.step >= 2 else 1
+
+    fake_sim = _FakeSimulation()
+    fake_traci = type(
+        "FakeTraci",
+        (),
+        {
+            "simulationStep": fake_sim.simulationStep,
+            "simulation": fake_sim,
+        },
+    )()
+    monkeypatch.setattr(routerl_connector_module, "TRACI_AVAILABLE", True)
+    monkeypatch.setattr(routerl_connector_module, "traci", fake_traci)
+
+    connector = RouteRLConnector.__new__(RouteRLConnector)
+    connector.seed = 42
+    connector.current_step = 0
+    connector.env = type("FakeEnv", (), {"simulator": None})()
+    connector._started = False
+    connector._apply_incident_for_current_time = lambda: None
+
+    arrivals = connector.advance_steps(9000)
+
+    assert fake_sim.step == 2
+    assert connector.current_step == 2
+    assert arrivals == [("veh0", 2.0)]
 
 
 def test_planned_av_edge_flow_encodes_future_route_pressure_not_current_occupancy():

@@ -156,7 +156,13 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
 
     @classmethod
     def from_settings(cls, settings_path: str, **overrides: Any) -> "OnlineWmDreamerConfig":
-        base = OnlineNoCfmConfig.from_settings(settings_path, **overrides)
+        no_cfm_fields = set(asdict(OnlineNoCfmConfig()).keys())
+        base_overrides = {
+            key: value
+            for key, value in overrides.items()
+            if key in no_cfm_fields and value is not None
+        }
+        base = OnlineNoCfmConfig.from_settings(settings_path, **base_overrides)
         values = asdict(base)
         own_defaults = asdict(cls())
         for key in (

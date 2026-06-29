@@ -1,0 +1,902 @@
+{
+  "title": "Toy Cross-Bottleneck Dynamic Case Study",
+  "primary_metric": "t_all_mean",
+  "dynamic_eval_only": true,
+  "online_baseline": {
+    "name": "pure_online_ac_ep400_dynamic_hdvlearn",
+    "family": "pure_online",
+    "summary_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck/online_ac_ep400_dynamic_hdvlearn_eval_20260629/summary.json",
+    "decision_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck/online_ac_ep400_dynamic_hdvlearn_eval_20260629/dynamic_agent_decisions.csv",
+    "config_path": "",
+    "policy_ckpt": "results/toy_cross_bottleneck/online_ac_dynamic_game_v2_fixedroles_hdvlearn_400ep_urb_matched/checkpoints/checkpoint_ep00400.pt",
+    "test_eps": 5,
+    "ratio_machines": 0.4,
+    "dynamic_routing": true,
+    "human_learning_after_mutation": true,
+    "av_candidate_source": "current_shortest_freeflow",
+    "route_generator": "dijkstra",
+    "post_mutation_state_in": "results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/collect_urb_fair_eval_postmutation_records/post_mutation_state.json",
+    "hdv_state_in": "results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/collect_urb_fair_eval_postmutation_records/post_mutation_hdv_learning_state.json",
+    "t_all_mean": 7.455322916666667,
+    "t_CAV_mean": 7.107890624999999,
+    "t_HDV_mean": 7.686944444444444,
+    "completion_rate_mean": 1.0,
+    "route_counts": {
+      "route0": 3204,
+      "route1": 2673,
+      "route2": 2171,
+      "route3": 2257
+    },
+    "mean_route_probs": {
+      "route0": 0.30845415937673126,
+      "route1": 0.2592429146109987,
+      "route2": 0.21067514011946237,
+      "route3": 0.2216277858928084
+    },
+    "diagnostics": {
+      "n_decisions": 10305,
+      "selected_route_counts": {
+        "route0": 3204,
+        "route1": 2673,
+        "route2": 2171,
+        "route3": 2257
+      },
+      "live_best_route_counts": {
+        "route0": 0,
+        "route1": 0,
+        "route2": 0,
+        "route3": 0
+      },
+      "wm_best_route_counts": {},
+      "mean_route_probs": {
+        "route0": 0.30845415937673126,
+        "route1": 0.2592429146109987,
+        "route2": 0.21067514011946237,
+        "route3": 0.2216277858928084
+      },
+      "entropy": 1.149855826657062,
+      "lnK_minus_entropy": 0.2364385344628286,
+      "prob_margin_mean": 0.17468047560723363,
+      "selected_live_match": NaN,
+      "selected_wm_match": NaN,
+      "wm_live_match": NaN,
+      "live_regret_mean": 10.641730424861548,
+      "live_best_gap_mean": 5.919349773319991,
+      "wm_best_gap_mean": NaN,
+      "candidate_unique_mean": NaN,
+      "route0_eq_route3_frac": NaN
+    },
+    "note": "pure SUMO online AC; dynamic eval only, fixed roles, HDV learning enabled"
+  },
+  "best_setting_matched_wm_dynamic": {
+    "name": "online_wm_hdvlearn_ep100_manual_5ep_dynamic",
+    "family": "online_wm",
+    "summary_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck/online_wm_case_study_hdvlearn_dynamic_400ep_20260629/manual_eval_ep00100_5ep/collector_eval_summary.json",
+    "decision_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck/online_wm_case_study_hdvlearn_dynamic_400ep_20260629/manual_eval_ep00100_5ep/dynamic_av_agent_decisions.csv",
+    "config_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck/online_wm_case_study_hdvlearn_dynamic_400ep_20260629/online_wm_dreamer_config.json",
+    "policy_ckpt": "results/toy_cross_bottleneck/online_wm_case_study_hdvlearn_dynamic_400ep_20260629/checkpoints/checkpoint_ep00100.pt",
+    "test_eps": 5,
+    "ratio_machines": 0.4,
+    "dynamic_routing": true,
+    "human_learning_after_mutation": true,
+    "av_candidate_source": "current_shortest_freeflow",
+    "route_generator": "dijkstra",
+    "post_mutation_state_in": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/collect_urb_fair_eval_postmutation_records/post_mutation_state.json",
+    "hdv_state_in": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/collect_urb_fair_eval_postmutation_records/post_mutation_hdv_learning_state.json",
+    "t_all_mean": 7.508677083333334,
+    "t_CAV_mean": 7.7425,
+    "t_HDV_mean": 7.352795138888888,
+    "completion_rate_mean": 1.0,
+    "route_counts": {
+      "route0": 3238,
+      "route1": 2799,
+      "route2": 3181,
+      "route3": 3057
+    },
+    "mean_route_probs": {
+      "route0": 0.27308581620454786,
+      "route1": 0.19221899077296256,
+      "route2": 0.2605952228109042,
+      "route3": 0.27409997875491776
+    },
+    "diagnostics": {
+      "n_decisions": 12275,
+      "selected_route_counts": {
+        "route0": 3238,
+        "route1": 2799,
+        "route2": 3181,
+        "route3": 3057
+      },
+      "live_best_route_counts": {
+        "route0": 9860,
+        "route1": 715,
+        "route2": 1700,
+        "route3": 0
+      },
+      "wm_best_route_counts": {
+        "route0": 10532,
+        "route1": 1388,
+        "route2": 355,
+        "route3": 0
+      },
+      "mean_route_probs": {
+        "route0": 0.275032617123615,
+        "route1": 0.1857621339514303,
+        "route2": 0.2632561393852902,
+        "route3": 0.275949109539661
+      },
+      "entropy": 1.2936744912211948,
+      "lnK_minus_entropy": 0.09261986989869575,
+      "prob_margin_mean": 0.012309402092136764,
+      "selected_live_match": 0.2695723014256619,
+      "selected_wm_match": 0.36969450101832996,
+      "wm_live_match": 0.8032586558044806,
+      "live_regret_mean": 10.786519470214843,
+      "live_best_gap_mean": 9.499461630764902,
+      "wm_best_gap_mean": 8.28857134413088,
+      "candidate_unique_mean": 1.8197963340122199,
+      "route0_eq_route3_frac": 1.0
+    },
+    "note": "online+WM corrected mainline ep100 manual 5ep eval; dynamic, fixed roles, HDV learning enabled"
+  },
+  "best_setting_matched_wm_delta_vs_online": 0.053354166666666814,
+  "setting_matched_wm_beats_online": false,
+  "best_wm_dynamic": {
+    "name": "wm_marl_mainline_ep400_dynamic",
+    "family": "wm_marl",
+    "summary_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/eval_urb_fair_mainline_sweep/checkpoint_ep00400/collector_eval_summary.json",
+    "decision_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/eval_urb_fair_mainline_sweep/checkpoint_ep00400/dynamic_av_agent_decisions.csv",
+    "config_path": "",
+    "policy_ckpt": "/home/wangwenrui/shk/UrbanDreamer/logs/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/marl_urb_fair_mainline_500ep/checkpoint_ep00400.pt",
+    "test_eps": 3,
+    "ratio_machines": 0.4,
+    "dynamic_routing": true,
+    "human_learning_after_mutation": null,
+    "av_candidate_source": "current_shortest_freeflow",
+    "route_generator": "",
+    "post_mutation_state_in": "",
+    "hdv_state_in": "",
+    "t_all_mean": 7.445260416666667,
+    "t_CAV_mean": 8.473307291666666,
+    "t_HDV_mean": 6.759895833333334,
+    "completion_rate_mean": 1.0,
+    "route_counts": {
+      "route0": 6861,
+      "route1": 927,
+      "route2": 225,
+      "route3": 0
+    },
+    "mean_route_probs": {
+      "route0": 0.2568696481486162,
+      "route1": 0.2271429049472014,
+      "route2": 0.25911779776215554,
+      "route3": 0.2568696481486162
+    },
+    "diagnostics": {
+      "n_decisions": 8013,
+      "selected_route_counts": {
+        "route0": 6861,
+        "route1": 927,
+        "route2": 225,
+        "route3": 0
+      },
+      "live_best_route_counts": {
+        "route0": 6408,
+        "route1": 249,
+        "route2": 1356,
+        "route3": 0
+      },
+      "wm_best_route_counts": {
+        "route0": 6906,
+        "route1": 954,
+        "route2": 153,
+        "route3": 0
+      },
+      "mean_route_probs": {
+        "route0": 0.25867786185098685,
+        "route1": 0.22383953005205107,
+        "route2": 0.25880474624597327,
+        "route3": 0.25867786185098685
+      },
+      "entropy": 1.3755719723453232,
+      "lnK_minus_entropy": 0.010722388774567326,
+      "prob_margin_mean": 0.0042396266261871375,
+      "selected_live_match": 0.8244103332085362,
+      "selected_wm_match": 0.9580681392736803,
+      "wm_live_match": 0.8206664170722576,
+      "live_regret_mean": 11.433248062162352,
+      "live_best_gap_mean": 5.7149285559616745,
+      "wm_best_gap_mean": 19.08695426321083,
+      "candidate_unique_mean": 1.724447772369899,
+      "route0_eq_route3_frac": 1.0
+    },
+    "note": "WM/MARL mainline checkpoint; not the pure online baseline"
+  },
+  "best_wm_delta_vs_online": -0.010062500000000085,
+  "wm_beats_online": true,
+  "dynamic_game_ablation": {
+    "summary_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck/online_ac_dynamic_game_v2_fixedroles_ep400_eval_with_offline_postmutation_hdv/summary.json",
+    "eval_episodes": 5,
+    "hdv_updates_disabled": true,
+    "dynamic": {
+      "episodes": 5.0,
+      "complete_episodes": 5.0,
+      "t_all_mean": 7.364635416666667,
+      "t_all_std": 0.06598952167189968,
+      "t_CAV_mean": 7.448645833333333,
+      "t_CAV_std": 0.10299123927185981,
+      "t_HDV_mean": 7.308628472222222,
+      "t_HDV_std": 0.07481026669573093,
+      "reward_mean_mean": -0.4888509597151899,
+      "reward_mean_std": 0.0003952387697875702,
+      "samples_mean": 2268.6,
+      "samples_std": 76.68793907779762,
+      "completion_rate_mean": 1.0,
+      "completion_rate_std": 0.0
+    },
+    "first_decision_only": {
+      "episodes": 5.0,
+      "complete_episodes": 5.0,
+      "t_all_mean": 7.508989583333333,
+      "t_all_std": 0.11743668229713564,
+      "t_CAV_mean": 7.689609374999999,
+      "t_CAV_std": 0.21951239601224862,
+      "t_HDV_mean": 7.388576388888889,
+      "t_HDV_std": 0.11637090227880721,
+      "reward_mean_mean": -0.4899515497007242,
+      "reward_mean_std": 0.0003263668075441751,
+      "samples_mean": 2322.6,
+      "samples_std": 45.59210457963089,
+      "completion_rate_mean": 1.0,
+      "completion_rate_std": 0.0
+    },
+    "delta_minutes": {
+      "t_all_dynamic_minus_first_only": -0.14435416666666612,
+      "t_CAV_dynamic_minus_first_only": -0.240963541666666,
+      "t_HDV_dynamic_minus_first_only": -0.07994791666666679
+    }
+  },
+  "dynamic_policy_comparison": [
+    {
+      "name": "pure_online_ac_ep400_dynamic_hdvlearn",
+      "family": "pure_online",
+      "summary_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck/online_ac_ep400_dynamic_hdvlearn_eval_20260629/summary.json",
+      "decision_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck/online_ac_ep400_dynamic_hdvlearn_eval_20260629/dynamic_agent_decisions.csv",
+      "config_path": "",
+      "policy_ckpt": "results/toy_cross_bottleneck/online_ac_dynamic_game_v2_fixedroles_hdvlearn_400ep_urb_matched/checkpoints/checkpoint_ep00400.pt",
+      "test_eps": 5,
+      "ratio_machines": 0.4,
+      "dynamic_routing": true,
+      "human_learning_after_mutation": true,
+      "av_candidate_source": "current_shortest_freeflow",
+      "route_generator": "dijkstra",
+      "post_mutation_state_in": "results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/collect_urb_fair_eval_postmutation_records/post_mutation_state.json",
+      "hdv_state_in": "results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/collect_urb_fair_eval_postmutation_records/post_mutation_hdv_learning_state.json",
+      "t_all_mean": 7.455322916666667,
+      "t_CAV_mean": 7.107890624999999,
+      "t_HDV_mean": 7.686944444444444,
+      "completion_rate_mean": 1.0,
+      "route_counts": {
+        "route0": 3204,
+        "route1": 2673,
+        "route2": 2171,
+        "route3": 2257
+      },
+      "mean_route_probs": {
+        "route0": 0.30845415937673126,
+        "route1": 0.2592429146109987,
+        "route2": 0.21067514011946237,
+        "route3": 0.2216277858928084
+      },
+      "diagnostics": {
+        "n_decisions": 10305,
+        "selected_route_counts": {
+          "route0": 3204,
+          "route1": 2673,
+          "route2": 2171,
+          "route3": 2257
+        },
+        "live_best_route_counts": {
+          "route0": 0,
+          "route1": 0,
+          "route2": 0,
+          "route3": 0
+        },
+        "wm_best_route_counts": {},
+        "mean_route_probs": {
+          "route0": 0.30845415937673126,
+          "route1": 0.2592429146109987,
+          "route2": 0.21067514011946237,
+          "route3": 0.2216277858928084
+        },
+        "entropy": 1.149855826657062,
+        "lnK_minus_entropy": 0.2364385344628286,
+        "prob_margin_mean": 0.17468047560723363,
+        "selected_live_match": NaN,
+        "selected_wm_match": NaN,
+        "wm_live_match": NaN,
+        "live_regret_mean": 10.641730424861548,
+        "live_best_gap_mean": 5.919349773319991,
+        "wm_best_gap_mean": NaN,
+        "candidate_unique_mean": NaN,
+        "route0_eq_route3_frac": NaN
+      },
+      "note": "pure SUMO online AC; dynamic eval only, fixed roles, HDV learning enabled"
+    },
+    {
+      "name": "wm_marl_mainline_ep400_dynamic",
+      "family": "wm_marl",
+      "summary_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/eval_urb_fair_mainline_sweep/checkpoint_ep00400/collector_eval_summary.json",
+      "decision_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/eval_urb_fair_mainline_sweep/checkpoint_ep00400/dynamic_av_agent_decisions.csv",
+      "config_path": "",
+      "policy_ckpt": "/home/wangwenrui/shk/UrbanDreamer/logs/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/marl_urb_fair_mainline_500ep/checkpoint_ep00400.pt",
+      "test_eps": 3,
+      "ratio_machines": 0.4,
+      "dynamic_routing": true,
+      "human_learning_after_mutation": null,
+      "av_candidate_source": "current_shortest_freeflow",
+      "route_generator": "",
+      "post_mutation_state_in": "",
+      "hdv_state_in": "",
+      "t_all_mean": 7.445260416666667,
+      "t_CAV_mean": 8.473307291666666,
+      "t_HDV_mean": 6.759895833333334,
+      "completion_rate_mean": 1.0,
+      "route_counts": {
+        "route0": 6861,
+        "route1": 927,
+        "route2": 225,
+        "route3": 0
+      },
+      "mean_route_probs": {
+        "route0": 0.2568696481486162,
+        "route1": 0.2271429049472014,
+        "route2": 0.25911779776215554,
+        "route3": 0.2568696481486162
+      },
+      "diagnostics": {
+        "n_decisions": 8013,
+        "selected_route_counts": {
+          "route0": 6861,
+          "route1": 927,
+          "route2": 225,
+          "route3": 0
+        },
+        "live_best_route_counts": {
+          "route0": 6408,
+          "route1": 249,
+          "route2": 1356,
+          "route3": 0
+        },
+        "wm_best_route_counts": {
+          "route0": 6906,
+          "route1": 954,
+          "route2": 153,
+          "route3": 0
+        },
+        "mean_route_probs": {
+          "route0": 0.25867786185098685,
+          "route1": 0.22383953005205107,
+          "route2": 0.25880474624597327,
+          "route3": 0.25867786185098685
+        },
+        "entropy": 1.3755719723453232,
+        "lnK_minus_entropy": 0.010722388774567326,
+        "prob_margin_mean": 0.0042396266261871375,
+        "selected_live_match": 0.8244103332085362,
+        "selected_wm_match": 0.9580681392736803,
+        "wm_live_match": 0.8206664170722576,
+        "live_regret_mean": 11.433248062162352,
+        "live_best_gap_mean": 5.7149285559616745,
+        "wm_best_gap_mean": 19.08695426321083,
+        "candidate_unique_mean": 1.724447772369899,
+        "route0_eq_route3_frac": 1.0
+      },
+      "note": "WM/MARL mainline checkpoint; not the pure online baseline"
+    },
+    {
+      "name": "online_wm_hdvlearn_ep100_manual_5ep_dynamic",
+      "family": "online_wm",
+      "summary_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck/online_wm_case_study_hdvlearn_dynamic_400ep_20260629/manual_eval_ep00100_5ep/collector_eval_summary.json",
+      "decision_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck/online_wm_case_study_hdvlearn_dynamic_400ep_20260629/manual_eval_ep00100_5ep/dynamic_av_agent_decisions.csv",
+      "config_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck/online_wm_case_study_hdvlearn_dynamic_400ep_20260629/online_wm_dreamer_config.json",
+      "policy_ckpt": "results/toy_cross_bottleneck/online_wm_case_study_hdvlearn_dynamic_400ep_20260629/checkpoints/checkpoint_ep00100.pt",
+      "test_eps": 5,
+      "ratio_machines": 0.4,
+      "dynamic_routing": true,
+      "human_learning_after_mutation": true,
+      "av_candidate_source": "current_shortest_freeflow",
+      "route_generator": "dijkstra",
+      "post_mutation_state_in": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/collect_urb_fair_eval_postmutation_records/post_mutation_state.json",
+      "hdv_state_in": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/collect_urb_fair_eval_postmutation_records/post_mutation_hdv_learning_state.json",
+      "t_all_mean": 7.508677083333334,
+      "t_CAV_mean": 7.7425,
+      "t_HDV_mean": 7.352795138888888,
+      "completion_rate_mean": 1.0,
+      "route_counts": {
+        "route0": 3238,
+        "route1": 2799,
+        "route2": 3181,
+        "route3": 3057
+      },
+      "mean_route_probs": {
+        "route0": 0.27308581620454786,
+        "route1": 0.19221899077296256,
+        "route2": 0.2605952228109042,
+        "route3": 0.27409997875491776
+      },
+      "diagnostics": {
+        "n_decisions": 12275,
+        "selected_route_counts": {
+          "route0": 3238,
+          "route1": 2799,
+          "route2": 3181,
+          "route3": 3057
+        },
+        "live_best_route_counts": {
+          "route0": 9860,
+          "route1": 715,
+          "route2": 1700,
+          "route3": 0
+        },
+        "wm_best_route_counts": {
+          "route0": 10532,
+          "route1": 1388,
+          "route2": 355,
+          "route3": 0
+        },
+        "mean_route_probs": {
+          "route0": 0.275032617123615,
+          "route1": 0.1857621339514303,
+          "route2": 0.2632561393852902,
+          "route3": 0.275949109539661
+        },
+        "entropy": 1.2936744912211948,
+        "lnK_minus_entropy": 0.09261986989869575,
+        "prob_margin_mean": 0.012309402092136764,
+        "selected_live_match": 0.2695723014256619,
+        "selected_wm_match": 0.36969450101832996,
+        "wm_live_match": 0.8032586558044806,
+        "live_regret_mean": 10.786519470214843,
+        "live_best_gap_mean": 9.499461630764902,
+        "wm_best_gap_mean": 8.28857134413088,
+        "candidate_unique_mean": 1.8197963340122199,
+        "route0_eq_route3_frac": 1.0
+      },
+      "note": "online+WM corrected mainline ep100 manual 5ep eval; dynamic, fixed roles, HDV learning enabled"
+    },
+    {
+      "name": "online_wm_ep100_hdvfreeze_diagnostic_dynamic",
+      "family": "online_wm_diagnostic",
+      "summary_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck/online_wm_case_study_hdvlearn_dynamic_400ep_20260629/manual_eval_ep00100_5ep_hdvfreeze/collector_eval_summary.json",
+      "decision_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck/online_wm_case_study_hdvlearn_dynamic_400ep_20260629/manual_eval_ep00100_5ep_hdvfreeze/dynamic_av_agent_decisions.csv",
+      "config_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck/online_wm_case_study_hdvlearn_dynamic_400ep_20260629/online_wm_dreamer_config.json",
+      "policy_ckpt": "results/toy_cross_bottleneck/online_wm_case_study_hdvlearn_dynamic_400ep_20260629/checkpoints/checkpoint_ep00100.pt",
+      "test_eps": 5,
+      "ratio_machines": 0.4,
+      "dynamic_routing": true,
+      "human_learning_after_mutation": true,
+      "av_candidate_source": "current_shortest_freeflow",
+      "route_generator": "dijkstra",
+      "post_mutation_state_in": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/collect_urb_fair_eval_postmutation_records/post_mutation_state.json",
+      "hdv_state_in": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/collect_urb_fair_eval_postmutation_records/post_mutation_hdv_learning_state.json",
+      "t_all_mean": 7.4350000000000005,
+      "t_CAV_mean": 8.197526041666666,
+      "t_HDV_mean": 6.926649305555555,
+      "completion_rate_mean": 1.0,
+      "route_counts": {
+        "route0": 3370,
+        "route1": 3075,
+        "route2": 3350,
+        "route3": 3185
+      },
+      "mean_route_probs": {
+        "route0": 0.2652046943704287,
+        "route1": 0.19348042334119478,
+        "route2": 0.27514189581076304,
+        "route3": 0.2661729998886585
+      },
+      "diagnostics": {
+        "n_decisions": 12980,
+        "selected_route_counts": {
+          "route0": 3370,
+          "route1": 3075,
+          "route2": 3350,
+          "route3": 3185
+        },
+        "live_best_route_counts": {
+          "route0": 10305,
+          "route1": 360,
+          "route2": 2315,
+          "route3": 0
+        },
+        "wm_best_route_counts": {
+          "route0": 11095,
+          "route1": 1650,
+          "route2": 235,
+          "route3": 0
+        },
+        "mean_route_probs": {
+          "route0": 0.2669046044055661,
+          "route1": 0.18516918336284854,
+          "route2": 0.2801593489680858,
+          "route3": 0.26776686326349486
+        },
+        "entropy": 1.2882011704736884,
+        "lnK_minus_entropy": 0.09809319064620214,
+        "prob_margin_mean": 0.007333220943261241,
+        "selected_live_match": 0.2785053929121726,
+        "selected_wm_match": 0.3786594761171032,
+        "wm_live_match": 0.8147149460708782,
+        "live_regret_mean": 8.822961622100031,
+        "live_best_gap_mean": 8.046813412329817,
+        "wm_best_gap_mean": 7.357744698899185,
+        "candidate_unique_mean": 1.7630970724191064,
+        "route0_eq_route3_frac": 1.0
+      },
+      "note": "diagnostic only: online+WM ep100 dynamic eval with HDV learning frozen after mutation"
+    },
+    {
+      "name": "offline_wm_noqhat_ep400_dynamic",
+      "family": "offline_wm",
+      "summary_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/eval_dreamerv3_noqhat_ep400_online_keep_human_20260629/collector_eval_summary.json",
+      "decision_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/eval_dreamerv3_noqhat_ep400_online_keep_human_20260629/dynamic_av_agent_decisions.csv",
+      "config_path": "",
+      "policy_ckpt": "logs/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/marl_vehicle_bootstrap_dreamerv3_noqhat_grad_400ep_20260629_gpu/checkpoint_ep00400.pt",
+      "test_eps": 3,
+      "ratio_machines": 0.4,
+      "dynamic_routing": true,
+      "human_learning_after_mutation": null,
+      "av_candidate_source": "current_shortest_freeflow",
+      "route_generator": "",
+      "post_mutation_state_in": "",
+      "hdv_state_in": "",
+      "t_all_mean": 7.803350694444444,
+      "t_CAV_mean": 8.024479166666667,
+      "t_HDV_mean": 7.655931712962963,
+      "completion_rate_mean": 1.0,
+      "route_counts": {
+        "route0": 7091,
+        "route1": 531,
+        "route2": 535,
+        "route3": 0
+      },
+      "mean_route_probs": {
+        "route0": 0.2509774108727773,
+        "route1": 0.24722202685144212,
+        "route2": 0.250823152396414,
+        "route3": 0.2509774108727773
+      },
+      "diagnostics": {
+        "n_decisions": 8157,
+        "selected_route_counts": {
+          "route0": 7091,
+          "route1": 531,
+          "route2": 535,
+          "route3": 0
+        },
+        "live_best_route_counts": {
+          "route0": 6863,
+          "route1": 524,
+          "route2": 770,
+          "route3": 0
+        },
+        "wm_best_route_counts": {
+          "route0": 7151,
+          "route1": 966,
+          "route2": 40,
+          "route3": 0
+        },
+        "mean_route_probs": {
+          "route0": 0.25115031091775536,
+          "route1": 0.2468141231993618,
+          "route2": 0.25088525496513303,
+          "route3": 0.25115031091775536
+        },
+        "entropy": 1.3861748149331017,
+        "lnK_minus_entropy": 0.00011954618678888806,
+        "prob_margin_mean": 0.00020373177586962418,
+        "selected_live_match": 0.853132279024151,
+        "selected_wm_match": 0.9013117567733235,
+        "wm_live_match": 0.8230967267377712,
+        "live_regret_mean": 12.20710069834784,
+        "live_best_gap_mean": 7.637193819873544,
+        "wm_best_gap_mean": 20.80252532753214,
+        "candidate_unique_mean": 1.7494176780679171,
+        "route0_eq_route3_frac": 1.0
+      },
+      "note": "offline WM/Dreamer no-Qhat"
+    },
+    {
+      "name": "offline_wm_noqhat_ep1000_dynamic",
+      "family": "offline_wm",
+      "summary_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/eval_dreamerv3_noqhat_ep1000_online_keep_human_20260629/collector_eval_summary.json",
+      "decision_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/eval_dreamerv3_noqhat_ep1000_online_keep_human_20260629/dynamic_av_agent_decisions.csv",
+      "config_path": "",
+      "policy_ckpt": "logs/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/marl_vehicle_bootstrap_dreamerv3_noqhat_grad_continue1000_20260629_gpu/checkpoint_ep01000.pt",
+      "test_eps": 3,
+      "ratio_machines": 0.4,
+      "dynamic_routing": true,
+      "human_learning_after_mutation": null,
+      "av_candidate_source": "current_shortest_freeflow",
+      "route_generator": "",
+      "post_mutation_state_in": "",
+      "hdv_state_in": "",
+      "t_all_mean": 7.58078125,
+      "t_CAV_mean": 7.406206597222223,
+      "t_HDV_mean": 7.697164351851852,
+      "completion_rate_mean": 1.0,
+      "route_counts": {
+        "route0": 6615,
+        "route1": 670,
+        "route2": 179,
+        "route3": 0
+      },
+      "mean_route_probs": {
+        "route0": 0.26723088282677865,
+        "route1": 0.2056296645767159,
+        "route2": 0.2599085695213742,
+        "route3": 0.26723088282677865
+      },
+      "diagnostics": {
+        "n_decisions": 7464,
+        "selected_route_counts": {
+          "route0": 6615,
+          "route1": 670,
+          "route2": 179,
+          "route3": 0
+        },
+        "live_best_route_counts": {
+          "route0": 6059,
+          "route1": 463,
+          "route2": 942,
+          "route3": 0
+        },
+        "wm_best_route_counts": {
+          "route0": 6425,
+          "route1": 912,
+          "route2": 127,
+          "route3": 0
+        },
+        "mean_route_probs": {
+          "route0": 0.2693492512774983,
+          "route1": 0.20069721063776053,
+          "route2": 0.26060428680724884,
+          "route3": 0.2693492512774983
+        },
+        "entropy": 1.3553655892882093,
+        "lnK_minus_entropy": 0.0309287718316813,
+        "prob_margin_mean": 0.005369838843335406,
+        "selected_live_match": 0.8251607717041801,
+        "selected_wm_match": 0.9070203644158628,
+        "wm_live_match": 0.797561629153269,
+        "live_regret_mean": 14.79838632949551,
+        "live_best_gap_mean": 8.630832987966262,
+        "wm_best_gap_mean": 6.74349303005337,
+        "candidate_unique_mean": 1.8408360128617363,
+        "route0_eq_route3_frac": 1.0
+      },
+      "note": "offline WM/Dreamer no-Qhat"
+    },
+    {
+      "name": "offline_wm_noqhat_ep2000_dynamic",
+      "family": "offline_wm",
+      "summary_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/eval_dreamerv3_noqhat_ep2000_online_keep_human_20260629/collector_eval_summary.json",
+      "decision_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/eval_dreamerv3_noqhat_ep2000_online_keep_human_20260629/dynamic_av_agent_decisions.csv",
+      "config_path": "",
+      "policy_ckpt": "logs/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/marl_vehicle_bootstrap_dreamerv3_noqhat_grad_continue1000_20260629_gpu/checkpoint_ep02000.pt",
+      "test_eps": 3,
+      "ratio_machines": 0.4,
+      "dynamic_routing": true,
+      "human_learning_after_mutation": null,
+      "av_candidate_source": "current_shortest_freeflow",
+      "route_generator": "",
+      "post_mutation_state_in": "",
+      "hdv_state_in": "",
+      "t_all_mean": 7.4824826388888885,
+      "t_CAV_mean": 7.347699652777777,
+      "t_HDV_mean": 7.572337962962963,
+      "completion_rate_mean": 1.0,
+      "route_counts": {
+        "route0": 6212,
+        "route1": 665,
+        "route2": 324,
+        "route3": 0
+      },
+      "mean_route_probs": {
+        "route0": 0.267453225205342,
+        "route1": 0.20399194641245735,
+        "route2": 0.26110159758892326,
+        "route3": 0.267453225205342
+      },
+      "diagnostics": {
+        "n_decisions": 7201,
+        "selected_route_counts": {
+          "route0": 6212,
+          "route1": 665,
+          "route2": 324,
+          "route3": 0
+        },
+        "live_best_route_counts": {
+          "route0": 5701,
+          "route1": 550,
+          "route2": 950,
+          "route3": 0
+        },
+        "wm_best_route_counts": {
+          "route0": 6215,
+          "route1": 746,
+          "route2": 240,
+          "route3": 0
+        },
+        "mean_route_probs": {
+          "route0": 0.2684139512217941,
+          "route1": 0.20211085951771735,
+          "route2": 0.2610612380386892,
+          "route3": 0.2684139512217941
+        },
+        "entropy": 1.3503577873847792,
+        "lnK_minus_entropy": 0.03593657373511139,
+        "prob_margin_mean": 0.007513201051123942,
+        "selected_live_match": 0.8241910845715873,
+        "selected_wm_match": 0.8802944035550618,
+        "wm_live_match": 0.79613942507985,
+        "live_regret_mean": 13.846964831485332,
+        "live_best_gap_mean": 8.412608454582045,
+        "wm_best_gap_mean": 4.998434239734363,
+        "candidate_unique_mean": 1.883905013192612,
+        "route0_eq_route3_frac": 1.0
+      },
+      "note": "offline WM/Dreamer no-Qhat long train"
+    },
+    {
+      "name": "offline_wm_progress_ep400_dynamic",
+      "family": "offline_wm",
+      "summary_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260629/eval_progress_reward_ep400_online_keep_human_20260629/collector_eval_summary.json",
+      "decision_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260629/eval_progress_reward_ep400_online_keep_human_20260629/dynamic_av_agent_decisions.csv",
+      "config_path": "",
+      "policy_ckpt": "logs/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/marl_vehicle_progress_reward_400ep_20260629_gpu/checkpoint_ep00400.pt",
+      "test_eps": 3,
+      "ratio_machines": 0.4,
+      "dynamic_routing": true,
+      "human_learning_after_mutation": null,
+      "av_candidate_source": "current_shortest_freeflow",
+      "route_generator": "",
+      "post_mutation_state_in": "",
+      "hdv_state_in": "",
+      "t_all_mean": 7.792100694444444,
+      "t_CAV_mean": 7.623741319444444,
+      "t_HDV_mean": 7.904340277777777,
+      "completion_rate_mean": 1.0,
+      "route_counts": {
+        "route0": 6645,
+        "route1": 722,
+        "route2": 274,
+        "route3": 0
+      },
+      "mean_route_probs": {
+        "route0": 0.2507981080147955,
+        "route1": 0.2476616589559449,
+        "route2": 0.25074212898810705,
+        "route3": 0.2507981080147955
+      },
+      "diagnostics": {
+        "n_decisions": 7641,
+        "selected_route_counts": {
+          "route0": 6645,
+          "route1": 722,
+          "route2": 274,
+          "route3": 0
+        },
+        "live_best_route_counts": {
+          "route0": 6504,
+          "route1": 609,
+          "route2": 528,
+          "route3": 0
+        },
+        "wm_best_route_counts": {
+          "route0": 6824,
+          "route1": 805,
+          "route2": 12,
+          "route3": 0
+        },
+        "mean_route_probs": {
+          "route0": 0.2508919036165586,
+          "route1": 0.2474417061883579,
+          "route2": 0.250774486578524,
+          "route3": 0.2508919036165586
+        },
+        "entropy": 1.3861659979546785,
+        "lnK_minus_entropy": 0.00012836316521203095,
+        "prob_margin_mean": 0.0004112414819750433,
+        "selected_live_match": 0.8655935087030493,
+        "selected_wm_match": 0.9345635388038215,
+        "wm_live_match": 0.8678183483837194,
+        "live_regret_mean": 7.109849700907764,
+        "live_best_gap_mean": 8.391085686226226,
+        "wm_best_gap_mean": 16.83247983163914,
+        "candidate_unique_mean": 1.7167909959429395,
+        "route0_eq_route3_frac": 1.0
+      },
+      "note": "offline WM/Dreamer progress reward"
+    },
+    {
+      "name": "offline_wm_capped_step_ep400_dynamic",
+      "family": "offline_wm",
+      "summary_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/eval_vehicle_bootstrap_capped_step_ep400/collector_eval_summary.json",
+      "decision_path": "/home/wangwenrui/shk/UrbanDreamer/results/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/eval_vehicle_bootstrap_capped_step_ep400/dynamic_av_agent_decisions.csv",
+      "config_path": "",
+      "policy_ckpt": "logs/toy_cross_bottleneck_dynamic_game_v2_current_to_dest_full_cycle_warm20_20260626/marl_vehicle_bootstrap_capped_step_400ep_20260628/checkpoint_ep00400.pt",
+      "test_eps": 3,
+      "ratio_machines": 0.4,
+      "dynamic_routing": true,
+      "human_learning_after_mutation": null,
+      "av_candidate_source": "current_shortest_freeflow",
+      "route_generator": "",
+      "post_mutation_state_in": "",
+      "hdv_state_in": "",
+      "t_all_mean": 7.4902604166666675,
+      "t_CAV_mean": 8.315234375,
+      "t_HDV_mean": 6.940277777777777,
+      "completion_rate_mean": 1.0,
+      "route_counts": {
+        "route0": 5874,
+        "route1": 813,
+        "route2": 876,
+        "route3": 0
+      },
+      "mean_route_probs": {
+        "route0": 0.25045144483447074,
+        "route1": 0.24661082923412322,
+        "route2": 0.2524862912793954,
+        "route3": 0.25045144483447074
+      },
+      "diagnostics": {
+        "n_decisions": 7563,
+        "selected_route_counts": {
+          "route0": 5874,
+          "route1": 813,
+          "route2": 876,
+          "route3": 0
+        },
+        "live_best_route_counts": {
+          "route0": 5718,
+          "route1": 525,
+          "route2": 1320,
+          "route3": 0
+        },
+        "wm_best_route_counts": {
+          "route0": 6273,
+          "route1": 708,
+          "route2": 582,
+          "route3": 0
+        },
+        "mean_route_probs": {
+          "route0": 0.2505581162675269,
+          "route1": 0.24633990490148863,
+          "route2": 0.252543862563459,
+          "route3": 0.2505581162675269
+        },
+        "entropy": 1.3860092277412566,
+        "lnK_minus_entropy": 0.000285133378634006,
+        "prob_margin_mean": 0.0008762730103718982,
+        "selected_live_match": 0.839349464498215,
+        "selected_wm_match": 0.8627528758429195,
+        "wm_live_match": 0.8151527171757239,
+        "live_regret_mean": 9.605081354706403,
+        "live_best_gap_mean": 9.942145157314302,
+        "wm_best_gap_mean": 4.530845094322922,
+        "candidate_unique_mean": 1.868702895676319,
+        "route0_eq_route3_frac": 1.0
+      },
+      "note": "older capped-step WM-family run"
+    }
+  ],
+  "notes": [
+    "Main policy comparison uses dynamic evaluations only.",
+    "Dynamic-vs-first-decision-only is retained only as a dynamic-game ablation.",
+    "At ep100, setting-matched online+WM does not prove CAV policy improvement: CAV travel time is worse while HDV travel time improves.",
+    "The ep100 HDV-frozen diagnostic has lower t_all but much worse t_CAV, so it is interpreted as system-level redistribution rather than CAV self-improvement.",
+    "Route probability separation is diagnostic, not a success criterion, because this toy network has duplicate/low-diversity candidate routes."
+  ]
+}

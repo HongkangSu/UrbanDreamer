@@ -1,0 +1,6 @@
+{
+  "input_csv": "results/toy_cross_bottleneck/online_ac_ep400_dynamic_hdvlearn_eval_20260629/dynamic_agent_decisions.csv",
+  "n_routes": 4,
+  "rows_total": 10305,
+  "rows_with_valid_costs": 0
+}

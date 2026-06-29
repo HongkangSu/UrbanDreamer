@@ -43,6 +43,11 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         help="Episode number already completed in --resume-checkpoint; defaults to checkpoint metadata.",
     )
     parser.add_argument(
+        "--hdv-state-in",
+        default=None,
+        help="Optional HDV/RouterL learning state JSON to seed online training.",
+    )
+    parser.add_argument(
         "--checkpoint-episodes",
         default=",".join(str(v) for v in DEFAULT_CHECKPOINT_EPISODES),
         help="Comma-separated online training episodes to checkpoint and evaluate.",
@@ -91,6 +96,19 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Extra SUMO arguments used during online training and appended to eval_sumo.",
     )
+    parser.add_argument(
+        "--keep-human-learning-after-mutation",
+        dest="disable_human_learning_after_mutation",
+        action="store_false",
+        help="Keep HDV/RouterL learning active after the post-mutation state during online training.",
+    )
+    parser.add_argument(
+        "--disable-human-learning-after-mutation",
+        dest="disable_human_learning_after_mutation",
+        action="store_true",
+        help="Freeze HDV/RouterL learning after the post-mutation state during online training.",
+    )
+    parser.set_defaults(disable_human_learning_after_mutation=True)
     parser.add_argument("--dry-run", action="store_true", help="Print resolved plan and exit.")
     parser.add_argument("--skip-eval", action="store_true", help="Train and save checkpoints, but do not run eval_sumo.")
     parser.add_argument(
@@ -126,6 +144,7 @@ def build_config(args: argparse.Namespace) -> OnlineNoCfmConfig:
         "checkpoint_episodes": _parse_checkpoint_episodes(args.checkpoint_episodes),
         "resume_checkpoint": str(args.resume_checkpoint or ""),
         "resume_start_episode": int(args.resume_start_episode),
+        "hdv_state_in": str(args.hdv_state_in) if args.hdv_state_in else None,
         "device": str(args.device),
         "seed": int(args.seed),
         "reward_mode": str(args.reward_mode),
@@ -134,6 +153,7 @@ def build_config(args: argparse.Namespace) -> OnlineNoCfmConfig:
         "replay_update_epochs": int(args.replay_update_epochs),
         "replay_actor_max_age_episodes": int(args.replay_actor_max_age_episodes),
         "return_horizon_steps": int(args.return_horizon_steps),
+        "disable_human_learning_after_mutation": bool(args.disable_human_learning_after_mutation),
         "eval_python": str(args.eval_python),
         "extra_eval_args": tuple(passthrough),
     }

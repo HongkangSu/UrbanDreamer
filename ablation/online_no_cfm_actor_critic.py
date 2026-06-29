@@ -406,6 +406,9 @@ def build_gretz_ablation_plan(cfg: Optional[OnlineNoCfmConfig] = None) -> Dict[s
             "incident_start": float(resolved.incident_start),
             "incident_end": float(resolved.incident_end),
             "incident_speed": float(resolved.incident_speed),
+            "disable_human_learning_after_mutation": bool(
+                resolved.disable_human_learning_after_mutation
+            ),
             "post_mutation_state_in": resolved.post_mutation_state_in,
             "hdv_state_in": resolved.hdv_state_in,
         },
@@ -1935,8 +1938,7 @@ def build_eval_command(
         "none",
         "--sumo_time_to_teleport",
         str(cfg.sumo_time_to_teleport),
-        "--incident_edge",
-        str(cfg.incident_edge),
+        f"--incident_edge={cfg.incident_edge}",
         "--incident_start",
         str(float(cfg.incident_start)),
         "--incident_end",
@@ -1944,6 +1946,10 @@ def build_eval_command(
         "--incident_speed",
         str(float(cfg.incident_speed)),
     ]
+    if bool(cfg.disable_human_learning_after_mutation):
+        cmd.append("--disable_human_learning_after_mutation")
+    else:
+        cmd.append("--keep_human_learning_after_mutation")
     if bool(cfg.deterministic_eval):
         cmd.append("--deterministic")
     else:

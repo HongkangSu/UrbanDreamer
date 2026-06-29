@@ -809,6 +809,11 @@ class RouteRLConnector:
                     arrived_ids = []
                 for veh_id in arrived_ids:
                     arrival_events.append((str(veh_id), sim_time))
+                try:
+                    if int(traci.simulation.getMinExpectedNumber()) <= 0:
+                        break
+                except Exception:
+                    pass
         return arrival_events
 
     def is_done(self) -> bool:

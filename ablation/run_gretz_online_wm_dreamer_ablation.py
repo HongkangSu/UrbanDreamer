@@ -42,6 +42,18 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--settings", default=None, help="Gretz .env settings file.")
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--tag", default=None)
+    parser.add_argument("--network-name", default=None)
+    parser.add_argument("--network-dir", default=None)
+    parser.add_argument("--edge-registry", default=None)
+    parser.add_argument("--route-artifacts-dir", default=None)
+    parser.add_argument("--post-mutation-state-in", default=None)
+    parser.add_argument("--hdv-state-in", default=None)
+    parser.add_argument("--projector-ckpt", default=None)
+    parser.add_argument("--dynamics-ckpt", default=None)
+    parser.add_argument("--ratio-machines", type=float, default=None)
+    parser.add_argument("--av-candidate-source", default=None)
+    parser.add_argument("--route-generator", default=None)
     parser.add_argument("--train-episodes", type=int, default=100)
     parser.add_argument("--eval-episodes", type=int, default=3)
     parser.add_argument("--resume-checkpoint", default="", help="Optional online-WM checkpoint to continue from.")
@@ -93,6 +105,19 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Extra SUMO arguments used during online training and appended to eval_sumo.",
     )
+    parser.add_argument(
+        "--keep-human-learning-after-mutation",
+        dest="disable_human_learning_after_mutation",
+        action="store_false",
+        help="Keep HDV/RouterL learning active after the post-mutation state during online training and eval.",
+    )
+    parser.add_argument(
+        "--disable-human-learning-after-mutation",
+        dest="disable_human_learning_after_mutation",
+        action="store_true",
+        help="Freeze HDV/RouterL learning after the post-mutation state during online training and eval.",
+    )
+    parser.set_defaults(disable_human_learning_after_mutation=True)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--skip-eval", action="store_true")
     parser.add_argument("--allow-missing", action="store_true")
@@ -139,6 +164,7 @@ def build_config(args: argparse.Namespace) -> OnlineWmDreamerConfig:
         "imag_horizon": int(args.imag_horizon),
         "imagined_updates_per_episode": int(args.imagined_updates_per_episode),
         "imagined_rollouts_per_update": int(args.imagined_rollouts_per_update),
+        "disable_human_learning_after_mutation": bool(args.disable_human_learning_after_mutation),
         "eval_python": str(args.eval_python),
         "extra_eval_args": tuple(passthrough),
     }
@@ -152,6 +178,25 @@ def build_config(args: argparse.Namespace) -> OnlineWmDreamerConfig:
         overrides["max_steps_per_episode"] = int(args.max_steps_per_episode)
     if args.output_dir:
         overrides["output_dir"] = str(args.output_dir)
+    if args.tag:
+        overrides["tag"] = str(args.tag)
+    for arg_name, field_name in (
+        ("network_name", "network_name"),
+        ("network_dir", "network_dir"),
+        ("edge_registry", "edge_registry"),
+        ("route_artifacts_dir", "route_artifacts_dir"),
+        ("post_mutation_state_in", "post_mutation_state_in"),
+        ("hdv_state_in", "hdv_state_in"),
+        ("projector_ckpt", "projector_ckpt"),
+        ("dynamics_ckpt", "dynamics_ckpt"),
+        ("av_candidate_source", "av_candidate_source"),
+        ("route_generator", "route_generator"),
+    ):
+        value = getattr(args, arg_name)
+        if value is not None:
+            overrides[field_name] = str(value)
+    if args.ratio_machines is not None:
+        overrides["ratio_machines"] = float(args.ratio_machines)
     if args.settings:
         return OnlineWmDreamerConfig.from_settings(str(args.settings), **overrides)
     return OnlineWmDreamerConfig(**overrides).resolve()

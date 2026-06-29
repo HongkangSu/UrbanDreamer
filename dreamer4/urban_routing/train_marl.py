@@ -26,6 +26,7 @@ import argparse
 import random
 import csv
 import copy
+import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any, Union
 
@@ -249,19 +250,36 @@ class DreamerReturnNormalizer:
         decay: float = 0.99,
         eps: float = 1e-6,
         enabled: bool = True,
+        mode: str = "ema_std",
+        percentile_low: float = 5.0,
+        percentile_high: float = 95.0,
         device: Optional[torch.device] = None,
     ) -> None:
         self.decay = float(decay)
         self.eps = float(eps)
         self.enabled = bool(enabled)
+        mode_key = str(mode or "ema_std").strip().lower()
+        if mode_key in {"std", "ema", "variance", "mean_std"}:
+            mode_key = "ema_std"
+        elif mode_key in {"dreamerv3", "dreamer_v3", "percentile", "percentile_range", "return_range"}:
+            mode_key = "range"
+        if mode_key not in {"ema_std", "range"}:
+            raise ValueError(f"Unsupported DreamerReturnNormalizer mode={mode!r}")
+        self.mode = mode_key
+        self.percentile_low = float(percentile_low)
+        self.percentile_high = float(percentile_high)
         target_device = device if device is not None else torch.device("cpu")
         self.mean = torch.zeros((), device=target_device, dtype=torch.float32)
         self.var = torch.ones((), device=target_device, dtype=torch.float32)
+        self.offset = torch.zeros((), device=target_device, dtype=torch.float32)
+        self.scale = torch.ones((), device=target_device, dtype=torch.float32)
         self.count = torch.zeros((), device=target_device, dtype=torch.float32)
 
     def to(self, device: torch.device) -> "DreamerReturnNormalizer":
         self.mean = self.mean.to(device=device)
         self.var = self.var.to(device=device)
+        self.offset = self.offset.to(device=device)
+        self.scale = self.scale.to(device=device)
         self.count = self.count.to(device=device)
         return self
 
@@ -270,8 +288,13 @@ class DreamerReturnNormalizer:
             "decay": float(self.decay),
             "eps": float(self.eps),
             "enabled": bool(self.enabled),
+            "mode": str(self.mode),
+            "percentile_low": float(self.percentile_low),
+            "percentile_high": float(self.percentile_high),
             "mean": self.mean.detach().cpu(),
             "var": self.var.detach().cpu(),
+            "offset": self.offset.detach().cpu(),
+            "scale": self.scale.detach().cpu(),
             "count": self.count.detach().cpu(),
         }
 
@@ -282,8 +305,19 @@ class DreamerReturnNormalizer:
         self.decay = float(state.get("decay", self.decay))
         self.eps = float(state.get("eps", self.eps))
         self.enabled = bool(state.get("enabled", self.enabled))
+        mode_key = str(state.get("mode", self.mode) or self.mode).strip().lower()
+        if mode_key in {"std", "ema", "variance", "mean_std"}:
+            mode_key = "ema_std"
+        elif mode_key in {"dreamerv3", "dreamer_v3", "percentile", "percentile_range", "return_range"}:
+            mode_key = "range"
+        self.mode = mode_key if mode_key in {"ema_std", "range"} else self.mode
+        self.percentile_low = float(state.get("percentile_low", self.percentile_low))
+        self.percentile_high = float(state.get("percentile_high", self.percentile_high))
         self.mean = torch.as_tensor(state.get("mean", self.mean), device=device, dtype=torch.float32).reshape(())
         self.var = torch.as_tensor(state.get("var", self.var), device=device, dtype=torch.float32).reshape(()).clamp_min(self.eps)
+        default_scale = self.var.detach().clamp_min(self.eps).sqrt()
+        self.offset = torch.as_tensor(state.get("offset", self.mean), device=device, dtype=torch.float32).reshape(())
+        self.scale = torch.as_tensor(state.get("scale", default_scale), device=device, dtype=torch.float32).reshape(()).clamp_min(self.eps)
         self.count = torch.as_tensor(state.get("count", self.count), device=device, dtype=torch.float32).reshape(())
 
     def update(self, values: torch.Tensor) -> None:
@@ -295,18 +329,37 @@ class DreamerReturnNormalizer:
             return
         batch_mean = finite.mean().to(device=self.mean.device, dtype=self.mean.dtype)
         batch_var = finite.var(unbiased=False).to(device=self.var.device, dtype=self.var.dtype).clamp_min(self.eps)
+        low_q = min(max(float(self.percentile_low), 0.0), 100.0)
+        high_q = min(max(float(self.percentile_high), 0.0), 100.0)
+        if high_q < low_q:
+            low_q, high_q = high_q, low_q
+        q = torch.tensor([low_q / 100.0, high_q / 100.0], device=finite.device, dtype=finite.dtype)
+        quantiles = torch.quantile(finite, q)
+        batch_offset = quantiles[0].to(device=self.offset.device, dtype=self.offset.dtype)
+        batch_scale = (quantiles[1] - quantiles[0]).abs().to(
+            device=self.scale.device,
+            dtype=self.scale.dtype,
+        ).clamp_min(self.eps)
         if float(self.count.detach().cpu().item()) <= 0.0:
             self.mean.copy_(batch_mean)
             self.var.copy_(batch_var)
+            self.offset.copy_(batch_offset)
+            self.scale.copy_(batch_scale)
         else:
             decay = min(max(float(self.decay), 0.0), 0.999999)
             self.mean.mul_(decay).add_(batch_mean, alpha=1.0 - decay)
             self.var.mul_(decay).add_(batch_var, alpha=1.0 - decay)
+            self.offset.mul_(decay).add_(batch_offset, alpha=1.0 - decay)
+            self.scale.mul_(decay).add_(batch_scale, alpha=1.0 - decay)
         self.count.add_(float(int(finite.numel())))
 
     def normalize(self, values: torch.Tensor) -> torch.Tensor:
         if not self.enabled:
             return values
+        if self.mode == "range":
+            offset = self.offset.to(device=values.device, dtype=values.dtype)
+            scale = self.scale.to(device=values.device, dtype=values.dtype).clamp_min(self.eps)
+            return (values - offset) / scale
         mean = self.mean.to(device=values.device, dtype=values.dtype)
         std = self.var.to(device=values.device, dtype=values.dtype).clamp_min(self.eps).sqrt()
         return (values - mean) / std
@@ -314,9 +367,25 @@ class DreamerReturnNormalizer:
     def denormalize(self, values: torch.Tensor) -> torch.Tensor:
         if not self.enabled:
             return values
+        if self.mode == "range":
+            offset = self.offset.to(device=values.device, dtype=values.dtype)
+            scale = self.scale.to(device=values.device, dtype=values.dtype).clamp_min(self.eps)
+            return values * scale + offset
         mean = self.mean.to(device=values.device, dtype=values.dtype)
         std = self.var.to(device=values.device, dtype=values.dtype).clamp_min(self.eps).sqrt()
         return values * std + mean
+
+    def actor_scale(self, *, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+        if not self.enabled:
+            return torch.ones((), device=device, dtype=dtype)
+        if self.mode == "range":
+            return self.scale.to(device=device, dtype=dtype).clamp_min(self.eps)
+        return self.var.to(device=device, dtype=dtype).clamp_min(self.eps).sqrt()
+
+    def scale_only(self, values: torch.Tensor) -> torch.Tensor:
+        if not self.enabled:
+            return values
+        return values / self.actor_scale(device=values.device, dtype=values.dtype)
 
 
 def _polyak_update_module(target: nn.Module, source: nn.Module, tau: float) -> None:
@@ -355,6 +424,18 @@ def _set_optimizer_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:
 def _restore_optimizer_lr(optimizer: torch.optim.Optimizer, lrs: List[float]) -> None:
     for group, lr in zip(optimizer.param_groups, lrs):
         group["lr"] = float(lr)
+
+
+def _module_grad_norm(module: nn.Module) -> float:
+    total_sq = 0.0
+    for param in module.parameters():
+        if param.grad is None:
+            continue
+        grad = param.grad.detach()
+        if grad.numel() == 0:
+            continue
+        total_sq += float(torch.sum(grad.float() * grad.float()).detach().cpu().item())
+    return float(math.sqrt(max(total_sq, 0.0)))
 
 
 def _actor_update_gate_enabled(cfg: Any) -> bool:
@@ -960,6 +1041,9 @@ class TrainConfig:
     dreamer_slow_critic_tau: float = 0.01
     dreamer_return_normalizer: bool = True
     dreamer_return_normalizer_decay: float = 0.99
+    dreamer_return_normalizer_mode: str = "ema_std"  # ema_std | range
+    dreamer_return_normalizer_percentile_low: float = 5.0
+    dreamer_return_normalizer_percentile_high: float = 95.0
     dreamer_vehicle_critic: bool = True
     dreamer_vehicle_critic_lr: float = 0.0
     dreamer_vehicle_critic_context: bool = True
@@ -1169,6 +1253,7 @@ DREAMER_UPDATE_SCALAR_KEYS = (
     "grpo_combined_loss", "grpo_combined_pg_loss", "grpo_combined_kl_loss",
     "grpo_combined_adv_mean", "grpo_combined_adv_std", "grpo_combined_clip_frac",
     "grpo_policy_kl",
+    "actor_grad_norm", "actor_grad_norm_clipped", "actor_update_applied",
     "grpo_rollout_vehicle_cost_loss", "grpo_rollout_vehicle_cost",
     "grpo_rollout_vehicle_cost_adv_mean", "grpo_rollout_vehicle_cost_adv_std",
     "dreamer_ac_loss", "dreamer_ac_adv_mean", "dreamer_ac_adv_std",
@@ -1222,6 +1307,11 @@ DREAMER_UPDATE_SCALAR_KEYS = (
     "dreamer_ac_entropy_effective_route_count", "dreamer_ac_entropy_cost_mask_frac",
     "vehicle_value_loss", "vehicle_critic_target_mean", "vehicle_critic_target_std",
     "vehicle_critic_explained_variance", "vehicle_return_norm_mean", "vehicle_return_norm_std",
+    "vehicle_return_norm_scale",
+    "vehicle_adv_raw_mean", "vehicle_adv_raw_std",
+    "vehicle_adv_scaled_mean", "vehicle_adv_scaled_std",
+    "vehicle_bootstrap_nonterminal_frac", "vehicle_bootstrap_value_mean", "vehicle_bootstrap_value_std",
+    "vehicle_terminal_frac",
     "vehicle_reward_mean", "vehicle_reward_std",
     "vehicle_route_progress_reward_mean", "vehicle_route_progress_reward_std",
     "vehicle_route_credit_reward_mean", "vehicle_route_credit_reward_std",
@@ -1234,7 +1324,9 @@ DREAMER_UPDATE_SCALAR_KEYS = (
     "vehicle_return_discount",
     "critic_target_mean", "critic_target_std", "critic_explained_variance",
     "critic_return_discount",
-    "return_norm_mean", "return_norm_std",
+    "actor_adv_raw_mean", "actor_adv_raw_std",
+    "actor_adv_scaled_mean", "actor_adv_scaled_std",
+    "return_norm_mean", "return_norm_std", "return_norm_scale",
 )
 
 
@@ -1936,6 +2028,17 @@ def _selected_route_vehicle_rewards_from_cost_matrix(
         # _route_credit_base_cost_matrix returns negative progress as a cost,
         # so negating gives a critic-visible reward in [0, progress_cap].
         reward = -float(reward_weight) * progress_costs[rows, selected] * float(reward_scale)
+    elif mode_key in {"capped_step_cost", "capped_cost", "step_cost", "min_step_remaining"}:
+        effective = torch.minimum(
+            costs.clamp_min(0.0),
+            torch.full_like(costs, float(max(step_interval, 1e-6))),
+        )
+        reward = (
+            -float(reward_weight)
+            * effective[rows, selected]
+            / float(max(temperature, 1e-6))
+            * float(reward_scale)
+        )
     elif bool(normalize_regret):
         selected_cost = costs[rows, selected]
         large = torch.finfo(costs.dtype).max / 4.0
@@ -1946,7 +2049,7 @@ def _selected_route_vehicle_rewards_from_cost_matrix(
         if mode_key not in {"", "route_tt", "remaining_tt", "full_path", "legacy"}:
             raise ValueError(
                 f"Unsupported dreamer_route_cost_reward_mode={reward_mode!r}; "
-                "expected progress_fraction or route_tt"
+                "expected progress_fraction, capped_step_cost, or route_tt"
             )
         selected_cost = costs[rows, selected]
         reward = -float(reward_weight) * selected_cost * float(reward_scale)
@@ -1986,6 +2089,17 @@ def _route_vehicle_reward_matrix_from_cost_matrix(
             progress_cap=float(progress_cap),
         )
         reward = -float(reward_weight) * progress_costs * float(reward_scale)
+    elif mode_key in {"capped_step_cost", "capped_cost", "step_cost", "min_step_remaining"}:
+        effective = torch.minimum(
+            costs.clamp_min(0.0),
+            torch.full_like(costs, float(max(step_interval, 1e-6))),
+        )
+        reward = (
+            -float(reward_weight)
+            * effective
+            / float(max(temperature, 1e-6))
+            * float(reward_scale)
+        )
     elif bool(normalize_regret):
         large = torch.finfo(costs.dtype).max / 4.0
         min_cost = costs.masked_fill(~valid, large).min(dim=-1, keepdim=True).values
@@ -1995,13 +2109,133 @@ def _route_vehicle_reward_matrix_from_cost_matrix(
         if mode_key not in {"", "route_tt", "remaining_tt", "full_path", "legacy"}:
             raise ValueError(
                 f"Unsupported dreamer_route_cost_reward_mode={reward_mode!r}; "
-                "expected progress_fraction or route_tt"
+                "expected progress_fraction, capped_step_cost, or route_tt"
             )
         reward = -float(reward_weight) * costs * float(reward_scale)
     reward = torch.where(valid, reward, torch.zeros_like(reward))
     out = torch.zeros_like(route_costs)
     out[:n] = torch.nan_to_num(reward, nan=0.0, posinf=0.0, neginf=0.0)
     return out
+
+
+def _build_vehicle_bootstrap_obs(
+    *,
+    wm: UrbanWorldModel,
+    z_ref: torch.Tensor,
+    active_avs: List[Dict[str, Any]],
+    route_registry: PathTopology,
+    path_cache: Optional[Union["VehiclePathCache", "LazyVehiclePathCache"]],
+    adj_list: List[List[Tuple[int, float]]],
+    cfg: TrainConfig,
+    step: int,
+    episode_steps: int,
+    avg_route_steps: int,
+    n_edges: int,
+    n_routes: int,
+    n_total_av: int,
+    candidate_edge_cost_source: str,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Build next-decision vehicle observations for critic bootstrap."""
+    active = [av for av in active_avs if not bool(av.get("arrived", False))]
+    obs_dim = int(getattr(cfg, "_vehicle_obs_dim", 0))
+    if not active:
+        return (
+            torch.zeros((0, max(obs_dim, 0)), device=device, dtype=dtype),
+            torch.zeros((0,), device=device, dtype=torch.long),
+            torch.zeros((0,), device=device, dtype=torch.bool),
+        )
+
+    edge_feats_obs = wm.latent_edge_features(z_ref).detach().cpu().numpy().astype(np.float32)
+    _, _, _, t_e_route_cost = edge_tt_from_latent_state(
+        wm=wm,
+        z=z_ref.detach(),
+        bpr_alpha=cfg.bpr_alpha,
+        bpr_beta=cfg.bpr_beta,
+        edge_cost_source=cfg.wm_edge_cost_source,
+        decoded_speed_min_ratio=cfg.wm_decoded_speed_min_ratio,
+        decoded_speed_max_ratio=cfg.wm_decoded_speed_max_ratio,
+        decoded_speed_excess_scale=cfg.wm_decoded_speed_excess_scale,
+    )
+    if candidate_edge_cost_source == "freeflow":
+        t_e_candidate = _free_flow_edge_tt_numpy(wm)
+    elif candidate_edge_cost_source == str(cfg.wm_edge_cost_source).strip().lower():
+        t_e_candidate = t_e_route_cost
+    else:
+        _, _, _, t_e_candidate = edge_tt_from_latent_state(
+            wm=wm,
+            z=z_ref.detach(),
+            bpr_alpha=cfg.bpr_alpha,
+            bpr_beta=cfg.bpr_beta,
+            edge_cost_source=candidate_edge_cost_source,
+            decoded_speed_min_ratio=cfg.wm_decoded_speed_min_ratio,
+            decoded_speed_max_ratio=cfg.wm_decoded_speed_max_ratio,
+            decoded_speed_excess_scale=cfg.wm_decoded_speed_excess_scale,
+        )
+
+    current_edges_np = np.asarray(
+        [int(av.get("current_edge", av["origin_edge"])) for av in active],
+        dtype=np.int64,
+    )
+    dest_edges_np = np.asarray([int(av["dest_edge"]) for av in active], dtype=np.int64)
+    done_np = np.asarray([bool(av.get("arrived", False)) for av in active], dtype=bool)
+    if str(getattr(cfg, "vehicle_candidate_source", "current_to_dest")).strip().lower() == "od_suffix":
+        path_batch = _od_suffix_path_batch(
+            route_registry=route_registry,
+            active_avs=active,
+            current_edges=current_edges_np,
+            done=done_np,
+            K=n_routes,
+        )
+    elif path_cache is not None:
+        if isinstance(path_cache, LazyVehiclePathCache):
+            path_batch = path_cache.lookup_batch(current_edges_np, dest_edges_np, done_np, t_e_candidate)
+        else:
+            path_batch = path_cache.lookup_batch(current_edges_np, dest_edges_np, done_np)
+    else:
+        path_batch = [
+            build_diverse_paths_current_to_dest(
+                adj_list=adj_list,
+                edge_tt=t_e_candidate,
+                src_idx=int(current_edges_np[i]),
+                dst_idx=int(dest_edges_np[i]),
+                K=n_routes,
+                penalty_factor=cfg.vehicle_path_penalty_factor,
+            )
+            for i in range(len(active))
+        ]
+
+    obs_np = build_vehicle_obs_vectorized(
+        edge_feats_dyn=edge_feats_obs,
+        path_batch=path_batch,
+        include_global=bool(cfg.vehicle_obs_include_global),
+        route_stats=str(cfg.vehicle_obs_route_stats),
+        edge_cost=t_e_route_cost,
+        include_route_costs=bool(cfg.vehicle_obs_include_route_costs),
+        include_fleet_pressure=False,
+    )
+    if bool(getattr(cfg, "vehicle_obs_include_fleet_pressure", False)):
+        # The current mainline disables fleet-pressure obs.  If enabled, use a
+        # zero-pressure bootstrap feature rather than inventing future order.
+        fleet_features = build_vehicle_fleet_pressure_obs_features(
+            path_batch=path_batch,
+            n_edges=n_edges,
+            n_routes=n_routes,
+        )
+        obs_np = np.concatenate([obs_np, fleet_features], axis=1)
+    first_depart = active[0]["depart_step"] if active else step
+    context_features = np.array([
+        step / max(episode_steps, 1),
+        len(active) / max(n_total_av, 1),
+        (step - first_depart) / max(avg_route_steps, 1),
+    ], dtype=np.float32)
+    obs_np = np.concatenate([obs_np, np.tile(context_features, (len(active), 1))], axis=1)
+
+    obs = torch.from_numpy(obs_np).to(device=device, dtype=dtype)
+    valid = _valid_route_mask_from_paths(path_batch, n_routes=n_routes, device=device).any(dim=-1)
+    ids = torch.as_tensor([int(av.get("id", -1)) for av in active], device=device, dtype=torch.long)
+    return obs, ids, valid
 
 
 def _selected_route_credit_vehicle_rewards_from_cost_matrix(
@@ -2600,6 +2834,8 @@ def imagined_episode_dynamic_dreamer(
     horizon_proxy: Optional[ActionHorizonProxyReward] = None,
     hdv_background_edge: Optional[torch.Tensor] = None,
     episode_index: Optional[int] = None,
+    vehicle_critic: Optional[CentralizedVehicleValueCritic] = None,
+    target_vehicle_critic: Optional[CentralizedVehicleValueCritic] = None,
 ) -> Tuple[Dict[str, Any], float, Dict[str, float]]:
     T = min(int(cfg.imagination_horizon), int(cfg.dreamer_actor_horizon))
     episode_steps = int(cfg.episode_steps)
@@ -2688,6 +2924,8 @@ def imagined_episode_dynamic_dreamer(
     dreamer_ac_vehicle_route_credit_reward_steps: List[torch.Tensor] = []
     dreamer_ac_vehicle_social_reward_steps: List[torch.Tensor] = []
     dreamer_ac_vehicle_route_reward_matrix_steps: List[torch.Tensor] = []
+    dreamer_ac_vehicle_next_obs_steps: List[torch.Tensor] = []
+    dreamer_ac_vehicle_next_valid_steps: List[torch.Tensor] = []
     vehicle_route_credit_gate_fracs: List[float] = []
     vehicle_route_credit_selected_gate_fracs: List[float] = []
     dreamer_ac_selected_nonzero_fracs: List[float] = []
@@ -2877,6 +3115,7 @@ def imagined_episode_dynamic_dreamer(
                 [int(av.get("current_edge", av["origin_edge"])) for av in active_avs],
                 dtype=np.int64,
             )
+            active_avs_before_action = [copy.deepcopy(av) for av in active_avs]
             dest_edges_np = np.asarray([int(av["dest_edge"]) for av in active_avs], dtype=np.int64)
             elapsed_time_np = np.asarray(
                 [
@@ -4111,7 +4350,50 @@ def imagined_episode_dynamic_dreamer(
                 device=device,
                 dtype=torch.long,
             )
-            dreamer_pg.append_discrete_actor_critic_samples(
+            vehicle_next_obs_for_ac = None
+            vehicle_next_valid_for_ac = None
+            if vehicle_critic_reward_needed and sampled_obs_t is not None:
+                next_obs, next_ids, next_valid = _build_vehicle_bootstrap_obs(
+                    wm=wm,
+                    z_ref=z_next.detach(),
+                    active_avs=active_avs,
+                    route_registry=route_registry,
+                    path_cache=path_cache,
+                    adj_list=adj_list,
+                    cfg=cfg,
+                    step=step + 1,
+                    episode_steps=episode_steps,
+                    avg_route_steps=avg_route_steps,
+                    n_edges=n_edges,
+                    n_routes=K,
+                    n_total_av=n_total_av,
+                    candidate_edge_cost_source=candidate_edge_cost_source,
+                    device=device,
+                    dtype=sampled_obs_t.dtype,
+                )
+                vehicle_next_obs_for_ac = torch.zeros_like(sampled_obs_t)
+                vehicle_next_valid_for_ac = torch.zeros(
+                    (int(sampled_obs_t.shape[0]),),
+                    device=sampled_obs_t.device,
+                    dtype=torch.bool,
+                )
+                if int(next_ids.numel()) > 0:
+                    next_by_id = {int(v): int(i) for i, v in enumerate(next_ids.detach().cpu().tolist())}
+                    for row, veh_id in enumerate(vehicle_id_t.detach().cpu().tolist()):
+                        next_row = next_by_id.get(int(veh_id))
+                        if next_row is None:
+                            continue
+                        if (
+                            next_row < int(next_obs.shape[0])
+                            and row < int(vehicle_next_obs_for_ac.shape[0])
+                            and bool(next_valid[next_row].detach().cpu().item())
+                        ):
+                            vehicle_next_obs_for_ac[row] = next_obs[next_row].to(
+                                device=vehicle_next_obs_for_ac.device,
+                                dtype=vehicle_next_obs_for_ac.dtype,
+                            )
+                            vehicle_next_valid_for_ac[row] = True
+            appended_ac_count = dreamer_pg.append_discrete_actor_critic_samples(
                 obs_steps=dreamer_ac_obs_steps,
                 selected_steps=dreamer_ac_selected_steps,
                 valid_steps=dreamer_ac_valid_steps,
@@ -4125,6 +4407,8 @@ def imagined_episode_dynamic_dreamer(
                 vehicle_route_credit_reward_steps=dreamer_ac_vehicle_route_credit_reward_steps,
                 vehicle_social_reward_steps=dreamer_ac_vehicle_social_reward_steps,
                 vehicle_route_reward_matrix_steps=dreamer_ac_vehicle_route_reward_matrix_steps,
+                vehicle_next_obs_steps=dreamer_ac_vehicle_next_obs_steps,
+                vehicle_next_valid_steps=dreamer_ac_vehicle_next_valid_steps,
                 selected_nonzero_fracs=dreamer_ac_selected_nonzero_fracs,
                 obs=sampled_obs_t,
                 selected_idx=selected_route_idx_t_for_update,
@@ -4139,6 +4423,8 @@ def imagined_episode_dynamic_dreamer(
                 vehicle_route_credit_reward=vehicle_route_credit_reward_for_ac,
                 vehicle_social_reward=vehicle_social_reward_for_ac,
                 vehicle_route_reward_matrix=vehicle_route_reward_matrix_for_ac,
+                vehicle_next_obs=vehicle_next_obs_for_ac,
+                vehicle_next_valid=vehicle_next_valid_for_ac,
             )
         reward_requires_grad = bool(reward_t.requires_grad)
         if reward_requires_grad:
@@ -4357,6 +4643,8 @@ def imagined_episode_dynamic_dreamer(
         vehicle_route_credit_reward_steps=dreamer_ac_vehicle_route_credit_reward_steps,
         vehicle_social_reward_steps=dreamer_ac_vehicle_social_reward_steps,
         vehicle_route_reward_matrix_steps=dreamer_ac_vehicle_route_reward_matrix_steps,
+        vehicle_next_obs_steps=dreamer_ac_vehicle_next_obs_steps,
+        vehicle_next_valid_steps=dreamer_ac_vehicle_next_valid_steps,
         device=device,
         dtype=z.dtype,
         obs_dim=int(getattr(actor, "obs_dim", 0)),
@@ -4691,12 +4979,24 @@ def dreamer_update(
     dreamer_ac_entropy_valid_target_means: List[float] = []
     dreamer_ac_entropy_effective_route_counts: List[float] = []
     dreamer_ac_entropy_cost_mask_fracs: List[float] = []
+    actor_adv_raw_means: List[float] = []
+    actor_adv_raw_stds: List[float] = []
+    actor_adv_scaled_means: List[float] = []
+    actor_adv_scaled_stds: List[float] = []
     critic_target_means: List[float] = []
     critic_target_stds: List[float] = []
     critic_explained_variances: List[float] = []
     vehicle_critic_target_means: List[float] = []
     vehicle_critic_target_stds: List[float] = []
     vehicle_critic_explained_variances: List[float] = []
+    vehicle_adv_raw_means: List[float] = []
+    vehicle_adv_raw_stds: List[float] = []
+    vehicle_adv_scaled_means: List[float] = []
+    vehicle_adv_scaled_stds: List[float] = []
+    vehicle_bootstrap_nonterminal_fracs: List[float] = []
+    vehicle_bootstrap_value_means: List[float] = []
+    vehicle_bootstrap_value_stds: List[float] = []
+    vehicle_terminal_fracs: List[float] = []
     vehicle_reward_means: List[float] = []
     vehicle_reward_stds: List[float] = []
     vehicle_route_progress_reward_means: List[float] = []
@@ -4846,10 +5146,21 @@ def dreamer_update(
                 gamma=critic_return_discount,
                 lambda_=float(cfg.gae_lambda),
             )
+            raw_actor_advantages = actor_returns.detach() - values.detach()
+            actor_adv_raw_means.append(float(raw_actor_advantages.detach().mean().cpu().item()))
+            actor_adv_raw_stds.append(
+                float(raw_actor_advantages.detach().std(unbiased=False).cpu().item())
+                if int(raw_actor_advantages.numel()) > 1 else 0.0
+            )
             if return_normalizer is not None and bool(getattr(cfg, "dreamer_return_normalizer", True)):
-                actor_advantages = return_normalizer.normalize(actor_returns) - return_normalizer.normalize(values.detach())
+                actor_advantages = return_normalizer.scale_only(raw_actor_advantages)
             else:
-                actor_advantages = actor_returns - values.detach()
+                actor_advantages = raw_actor_advantages
+            actor_adv_scaled_means.append(float(actor_advantages.detach().mean().cpu().item()))
+            actor_adv_scaled_stds.append(
+                float(actor_advantages.detach().std(unbiased=False).cpu().item())
+                if int(actor_advantages.numel()) > 1 else 0.0
+            )
         else:
             actor_advantages = torch.zeros(
                 (int(rewards.reshape(-1).shape[0]),),
@@ -4863,6 +5174,8 @@ def dreamer_update(
             vehicle_reward = traj.get("dreamer_ac_vehicle_reward")
             vehicle_ids = traj.get("dreamer_ac_vehicle_id")
             vehicle_step_index = traj.get("dreamer_ac_step_index")
+            vehicle_next_obs = traj.get("dreamer_ac_vehicle_next_obs")
+            vehicle_next_valid = traj.get("dreamer_ac_vehicle_next_valid")
             vehicle_sample_weight = traj.get("dreamer_ac_sample_weight")
             if (
                 torch.is_tensor(vehicle_obs)
@@ -4920,11 +5233,63 @@ def dreamer_update(
                             group_index=step_used,
                         ).squeeze(-1)
                         with torch.no_grad():
-                            bootstrap_vehicle_values = bootstrap_vehicle_critic(
-                                obs_used,
-                                context=vehicle_context,
-                                group_index=step_used,
-                            ).squeeze(-1)
+                            next_value_source = torch.zeros_like(vehicle_values)
+                            next_valid_source = torch.zeros_like(vehicle_values, dtype=torch.bool)
+                            if (
+                                torch.is_tensor(vehicle_next_obs)
+                                and torch.is_tensor(vehicle_next_valid)
+                                and vehicle_next_obs.numel() > 0
+                                and vehicle_next_valid.numel() > 0
+                            ):
+                                next_obs_n = vehicle_next_obs[:n_vehicle_samples].to(
+                                    device=vehicle_obs_n.device,
+                                    dtype=vehicle_obs_n.dtype,
+                                )
+                                next_valid_n = vehicle_next_valid.reshape(-1)[:n_vehicle_samples].to(
+                                    device=vehicle_obs_n.device,
+                                    dtype=torch.bool,
+                                )
+                                if (
+                                    int(next_obs_n.shape[0]) == n_vehicle_samples
+                                    and int(next_obs_n.shape[1]) == int(vehicle_obs_n.shape[1])
+                                    and int(next_valid_n.numel()) == n_vehicle_samples
+                                ):
+                                    next_obs_used = next_obs_n[finite_vehicle]
+                                    next_valid_used = next_valid_n[finite_vehicle]
+                                    if bool(next_valid_used.any().detach().cpu().item()):
+                                        next_context = None
+                                        if int(getattr(vehicle_critic, "context_dim", 0)) > 0:
+                                            if (
+                                                torch.is_tensor(critic_context_tensor)
+                                                and int(critic_context_tensor.shape[0]) > 0
+                                            ):
+                                                next_ctx_idx = (step_used + 1).clamp(
+                                                    0,
+                                                    int(critic_context_tensor.shape[0]) - 1,
+                                                )
+                                                next_context = critic_context_tensor[next_ctx_idx].detach()
+                                        next_bootstrap_values = bootstrap_vehicle_critic(
+                                            next_obs_used,
+                                            context=next_context,
+                                            group_index=step_used + 1,
+                                        ).squeeze(-1)
+                                        next_value_source[next_valid_used] = next_bootstrap_values.detach()[next_valid_used]
+                                        next_valid_source = next_valid_used
+                            finite_bootstrap = next_value_source[next_valid_source]
+                            vehicle_bootstrap_nonterminal_fracs.append(
+                                float(next_valid_source.to(dtype=torch.float32).mean().cpu().item())
+                            )
+                            vehicle_terminal_fracs.append(
+                                float((~next_valid_source).to(dtype=torch.float32).mean().cpu().item())
+                            )
+                            vehicle_bootstrap_value_means.append(
+                                float(finite_bootstrap.mean().cpu().item())
+                                if int(finite_bootstrap.numel()) > 0 else 0.0
+                            )
+                            vehicle_bootstrap_value_stds.append(
+                                float(finite_bootstrap.std(unbiased=False).cpu().item())
+                                if int(finite_bootstrap.numel()) > 1 else 0.0
+                            )
                             vehicle_targets = torch.zeros_like(vehicle_values)
                             for veh_id in torch.unique(ids_used, sorted=True):
                                 mask = ids_used == veh_id
@@ -4933,16 +5298,31 @@ def dreamer_update(
                                     continue
                                 order = torch.argsort(step_used[idx], stable=True)
                                 ordered_idx = idx[order]
+                                steps_i = step_used.detach()[ordered_idx]
                                 rewards_i = reward_used.detach()[ordered_idx]
-                                next_i = torch.zeros_like(rewards_i)
-                                if int(ordered_idx.numel()) > 1:
-                                    next_i[:-1] = bootstrap_vehicle_values.detach()[ordered_idx[1:]]
-                                vehicle_targets[ordered_idx] = lambda_return(
-                                    rewards_i,
-                                    next_i,
-                                    gamma=vehicle_return_discount,
-                                    lambda_=float(cfg.gae_lambda),
-                                )
+                                next_i = next_value_source.detach()[ordered_idx]
+                                continue_i = next_valid_source.detach()[ordered_idx]
+                                targets_i = torch.zeros_like(rewards_i)
+                                acc = torch.zeros((), device=rewards_i.device, dtype=rewards_i.dtype)
+                                gamma = float(vehicle_return_discount)
+                                lambda_ = float(cfg.gae_lambda)
+                                for pos in reversed(range(int(ordered_idx.numel()))):
+                                    if not bool(continue_i[pos].detach().cpu().item()):
+                                        acc = rewards_i[pos]
+                                    else:
+                                        contiguous_next = (
+                                            pos + 1 < int(ordered_idx.numel())
+                                            and int(steps_i[pos + 1].detach().cpu().item())
+                                            == int(steps_i[pos].detach().cpu().item()) + 1
+                                        )
+                                        if contiguous_next:
+                                            acc = rewards_i[pos] + gamma * (
+                                                (1.0 - lambda_) * next_i[pos] + lambda_ * acc
+                                            )
+                                        else:
+                                            acc = rewards_i[pos] + gamma * next_i[pos]
+                                    targets_i[pos] = acc
+                                vehicle_targets[ordered_idx] = targets_i
                         vehicle_critic_target_means.append(float(vehicle_targets.detach().mean().cpu().item()))
                         vehicle_critic_target_stds.append(
                             float(vehicle_targets.detach().std(unbiased=False).cpu().item())
@@ -5031,16 +5411,24 @@ def dreamer_update(
                             device=vehicle_obs_n.device,
                             dtype=vehicle_obs_n.dtype,
                         )
+                        raw_vehicle_adv = vehicle_targets.detach() - vehicle_values.detach()
+                        vehicle_adv_raw_means.append(float(raw_vehicle_adv.detach().mean().cpu().item()))
+                        vehicle_adv_raw_stds.append(
+                            float(raw_vehicle_adv.detach().std(unbiased=False).cpu().item())
+                            if int(raw_vehicle_adv.numel()) > 1 else 0.0
+                        )
                         if (
                             vehicle_return_normalizer is not None
                             and bool(getattr(cfg, "dreamer_vehicle_critic_return_normalizer", True))
                         ):
-                            adv_used = (
-                                vehicle_return_normalizer.normalize(vehicle_targets)
-                                - vehicle_return_normalizer.normalize(vehicle_values.detach())
-                            )
+                            adv_used = vehicle_return_normalizer.scale_only(raw_vehicle_adv)
                         else:
-                            adv_used = vehicle_targets - vehicle_values.detach()
+                            adv_used = raw_vehicle_adv
+                        vehicle_adv_scaled_means.append(float(adv_used.detach().mean().cpu().item()))
+                        vehicle_adv_scaled_stds.append(
+                            float(adv_used.detach().std(unbiased=False).cpu().item())
+                            if int(adv_used.numel()) > 1 else 0.0
+                        )
                         if bool(getattr(cfg, "dreamer_normalize_actor_advantages", False)):
                             adv_used = _standardize_with_detached_stats(adv_used, center=True)
                         sample_adv[finite_vehicle] = adv_used.detach().to(dtype=sample_adv.dtype)
@@ -5564,6 +5952,9 @@ def dreamer_update(
             "grpo_combined_adv_std": 0.0,
             "grpo_combined_clip_frac": 0.0,
             "grpo_policy_kl": 0.0,
+            "actor_grad_norm": 0.0,
+            "actor_grad_norm_clipped": 0.0,
+            "actor_update_applied": 0.0,
             "grpo_rollout_cost": 0.0,
             "grpo_rollout_adv_mean": 0.0,
             "grpo_rollout_adv_std": 0.0,
@@ -5654,6 +6045,15 @@ def dreamer_update(
             "vehicle_critic_explained_variance": 0.0,
             "vehicle_return_norm_mean": 0.0,
             "vehicle_return_norm_std": 1.0,
+            "vehicle_return_norm_scale": 1.0,
+            "vehicle_adv_raw_mean": 0.0,
+            "vehicle_adv_raw_std": 0.0,
+            "vehicle_adv_scaled_mean": 0.0,
+            "vehicle_adv_scaled_std": 0.0,
+            "vehicle_bootstrap_nonterminal_frac": 0.0,
+            "vehicle_bootstrap_value_mean": 0.0,
+            "vehicle_bootstrap_value_std": 0.0,
+            "vehicle_terminal_frac": 0.0,
             "vehicle_reward_mean": 0.0,
             "vehicle_reward_std": 0.0,
             "vehicle_route_progress_reward_mean": 0.0,
@@ -5674,8 +6074,13 @@ def dreamer_update(
             "critic_target_std": 0.0,
             "critic_explained_variance": 0.0,
             "critic_return_discount": float(critic_return_discount),
+            "actor_adv_raw_mean": 0.0,
+            "actor_adv_raw_std": 0.0,
+            "actor_adv_scaled_mean": 0.0,
+            "actor_adv_scaled_std": 0.0,
             "return_norm_mean": 0.0,
             "return_norm_std": 1.0,
+            "return_norm_scale": 1.0,
             "skipped_actor_trajs": float(skipped_actor_trajs),
             "skip_reason_counts": skip_reason_counts,
             "skipped_traj_ids": skipped_traj_ids,
@@ -5840,6 +6245,9 @@ def dreamer_update(
     actor_probe_argmax_route0_frac = 0.0
     actor_probe_top1_prob = 0.0
     actor_probe_sample_count = _snapshot_sample_count(actor_probe_snapshot)
+    actor_grad_norm = 0.0
+    actor_grad_norm_clipped = 0.0
+    actor_update_applied = 0.0
 
     if actor_losses and not actor_gate_skip:
         actor_loss_total = torch.stack(actor_losses).mean()
@@ -5918,7 +6326,9 @@ def dreamer_update(
             optimizer_lrs_before = [float(group.get("lr", 0.0)) for group in actor_optimizer.param_groups]
             actor_optimizer.zero_grad()
             actor_loss_total.backward()
+            actor_grad_norm = _module_grad_norm(actor)
             nn.utils.clip_grad_norm_(actor.parameters(), 1.0)
+            actor_grad_norm_clipped = _module_grad_norm(actor)
             saved_actor_grads = [
                 None if p.grad is None else p.grad.detach().clone()
                 for p in actor.parameters()
@@ -6127,6 +6537,7 @@ def dreamer_update(
                     break
             if accepted:
                 actor_trust_region_accepted = 1.0
+                actor_update_applied = 1.0
                 _restore_optimizer_lr(actor_optimizer, optimizer_lrs_before)
             else:
                 actor.load_state_dict(actor_state_before)
@@ -6148,10 +6559,13 @@ def dreamer_update(
         else:
             actor_optimizer.zero_grad()
             actor_loss_total.backward()
+            actor_grad_norm = _module_grad_norm(actor)
             nn.utils.clip_grad_norm_(actor.parameters(), 1.0)
+            actor_grad_norm_clipped = _module_grad_norm(actor)
             actor_optimizer.step()
             actor_trust_region_accepted = 1.0
             actor_anchor_accepted = 1.0
+            actor_update_applied = 1.0
     else:
         actor_loss_total = torch.zeros((), device=critic_loss_total.device, dtype=critic_loss_total.dtype)
 
@@ -6190,6 +6604,9 @@ def dreamer_update(
         "grpo_combined_adv_std": float(np.mean(grpo_combined_adv_stds)) if grpo_combined_adv_stds else 0.0,
         "grpo_combined_clip_frac": float(np.mean(grpo_combined_clip_fracs)) if grpo_combined_clip_fracs else 0.0,
         "grpo_policy_kl": float(np.mean(grpo_policy_kl_values)) if grpo_policy_kl_values else 0.0,
+        "actor_grad_norm": float(actor_grad_norm),
+        "actor_grad_norm_clipped": float(actor_grad_norm_clipped),
+        "actor_update_applied": float(actor_update_applied),
         "grpo_rollout_cost": float(np.mean(grpo_rollout_cost_values)) if grpo_rollout_cost_values else 0.0,
         "grpo_rollout_adv_mean": float(np.mean(grpo_rollout_adv_values)) if grpo_rollout_adv_values else 0.0,
         "grpo_rollout_adv_std": float(np.std(grpo_rollout_adv_values)) if grpo_rollout_adv_values else 0.0,
@@ -6349,6 +6766,40 @@ def dreamer_update(
             float(vehicle_return_normalizer.var.detach().clamp_min(1e-6).sqrt().cpu().item())
             if vehicle_return_normalizer is not None else 1.0
         ),
+        "vehicle_return_norm_scale": (
+            float(
+                vehicle_return_normalizer.actor_scale(
+                    device=vehicle_return_normalizer.mean.device,
+                    dtype=torch.float32,
+                ).detach().cpu().item()
+            )
+            if vehicle_return_normalizer is not None else 1.0
+        ),
+        "vehicle_adv_raw_mean": (
+            float(np.mean(vehicle_adv_raw_means)) if vehicle_adv_raw_means else 0.0
+        ),
+        "vehicle_adv_raw_std": (
+            float(np.mean(vehicle_adv_raw_stds)) if vehicle_adv_raw_stds else 0.0
+        ),
+        "vehicle_adv_scaled_mean": (
+            float(np.mean(vehicle_adv_scaled_means)) if vehicle_adv_scaled_means else 0.0
+        ),
+        "vehicle_adv_scaled_std": (
+            float(np.mean(vehicle_adv_scaled_stds)) if vehicle_adv_scaled_stds else 0.0
+        ),
+        "vehicle_bootstrap_nonterminal_frac": (
+            float(np.mean(vehicle_bootstrap_nonterminal_fracs))
+            if vehicle_bootstrap_nonterminal_fracs else 0.0
+        ),
+        "vehicle_bootstrap_value_mean": (
+            float(np.mean(vehicle_bootstrap_value_means)) if vehicle_bootstrap_value_means else 0.0
+        ),
+        "vehicle_bootstrap_value_std": (
+            float(np.mean(vehicle_bootstrap_value_stds)) if vehicle_bootstrap_value_stds else 0.0
+        ),
+        "vehicle_terminal_frac": (
+            float(np.mean(vehicle_terminal_fracs)) if vehicle_terminal_fracs else 0.0
+        ),
         "vehicle_reward_mean": float(np.mean(vehicle_reward_means)) if vehicle_reward_means else 0.0,
         "vehicle_reward_std": float(np.mean(vehicle_reward_stds)) if vehicle_reward_stds else 0.0,
         "vehicle_route_progress_reward_mean": (
@@ -6419,11 +6870,32 @@ def dreamer_update(
             float(np.mean(critic_explained_variances)) if critic_explained_variances else 0.0
         ),
         "critic_return_discount": float(critic_return_discount),
+        "actor_adv_raw_mean": (
+            float(np.mean(actor_adv_raw_means)) if actor_adv_raw_means else 0.0
+        ),
+        "actor_adv_raw_std": (
+            float(np.mean(actor_adv_raw_stds)) if actor_adv_raw_stds else 0.0
+        ),
+        "actor_adv_scaled_mean": (
+            float(np.mean(actor_adv_scaled_means)) if actor_adv_scaled_means else 0.0
+        ),
+        "actor_adv_scaled_std": (
+            float(np.mean(actor_adv_scaled_stds)) if actor_adv_scaled_stds else 0.0
+        ),
         "return_norm_mean": (
             float(return_normalizer.mean.detach().cpu().item()) if return_normalizer is not None else 0.0
         ),
         "return_norm_std": (
             float(return_normalizer.var.detach().clamp_min(1e-6).sqrt().cpu().item())
+            if return_normalizer is not None else 1.0
+        ),
+        "return_norm_scale": (
+            float(
+                return_normalizer.actor_scale(
+                    device=return_normalizer.mean.device,
+                    dtype=torch.float32,
+                ).detach().cpu().item()
+            )
             if return_normalizer is not None else 1.0
         ),
         "skipped_actor_trajs": float(skipped_actor_trajs),
@@ -6699,11 +7171,17 @@ def train(cfg: TrainConfig) -> None:
     return_normalizer = DreamerReturnNormalizer(
         decay=float(getattr(cfg, "dreamer_return_normalizer_decay", 0.99)),
         enabled=bool(getattr(cfg, "dreamer_return_normalizer", True)),
+        mode=str(getattr(cfg, "dreamer_return_normalizer_mode", "ema_std")),
+        percentile_low=float(getattr(cfg, "dreamer_return_normalizer_percentile_low", 5.0)),
+        percentile_high=float(getattr(cfg, "dreamer_return_normalizer_percentile_high", 95.0)),
         device=device,
     )
     vehicle_return_normalizer = DreamerReturnNormalizer(
         decay=float(getattr(cfg, "dreamer_return_normalizer_decay", 0.99)),
         enabled=bool(getattr(cfg, "dreamer_vehicle_critic_return_normalizer", True)),
+        mode=str(getattr(cfg, "dreamer_return_normalizer_mode", "ema_std")),
+        percentile_low=float(getattr(cfg, "dreamer_return_normalizer_percentile_low", 5.0)),
+        percentile_high=float(getattr(cfg, "dreamer_return_normalizer_percentile_high", 95.0)),
         device=device,
     )
     freeze_module(wm)
@@ -6730,7 +7208,7 @@ def train(cfg: TrainConfig) -> None:
     )
     critic_return_discount = _dreamer_global_return_discount(cfg)
     logger.info(
-        "Dreamer CTDE mainline active: actor_obs_dim=%d n_routes=%d d_spatial=%d batch_eps=%d actor_h=%d critic_variant=%s critic_aggregation=%s critic_context_dim=%d slow_critic_tau=%.4f return_norm=%s actor_lr=%.2e actor_lr_decay=%d->%d@%.3f critic_lr=%.2e vehicle_critic=%s vehicle_critic_context_dim=%d vehicle_route_q=%s vehicle_q_actor_w=%.3f vehicle_critic_lr=%.2e critic_discount=%.4f vehicle_discount=%.4f",
+        "Dreamer CTDE mainline active: actor_obs_dim=%d n_routes=%d d_spatial=%d batch_eps=%d actor_h=%d critic_variant=%s critic_aggregation=%s critic_context_dim=%d slow_critic_tau=%.4f return_norm=%s/%s actor_lr=%.2e actor_lr_decay=%d->%d@%.3f critic_lr=%.2e vehicle_critic=%s vehicle_critic_context_dim=%d vehicle_route_q=%s vehicle_q_actor_w=%.3f vehicle_critic_lr=%.2e critic_discount=%.4f vehicle_discount=%.4f",
         obs_dim,
         int(cfg.n_routes),
         int(wm.d_spatial),
@@ -6741,6 +7219,7 @@ def train(cfg: TrainConfig) -> None:
         int(getattr(critic, "context_dim", 0)),
         float(getattr(cfg, "dreamer_slow_critic_tau", 0.0)) if target_critic is not None else 0.0,
         str(bool(getattr(cfg, "dreamer_return_normalizer", True))),
+        str(getattr(return_normalizer, "mode", "ema_std")),
         actor_lr,
         int(getattr(cfg, "dreamer_actor_lr_decay_start_episode", -1)),
         int(getattr(cfg, "dreamer_actor_lr_decay_end_episode", -1)),
@@ -6811,7 +7290,7 @@ def train(cfg: TrainConfig) -> None:
 
     pending_bufs: list  = []
     last_update_stats: Dict[str, float] = {
-        key: (1.0 if key == "return_norm_std" else 0.0)
+        key: (1.0 if key in {"return_norm_std", "return_norm_scale", "vehicle_return_norm_scale"} else 0.0)
         for key in DREAMER_UPDATE_SCALAR_KEYS
     }
 
@@ -7025,7 +7504,7 @@ def train(cfg: TrainConfig) -> None:
         pending_trajs: List[Dict[str, Any]] = []
         update_id = 0
         last_update_stats: Dict[str, float] = {
-            key: (1.0 if key == "return_norm_std" else 0.0)
+            key: (1.0 if key in {"return_norm_std", "return_norm_scale", "vehicle_return_norm_scale"} else 0.0)
             for key in DREAMER_UPDATE_SCALAR_KEYS
         }
         last_update_stats.update({
@@ -7275,6 +7754,8 @@ def train(cfg: TrainConfig) -> None:
                     horizon_proxy=horizon_proxy,
                     hdv_background_edge=hdv_background_for_rollout,
                     episode_index=episode,
+                    vehicle_critic=vehicle_critic,
+                    target_vehicle_critic=target_vehicle_critic,
                 )
                 _rollout_wall_sec += _time.perf_counter() - _rollout_t0
                 if hdv_response_metrics:
@@ -7446,6 +7927,13 @@ def train(cfg: TrainConfig) -> None:
                 ),
                 "vehicle_route_credit_selected_gate_frac": float(
                     ep_metrics.get("vehicle_route_credit_selected_gate_frac", 0.0)
+                ),
+                "vehicle_bootstrap_nonterminal_frac": float(
+                    ep_metrics.get("vehicle_bootstrap_nonterminal_frac", 0.0)
+                ),
+                "vehicle_terminal_frac": float(ep_metrics.get("vehicle_terminal_frac", 0.0)),
+                "vehicle_bootstrap_value_mean": float(
+                    ep_metrics.get("vehicle_bootstrap_value_mean", 0.0)
                 ),
                 "vehicle_social_reward_mean": float(ep_metrics.get("vehicle_social_reward_mean", 0.0)),
                 "vehicle_social_reward_std": float(ep_metrics.get("vehicle_social_reward_std", 0.0)),
@@ -7640,6 +8128,9 @@ def train(cfg: TrainConfig) -> None:
                 recent_actor_probe_change = np.mean(stats_history["dreamer_actor_probe_argmax_change_frac"][-cfg.log_every:]) if stats_history["dreamer_actor_probe_argmax_change_frac"] else 0.0
                 recent_actor_probe_vehicle_change = np.mean(stats_history["dreamer_actor_probe_vehicle_argmax_change_max"][-cfg.log_every:]) if stats_history["dreamer_actor_probe_vehicle_argmax_change_max"] else 0.0
                 recent_actor_probe_route0 = np.mean(stats_history["dreamer_actor_probe_argmax_route0_frac"][-cfg.log_every:]) if stats_history["dreamer_actor_probe_argmax_route0_frac"] else 0.0
+                recent_actor_grad = np.mean(stats_history["actor_grad_norm"][-cfg.log_every:]) if stats_history["actor_grad_norm"] else 0.0
+                recent_actor_grad_clipped = np.mean(stats_history["actor_grad_norm_clipped"][-cfg.log_every:]) if stats_history["actor_grad_norm_clipped"] else 0.0
+                recent_actor_update_applied = np.mean(stats_history["actor_update_applied"][-cfg.log_every:]) if stats_history["actor_update_applied"] else 0.0
                 recent_ac_samples = np.mean(stats_history["dreamer_ac_sample_count"][-cfg.log_every:]) if stats_history["dreamer_ac_sample_count"] else 0.0
                 recent_ac_kl = np.mean(stats_history["dreamer_ac_policy_kl"][-cfg.log_every:]) if stats_history["dreamer_ac_policy_kl"] else 0.0
                 recent_ac_clip = np.mean(stats_history["dreamer_ac_clip_frac"][-cfg.log_every:]) if stats_history["dreamer_ac_clip_frac"] else 0.0
@@ -7666,8 +8157,17 @@ def train(cfg: TrainConfig) -> None:
                 recent_vehicle_social_mean = np.mean(stats_history["vehicle_social_reward_mean"][-cfg.log_every:]) if stats_history["vehicle_social_reward_mean"] else 0.0
                 recent_vehicle_social_std = np.mean(stats_history["vehicle_social_reward_std"][-cfg.log_every:]) if stats_history["vehicle_social_reward_std"] else 0.0
                 recent_vehicle_ret_std = np.mean(stats_history["vehicle_return_norm_std"][-cfg.log_every:]) if stats_history["vehicle_return_norm_std"] else 1.0
+                recent_vehicle_ret_scale = np.mean(stats_history["vehicle_return_norm_scale"][-cfg.log_every:]) if stats_history["vehicle_return_norm_scale"] else 1.0
+                recent_vehicle_adv_raw_std = np.mean(stats_history["vehicle_adv_raw_std"][-cfg.log_every:]) if stats_history["vehicle_adv_raw_std"] else 0.0
+                recent_vehicle_adv_scaled_std = np.mean(stats_history["vehicle_adv_scaled_std"][-cfg.log_every:]) if stats_history["vehicle_adv_scaled_std"] else 0.0
+                recent_vehicle_bootstrap_frac = np.mean(stats_history["vehicle_bootstrap_nonterminal_frac"][-cfg.log_every:]) if stats_history["vehicle_bootstrap_nonterminal_frac"] else 0.0
+                recent_vehicle_bootstrap_value = np.mean(stats_history["vehicle_bootstrap_value_mean"][-cfg.log_every:]) if stats_history["vehicle_bootstrap_value_mean"] else 0.0
+                recent_vehicle_terminal_frac = np.mean(stats_history["vehicle_terminal_frac"][-cfg.log_every:]) if stats_history["vehicle_terminal_frac"] else 0.0
                 recent_v_ev = np.mean(stats_history["critic_explained_variance"][-cfg.log_every:]) if stats_history["critic_explained_variance"] else 0.0
                 recent_ret_std = np.mean(stats_history["return_norm_std"][-cfg.log_every:]) if stats_history["return_norm_std"] else 1.0
+                recent_ret_scale = np.mean(stats_history["return_norm_scale"][-cfg.log_every:]) if stats_history["return_norm_scale"] else 1.0
+                recent_actor_adv_raw_std = np.mean(stats_history["actor_adv_raw_std"][-cfg.log_every:]) if stats_history["actor_adv_raw_std"] else 0.0
+                recent_actor_adv_scaled_std = np.mean(stats_history["actor_adv_scaled_std"][-cfg.log_every:]) if stats_history["actor_adv_scaled_std"] else 0.0
                 recent_hdv_response_bg = np.mean(stats_history["hdv_response_background_sum"][-cfg.log_every:]) if stats_history["hdv_response_background_sum"] else 0.0
                 recent_active_av = np.mean(stats_history["avg_active_av"][-cfg.log_every:])
                 recent_actor_steps = np.mean(stats_history["n_actor_steps"][-cfg.log_every:]) if stats_history["n_actor_steps"] else 0.0
@@ -7718,10 +8218,12 @@ def train(cfg: TrainConfig) -> None:
                     f"trust={recent_actor_tr_accept:.1f}/kl={recent_actor_tr_kl:.4f}/retry={recent_actor_tr_retries:.1f}/chg={recent_actor_tr_argmax_change:.3f}/vchg={recent_actor_tr_vehicle_change:.3f}/r0={recent_actor_tr_route0:.2f} "
                     f"anchor={recent_actor_anchor_active:.1f}/{recent_actor_anchor_accept:.1f}/kl={recent_actor_anchor_kl:.4f}/chg={recent_actor_anchor_change:.3f}/vchg={recent_actor_anchor_vehicle_change:.3f}/r0={recent_actor_anchor_route0:.2f} "
                     f"probe={recent_actor_probe_active:.1f}/{recent_actor_probe_accept:.1f}/kl={recent_actor_probe_kl:.4f}/chg={recent_actor_probe_change:.3f}/vchg={recent_actor_probe_vehicle_change:.3f}/r0={recent_actor_probe_route0:.2f} "
+                    f"grad={recent_actor_grad:.3e}->{recent_actor_grad_clipped:.3e}/upd={recent_actor_update_applied:.1f} "
                     f"ac_n={recent_ac_samples:.1f} "
                     f"ac_kl/clip/w/sample_adv={recent_ac_kl:.4f}/{recent_ac_clip:.3f}/{recent_ac_weight:.3f}/{recent_ac_sample_adv:.1f} "
                     f"ent_floor={recent_ac_entropy_floor:.4f}/{recent_ac_entropy_target:.3f}/k={recent_ac_entropy_routes:.2f}/mask={recent_ac_entropy_mask:.2f} "
-                    f"v_ev={recent_v_ev:.3f} ret_std={recent_ret_std:.3f} | "
+                    f"v_ev={recent_v_ev:.3f} ret_std/scale={recent_ret_std:.3f}/{recent_ret_scale:.3f} "
+                    f"adv_std={recent_actor_adv_raw_std:.3f}->{recent_actor_adv_scaled_std:.3f} | "
                     f"veh_vf={recent_vehicle_vf:.4f} veh_rew={recent_vehicle_reward_mean:.2f}/{recent_vehicle_reward_std:.2f} "
                     f"veh_route_progress={recent_vehicle_route_progress_mean:.2f}/{recent_vehicle_route_progress_std:.2f} "
                     f"veh_route_credit={recent_vehicle_route_credit_mean:.2f}/{recent_vehicle_route_credit_std:.2f} "
@@ -7729,7 +8231,9 @@ def train(cfg: TrainConfig) -> None:
                     f"veh_q={recent_vehicle_route_q:.4f}/{recent_vehicle_route_q_actor:.4f} "
                     f"qadv={recent_vehicle_route_q_adv_mean:.2f}/{recent_vehicle_route_q_adv_std:.2f} "
                     f"veh_social={recent_vehicle_social_mean:.2f}/{recent_vehicle_social_std:.2f} "
-                    f"veh_tgt_std={recent_vehicle_target_std:.2f} veh_ret_std={recent_vehicle_ret_std:.2f} | "
+                    f"veh_tgt_std={recent_vehicle_target_std:.2f} veh_ret_std/scale={recent_vehicle_ret_std:.2f}/{recent_vehicle_ret_scale:.2f} "
+                    f"veh_adv_std={recent_vehicle_adv_raw_std:.2f}->{recent_vehicle_adv_scaled_std:.2f} "
+                    f"veh_boot={recent_vehicle_bootstrap_frac:.2f}/term={recent_vehicle_terminal_frac:.2f}/v={recent_vehicle_bootstrap_value:.2f} | "
                     f"hdv_resp_bg={recent_hdv_response_bg:.4f} | "
                     f"timing(ep={episode_wall_sec:.2f}s rollout={_rollout_wall_sec:.2f}s hdv={_hdv_response_wall_sec:.2f}s baseline={_baseline_wall_sec:.2f}s update={_update_wall_sec:.2f}s group={rollout_group_size}) | "
                     f"skip_reasons={last_skip_reasons} | "
@@ -8022,6 +8526,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="Use an EMA normalizer for Dreamer critic targets and actor advantages.")
     p.add_argument("--dreamer_return_normalizer_decay", type=float, default=0.99,
                    help="EMA decay for --dreamer_return_normalizer.")
+    p.add_argument("--dreamer_return_normalizer_mode", type=str, default="ema_std",
+                   choices=["ema_std", "range"],
+                   help="Return normalization mode. range uses an EMA of percentile range, matching DreamerV3-style symlog-free return scaling.")
+    p.add_argument("--dreamer_return_normalizer_percentile_low", type=float, default=5.0,
+                   help="Lower percentile for --dreamer_return_normalizer_mode=range.")
+    p.add_argument("--dreamer_return_normalizer_percentile_high", type=float, default=95.0,
+                   help="Upper percentile for --dreamer_return_normalizer_mode=range.")
     p.add_argument("--dreamer_vehicle_critic", action=argparse.BooleanOptionalAction, default=True,
                    help="Train a per-vehicle critic for discrete actor-critic sample advantages.")
     p.add_argument("--dreamer_vehicle_critic_lr", type=float, default=0.0,
@@ -8374,12 +8885,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dreamer_route_cost_reward_mode", type=str, default="progress_fraction",
                    choices=[
                        "progress_fraction", "step_progress", "trip_progress_fraction",
+                       "capped_step_cost", "capped_cost", "step_cost", "min_step_remaining",
                        "route_tt", "remaining_tt", "full_path", "legacy",
                    ],
                    help=(
                        "Per-vehicle critic route reward readout. progress_fraction rewards "
                        "min(step_interval, remaining_route_tt)/(elapsed+remaining_route_tt), "
-                       "so final steps that arrive early cannot exceed one step of progress; "
+                       "capped_step_cost rewards -min(step_interval, remaining_route_tt)/temperature; "
                        "route_tt/legacy keeps the old negative remaining-route-seconds reward."
                    ))
     p.add_argument("--dreamer_route_cost_reward_state", type=str, default="next",

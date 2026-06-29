@@ -1,0 +1,84 @@
+{
+  "base_records": "results/fontenay_en_parisis_incident_speed5_smoke_20260530/collect_urb_fair_eval_postmutation_records",
+  "base_settings": ".urbandreamer/generated/fontenay_en_parisis_incident_speed5_smoke_20260530/urb_fair_eval.env",
+  "full_cycle_script": null,
+  "generated_at": "2026-06-09T11:39:52.737235+00:00",
+  "max_steps_per_episode": 9000,
+  "min_live_t_all": 6.0,
+  "selected_incident": null,
+  "selected_incident_key": null,
+  "trials": [
+    {
+      "incident": {
+        "edge_count": 11,
+        "edges": "101220399#0,101220399#1,23214994,-494202201#0,-494202201#1,494202201#0,494202201#1,675895700#0,675895700#1,70118562#0,70118562#1",
+        "end": 1800,
+        "key": "top_delay_plus_both494_675895700_70118562_pairs_wide300_1800_s300_e1800_v0p1",
+        "label": "top_delay_plus_both494_675895700_70118562_pairs_wide300_1800",
+        "speed": 0.1,
+        "start": 300
+      },
+      "passed": false,
+      "policy_results": {
+        "live_current_tt": {
+          "bad_episodes": [
+            {
+              "arrived_all": "1609",
+              "arrived_av": "646",
+              "arrived_hdv": "963",
+              "completion_rate": "0.778046421663443",
+              "dataset_collected": "0",
+              "episode": "2",
+              "phase": "test",
+              "steps": "60",
+              "t_CAV": "4.4908152734778115",
+              "t_HDV": "5.128366216683974",
+              "t_all": "4.8723948622332705",
+              "total_agents": "2068",
+              "unfinished_all": "459"
+            }
+          ],
+          "bad_sumo_stats": [
+            {
+              "collisions": 0,
+              "file": "sumo_stats_1.xml",
+              "inserted": 2051,
+              "loaded": 2068,
+              "running": 442,
+              "teleports": 0,
+              "trip_count": 1609,
+              "waiting": 17
+            }
+          ],
+          "candidate_dynamic_total": 8584,
+          "candidate_fallback_total": 0,
+          "candidate_unique_mean": 3.761034063498179,
+          "complete": false,
+          "completion_rate": 0.778046421663443,
+          "dynamic_route_total": 8584,
+          "dynamic_selected_route_counts": {
+            "route0": 8214,
+            "route1": 269,
+            "route2": 67,
+            "route3": 34
+          },
+          "episodes": 1,
+          "live_route_best_counts": {
+            "route0": 8214,
+            "route1": 269,
+            "route2": 67,
+            "route3": 34
+          },
+          "out_dir": "results/fontenay_en_parisis_short_congestion_incident_probe_20260609/top_delay_plus_both494_675895700_70118562_pairs_wide300_1800_s300_e1800_v0p1/live_current_tt_1eps_max9000",
+          "route0_share": 0.9568965517241379,
+          "summary_path": "results/fontenay_en_parisis_short_congestion_incident_probe_20260609/top_delay_plus_both494_675895700_70118562_pairs_wide300_1800_s300_e1800_v0p1/live_current_tt_1eps_max9000/collector_eval_summary.json",
+          "sumo_stats_files": 1,
+          "t_CAV": 4.4908152734778115,
+          "t_HDV": 5.128366216683974,
+          "t_all": 4.8723948622332705
+        }
+      },
+      "reason": "live_current_tt failed completion/fallback/teleport gate"
+    }
+  ]
+}

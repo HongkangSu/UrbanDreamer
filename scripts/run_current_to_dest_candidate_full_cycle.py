@@ -327,6 +327,8 @@ def build_full_cycle_argv(args: argparse.Namespace, passthrough: Sequence[str] =
         str(args.marl_checkpoint_every),
         "--eval-test-eps",
         str(args.eval_test_eps),
+        "--eval-max-steps-per-episode",
+        str(args.eval_max_steps_per_episode),
         "--eval-sumo-time-to-teleport",
         str(args.eval_sumo_time_to_teleport),
         "--eval-sumo-extra-args",
@@ -442,6 +444,7 @@ def parse_args(argv: Iterable[str] | None = None) -> tuple[argparse.Namespace, l
     parser.add_argument("--checkpoint-episodes", default=_env("CHECKPOINT_EPISODES", "100 200 400"))
     parser.add_argument("--marl-checkpoint-every", default=_env("MARL_CHECKPOINT_EVERY", "100"))
     parser.add_argument("--eval-test-eps", default=_env("EVAL_TEST_EPS", "1"))
+    parser.add_argument("--eval-max-steps-per-episode", default=_env("EVAL_MAX_STEPS_PER_EPISODE", "0"))
     parser.add_argument("--eval-sumo-time-to-teleport", default=_env("EVAL_SUMO_TIME_TO_TELEPORT", ""))
     parser.add_argument("--eval-sumo-extra-args", default=_env("EVAL_SUMO_EXTRA_ARGS", ""))
     parser.add_argument("--marl-seed", default=_env("MARL_SEED", "98"))
