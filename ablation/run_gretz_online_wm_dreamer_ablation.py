@@ -74,6 +74,12 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--wm-replay-buffer-episodes", type=int, default=8)
     parser.add_argument("--wm-update-epochs", type=int, default=1)
     parser.add_argument("--wm-update-every-episodes", type=int, default=1)
+    parser.add_argument(
+        "--wm-updates-per-collect",
+        type=int,
+        default=1,
+        help="Number of replay-sampled WM optimizer updates after each real SUMO collection episode.",
+    )
     parser.add_argument("--wm-replay-completion-threshold", type=float, default=1.0)
     parser.add_argument(
         "--allow-incomplete-wm-replay",
@@ -95,7 +101,17 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--wm-transition-hdv-action-scale", type=float, default=1.0)
     parser.add_argument("--imag-horizon", type=int, default=8)
     parser.add_argument("--imagined-updates-per-episode", type=int, default=1)
+    parser.add_argument(
+        "--imagined-update-passes-per-collect",
+        type=int,
+        default=1,
+        help="Number of imagined actor-critic update calls after each real SUMO collection episode.",
+    )
     parser.add_argument("--imagined-rollouts-per-update", type=int, default=1)
+    parser.add_argument("--min-replay-episodes-before-actor", type=int, default=1)
+    parser.add_argument("--ac-lambda", type=float, default=0.95)
+    parser.add_argument("--wm-prediction-diagnostic-every-episodes", type=int, default=1)
+    parser.add_argument("--wm-prediction-diagnostic-max-steps", type=int, default=16)
     parser.add_argument("--episode-steps", type=int, default=None)
     parser.add_argument("--sim-buffer-after-last-depart", type=int, default=None)
     parser.add_argument("--max-steps-per-episode", type=int, default=None)
@@ -146,6 +162,7 @@ def build_config(args: argparse.Namespace) -> OnlineWmDreamerConfig:
         "wm_replay_buffer_episodes": int(args.wm_replay_buffer_episodes),
         "wm_update_epochs": int(args.wm_update_epochs),
         "wm_update_every_episodes": int(args.wm_update_every_episodes),
+        "wm_updates_per_collect": int(args.wm_updates_per_collect),
         "wm_replay_require_completion": not bool(args.allow_incomplete_wm_replay),
         "wm_replay_completion_threshold": float(args.wm_replay_completion_threshold),
         "wm_batch_size": int(args.wm_batch_size),
@@ -163,7 +180,12 @@ def build_config(args: argparse.Namespace) -> OnlineWmDreamerConfig:
         "wm_transition_hdv_action_scale": float(args.wm_transition_hdv_action_scale),
         "imag_horizon": int(args.imag_horizon),
         "imagined_updates_per_episode": int(args.imagined_updates_per_episode),
+        "imagined_update_passes_per_collect": int(args.imagined_update_passes_per_collect),
         "imagined_rollouts_per_update": int(args.imagined_rollouts_per_update),
+        "min_replay_episodes_before_actor": int(args.min_replay_episodes_before_actor),
+        "ac_lambda": float(args.ac_lambda),
+        "wm_prediction_diagnostic_every_episodes": int(args.wm_prediction_diagnostic_every_episodes),
+        "wm_prediction_diagnostic_max_steps": int(args.wm_prediction_diagnostic_max_steps),
         "disable_human_learning_after_mutation": bool(args.disable_human_learning_after_mutation),
         "eval_python": str(args.eval_python),
         "extra_eval_args": tuple(passthrough),

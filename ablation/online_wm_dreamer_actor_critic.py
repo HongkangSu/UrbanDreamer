@@ -52,6 +52,7 @@ try:
     from dreamer4.urban_routing.dreamer_actor_critic import (
         CentralizedVehicleValueCritic,
         VehicleRouteActor,
+        lambda_return,
     )
     from dreamer4.urban_routing.dreamer_rollout import aggregate_route_probs_to_action_edge
     from dreamer4.urban_routing.experiment_settings import load_settings_file
@@ -65,7 +66,7 @@ try:
     from dreamer4.dynamics_losses import transition_decoded_supervision_loss
     from dreamer4.train_dynamics import cfm_loss, cfm_predict_one_timestep
 except Exception:
-    from dreamer_actor_critic import CentralizedVehicleValueCritic, VehicleRouteActor
+    from dreamer_actor_critic import CentralizedVehicleValueCritic, VehicleRouteActor, lambda_return
     from dreamer_rollout import aggregate_route_probs_to_action_edge
     from experiment_settings import load_settings_file
     from routerl_shared import compute_agent_counts, load_od_data
@@ -109,6 +110,7 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
     wm_replay_buffer_episodes: int = 8
     wm_update_epochs: int = 1
     wm_update_every_episodes: int = 1
+    wm_updates_per_collect: int = 1
     wm_replay_require_completion: bool = True
     wm_replay_completion_threshold: float = 1.0
     wm_batch_size: int = 16
@@ -131,8 +133,13 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
     wm_cfm_max_weight: float = 50.0
     imag_horizon: int = 8
     imagined_updates_per_episode: int = 1
+    imagined_update_passes_per_collect: int = 1
     imagined_rollouts_per_update: int = 1
     imagined_max_start_samples: int = 1
+    min_replay_episodes_before_actor: int = 1
+    ac_lambda: float = 0.95
+    wm_prediction_diagnostic_every_episodes: int = 1
+    wm_prediction_diagnostic_max_steps: int = 16
     direct_real_a2c_update: bool = False
 
     def resolve(self) -> "OnlineWmDreamerConfig":
@@ -173,6 +180,7 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
             "wm_replay_buffer_episodes",
             "wm_update_epochs",
             "wm_update_every_episodes",
+            "wm_updates_per_collect",
             "wm_replay_require_completion",
             "wm_replay_completion_threshold",
             "wm_batch_size",
@@ -195,8 +203,13 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
             "wm_cfm_max_weight",
             "imag_horizon",
             "imagined_updates_per_episode",
+            "imagined_update_passes_per_collect",
             "imagined_rollouts_per_update",
             "imagined_max_start_samples",
+            "min_replay_episodes_before_actor",
+            "ac_lambda",
+            "wm_prediction_diagnostic_every_episodes",
+            "wm_prediction_diagnostic_max_steps",
             "direct_real_a2c_update",
         ):
             if key not in overrides:
@@ -302,6 +315,9 @@ class OnlineWorldModelReplay:
     @property
     def episodes(self) -> List[List[OnlineWorldModelStep]]:
         return list(self._episodes)
+
+    def episode_count(self) -> int:
+        return int(len(self._episodes))
 
     def all_steps(self) -> List[OnlineWorldModelStep]:
         return [step for ep in self._episodes for step in ep]
@@ -575,6 +591,76 @@ def _discounted_returns_by_vehicle_ids(
                 discount *= float(gamma)
             returns[idx] = acc
     return returns
+
+
+def _lambda_returns_by_vehicle_ids(
+    rewards: torch.Tensor,
+    next_values: torch.Tensor,
+    next_valid: torch.Tensor,
+    vehicle_ids: torch.Tensor,
+    *,
+    gamma: float,
+    lambda_: float,
+) -> torch.Tensor:
+    returns = torch.zeros_like(rewards)
+    if int(rewards.numel()) == 0:
+        return returns
+    ids = vehicle_ids.detach().to(device="cpu", dtype=torch.long).reshape(-1).tolist()
+    by_vehicle: Dict[int, List[int]] = {}
+    for idx, vehicle_id in enumerate(ids[: int(rewards.numel())]):
+        by_vehicle.setdefault(int(vehicle_id), []).append(int(idx))
+    masked_next = torch.where(next_valid.to(device=next_values.device), next_values, torch.zeros_like(next_values))
+    for indices in by_vehicle.values():
+        if not indices:
+            continue
+        idx_t = torch.tensor(indices, device=rewards.device, dtype=torch.long)
+        returns.index_copy_(
+            0,
+            idx_t,
+            lambda_return(
+                rewards.index_select(0, idx_t),
+                masked_next.index_select(0, idx_t),
+                gamma=float(gamma),
+                lambda_=float(lambda_),
+            ),
+        )
+    return returns
+
+
+def _mean_update_stats(rows: Sequence[Dict[str, float]]) -> Dict[str, float]:
+    if not rows:
+        return {}
+    keys = sorted({key for row in rows for key in row.keys()})
+    out: Dict[str, float] = {}
+    for key in keys:
+        if key in {"update_phase", "update_pass"}:
+            continue
+        vals: List[float] = []
+        for row in rows:
+            try:
+                value = float(row.get(key, float("nan")))
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(value):
+                vals.append(value)
+        if vals:
+            out[key] = float(np.mean(vals))
+    return out
+
+
+def _pearson_np(x: Sequence[float], y: Sequence[float]) -> float:
+    xs = np.asarray([float(v) for v in x], dtype=np.float64)
+    ys = np.asarray([float(v) for v in y], dtype=np.float64)
+    finite = np.isfinite(xs) & np.isfinite(ys)
+    if int(finite.sum()) < 2:
+        return float("nan")
+    xs = xs[finite]
+    ys = ys[finite]
+    x_std = float(xs.std())
+    y_std = float(ys.std())
+    if x_std <= 1e-12 or y_std <= 1e-12:
+        return float("nan")
+    return float(np.corrcoef(xs, ys)[0, 1])
 
 
 class OnlineWmDreamerCollector(OnlineNoCfmCollector):
@@ -1028,6 +1114,13 @@ def _route_cost_matrix_torch(
     return costs, valid
 
 
+def _best_index(values: Sequence[float]) -> Optional[int]:
+    finite = [(idx, float(v)) for idx, v in enumerate(values) if np.isfinite(float(v))]
+    if not finite:
+        return None
+    return min(finite, key=lambda item: (item[1], item[0]))[0]
+
+
 class OnlineImaginedActorCritic:
     def __init__(
         self,
@@ -1054,6 +1147,108 @@ class OnlineImaginedActorCritic:
             getattr(registry, "adjacency", None),
             getattr(registry, "passenger_allowed", None),
         )
+
+    def diagnose_prediction(self, replay: OnlineWorldModelReplay, rng: np.random.Generator) -> Dict[str, float]:
+        candidate_steps = [s for s in replay.all_steps() if s.samples]
+        if not candidate_steps:
+            return {"wm_pred_diag_samples": 0.0, "wm_pred_diag_skipped": 1.0}
+        max_steps = max(int(self.cfg.wm_prediction_diagnostic_max_steps), 1)
+        n_steps = min(max_steps, len(candidate_steps))
+        idx = rng.choice(len(candidate_steps), size=n_steps, replace=len(candidate_steps) < n_steps)
+        route_pred_values: List[float] = []
+        route_true_values: List[float] = []
+        route_abs_errors: List[float] = []
+        current_edge_pred: List[float] = []
+        current_edge_true: List[float] = []
+        current_edge_abs_errors: List[float] = []
+        top1_matches: List[float] = []
+        wm_best_live_regrets: List[float] = []
+        active_decisions = 0
+        n_edges = int(self.wm.n_edges)
+        n_routes = int(self.cfg.n_routes)
+        self.wm.flow_projector.eval()
+        self.wm.dynamics.eval()
+        with torch.no_grad():
+            for raw_i in np.asarray(idx).reshape(-1):
+                step = candidate_steps[int(raw_i)]
+                samples = [s for s in step.samples if s.path_batch]
+                if not samples:
+                    continue
+                path_batch = _paths_from_samples(samples)
+                z = self.wm.encode_observation(step.flow).to(device=self.device, dtype=torch.float32).clone()
+                action_edge = torch.from_numpy(np.asarray(step.av_action, dtype=np.float32)).to(
+                    device=self.device,
+                    dtype=z.dtype,
+                )
+                depart_t = torch.from_numpy(np.asarray(step.depart, dtype=np.float32)).to(device=self.device, dtype=z.dtype)
+                context_t = torch.from_numpy(np.asarray(step.context, dtype=np.float32)).to(device=self.device, dtype=z.dtype)
+                hdv_t = torch.from_numpy(np.asarray(step.hdv_action, dtype=np.float32)).to(device=self.device, dtype=z.dtype)
+                try:
+                    z_pred, _info = self.wm.predict_next_state_differentiable(
+                        z.detach(),
+                        action_edge.detach(),
+                        past_packed=z.detach().unsqueeze(0).unsqueeze(0),
+                        depart=depart_t,
+                        context=context_t,
+                        hdv_context=hdv_t if bool(getattr(self.wm, "use_hdv_context", False)) else None,
+                    )
+                    z_true = self.wm.encode_observation(step.next_flow).to(device=self.device, dtype=torch.float32).clone()
+                except Exception:
+                    continue
+                edge_tt_pred = _edge_tt_numpy_from_z(self.wm, z_pred, self.cfg)
+                edge_tt_true = _edge_tt_numpy_from_z(self.wm, z_true, self.cfg)
+                for sample, paths in zip(samples, path_batch):
+                    active_decisions += 1
+                    current = int(sample.current_edge_idx)
+                    if 0 <= current < n_edges:
+                        pred_cur = float(edge_tt_pred[current])
+                        true_cur = float(edge_tt_true[current])
+                        if np.isfinite(pred_cur) and np.isfinite(true_cur):
+                            current_edge_pred.append(pred_cur)
+                            current_edge_true.append(true_cur)
+                            current_edge_abs_errors.append(abs(pred_cur - true_cur))
+                    costs_pred: List[float] = []
+                    costs_true: List[float] = []
+                    for path in list(paths)[:n_routes]:
+                        clean = _sanitise_path(path, n_edges=n_edges)
+                        if not clean:
+                            costs_pred.append(float("nan"))
+                            costs_true.append(float("nan"))
+                            continue
+                        p = float(np.asarray(edge_tt_pred, dtype=np.float32)[clean].clip(min=0.0).sum())
+                        t = float(np.asarray(edge_tt_true, dtype=np.float32)[clean].clip(min=0.0).sum())
+                        costs_pred.append(p)
+                        costs_true.append(t)
+                        if np.isfinite(p) and np.isfinite(t):
+                            route_pred_values.append(p)
+                            route_true_values.append(t)
+                            route_abs_errors.append(abs(p - t))
+                    pred_best = _best_index(costs_pred)
+                    true_best = _best_index(costs_true)
+                    true_finite = [float(v) for v in costs_true if np.isfinite(float(v))]
+                    if pred_best is not None and true_best is not None:
+                        top1_matches.append(float(int(pred_best == true_best)))
+                    if pred_best is not None and true_finite and np.isfinite(float(costs_true[pred_best])):
+                        wm_best_live_regrets.append(float(costs_true[pred_best]) - float(min(true_finite)))
+        if not route_abs_errors and not current_edge_abs_errors:
+            return {"wm_pred_diag_samples": 0.0, "wm_pred_diag_skipped": 1.0}
+        return {
+            "wm_pred_diag_samples": float(active_decisions),
+            "wm_pred_diag_active_decisions": float(active_decisions),
+            "wm_pred_diag_route_cost_samples": float(len(route_abs_errors)),
+            "wm_pred_diag_steps": float(n_steps),
+            "wm_pred_diag_route_mae": float(np.mean(route_abs_errors)) if route_abs_errors else float("nan"),
+            "wm_pred_diag_route_corr": _pearson_np(route_pred_values, route_true_values),
+            "wm_pred_diag_current_edge_mae": (
+                float(np.mean(current_edge_abs_errors)) if current_edge_abs_errors else float("nan")
+            ),
+            "wm_pred_diag_current_edge_corr": _pearson_np(current_edge_pred, current_edge_true),
+            "wm_pred_diag_top1_match": float(np.mean(top1_matches)) if top1_matches else float("nan"),
+            "wm_pred_diag_wm_best_live_regret": (
+                float(np.mean(wm_best_live_regrets)) if wm_best_live_regrets else float("nan")
+            ),
+            "wm_pred_diag_skipped": 0.0,
+        }
 
     def _obs_from_paths(
         self,
@@ -1158,7 +1353,10 @@ class OnlineImaginedActorCritic:
         valid_steps: List[torch.Tensor] = []
         reward_steps: List[torch.Tensor] = []
         group_steps: List[torch.Tensor] = []
+        next_group_steps: List[torch.Tensor] = []
         vehicle_id_steps: List[torch.Tensor] = []
+        next_obs_steps: List[torch.Tensor] = []
+        next_valid_steps: List[torch.Tensor] = []
         entropies: List[torch.Tensor] = []
         action_edges: List[torch.Tensor] = []
         arrived_events = 0
@@ -1263,13 +1461,52 @@ class OnlineImaginedActorCritic:
                     context=context_t,
                     hdv_context=hdv_t if bool(getattr(self.wm, "use_hdv_context", False)) else None,
                 )
+            next_obs = torch.zeros_like(obs)
+            next_valid = torch.zeros((int(obs.shape[0]),), device=self.device, dtype=torch.bool)
+            next_edge_tt = _edge_tt_numpy_from_z(self.wm, z_next.detach(), self.cfg)
+            next_path_batch: List[List[List[int]]] = []
+            next_positions: List[int] = []
+            for local_i, state_i in enumerate(active_indices):
+                vehicle = vehicle_states[int(state_i)]
+                if bool(vehicle.arrived) or int(vehicle.current_edge) < 0:
+                    continue
+                candidates = _current_to_dest_candidate_paths(
+                    adj_list=self.adj_list,
+                    edge_tt=next_edge_tt,
+                    current_edge=int(vehicle.current_edge),
+                    dest_edge=int(vehicle.dest_edge),
+                    n_routes=n_routes,
+                    n_edges=n_edges,
+                    penalty_factor=float(self.cfg.av_candidate_path_penalty_factor),
+                    fallback_paths=vehicle.candidate_paths,
+                )
+                if not any(len(path) > 0 for path in candidates):
+                    continue
+                next_path_batch.append(candidates)
+                next_positions.append(int(local_i))
+            if next_path_batch:
+                next_obs_used, next_route_valid, _ = self._obs_from_paths(
+                    z=z_next.detach(),
+                    path_batch=next_path_batch,
+                    step_idx=int(start.decision_idx) + h + 1,
+                    n_total_av=max(n_agents, 1),
+                    edge_tt_override=next_edge_tt,
+                )
+                next_has_valid = next_route_valid.any(dim=-1)
+                for src_i, dst_i in enumerate(next_positions):
+                    if bool(next_has_valid[src_i].detach().cpu().item()):
+                        next_obs[int(dst_i)] = next_obs_used[src_i]
+                        next_valid[int(dst_i)] = True
             obs_steps.append(obs.detach())
             action_steps.append(selected.detach())
             old_logp_steps.append(old_logp.detach())
             valid_steps.append(valid.detach())
             reward_steps.append(rewards.detach())
             group_steps.append(torch.full((int(obs.shape[0]),), h, device=self.device, dtype=torch.long))
+            next_group_steps.append(torch.full((int(obs.shape[0]),), h + 1, device=self.device, dtype=torch.long))
             vehicle_id_steps.append(torch.tensor(active_indices, device=self.device, dtype=torch.long))
+            next_obs_steps.append(next_obs.detach())
+            next_valid_steps.append(next_valid.detach())
             entropies.append(entropy.detach())
             action_edges.append(action_edge.detach())
             z = z_next.detach()
@@ -1293,7 +1530,10 @@ class OnlineImaginedActorCritic:
             "rewards": rewards_flat,
             "returns": returns_flat.detach(),
             "group_index": torch.cat(group_steps, dim=0),
+            "next_group_index": torch.cat(next_group_steps, dim=0),
             "vehicle_index": vehicle_ids_flat,
+            "next_obs": torch.cat(next_obs_steps, dim=0),
+            "next_valid": torch.cat(next_valid_steps, dim=0),
             "entropy_rollout": torch.stack(entropies).mean() if entropies else torch.zeros((), device=self.device),
             "action_edges": action_edges,
             "reward_mean": float(rewards_flat.mean().detach().cpu().item()),
@@ -1322,28 +1562,71 @@ class OnlineImaginedActorCritic:
             obs = torch.cat(obs_parts, dim=0)
             actions = torch.cat([p["actions"] for p in rollout_parts if "actions" in p], dim=0)
             rewards = torch.cat([p["rewards"] for p in rollout_parts if "rewards" in p], dim=0)
-            returns = torch.cat(
-                [
-                    p["returns"] if "returns" in p else p["rewards"]
-                    for p in rollout_parts
-                    if "rewards" in p
-                ],
-                dim=0,
-            )
             valid = torch.cat([p["valid_mask"] for p in rollout_parts if "valid_mask" in p], dim=0)
             old_logp = torch.cat([p["old_log_probs"] for p in rollout_parts if "old_log_probs" in p], dim=0)
             group_parts: List[torch.Tensor] = []
+            next_group_parts: List[torch.Tensor] = []
+            vehicle_parts: List[torch.Tensor] = []
             group_offset = 0
+            vehicle_offset = 0
             for p in rollout_parts:
                 group_i = p.get("group_index")
+                next_group_i = p.get("next_group_index")
+                vehicle_i = p.get("vehicle_index")
                 if torch.is_tensor(group_i) and int(group_i.numel()) > 0:
-                    group_parts.append(group_i.to(device=self.device, dtype=torch.long) + int(group_offset))
-                    group_offset += int(group_i.max().detach().cpu().item()) + 1
+                    base = int(group_offset)
+                    group_parts.append(group_i.to(device=self.device, dtype=torch.long) + base)
+                    max_group = int(group_i.max().detach().cpu().item())
+                    if torch.is_tensor(next_group_i) and int(next_group_i.numel()) == int(group_i.numel()):
+                        next_group_parts.append(next_group_i.to(device=self.device, dtype=torch.long) + base)
+                        max_group = max(max_group, int(next_group_i.max().detach().cpu().item()))
+                    group_offset += max_group + 1
+                if torch.is_tensor(vehicle_i) and int(vehicle_i.numel()) > 0:
+                    vehicle_parts.append(vehicle_i.to(device=self.device, dtype=torch.long) + int(vehicle_offset))
+                    vehicle_offset += int(vehicle_i.max().detach().cpu().item()) + 1
             group = (
                 torch.cat(group_parts, dim=0)
                 if group_parts and int(torch.cat(group_parts, dim=0).numel()) == int(obs.shape[0])
                 else torch.arange(int(obs.shape[0]), device=self.device, dtype=torch.long)
             )
+            next_group = (
+                torch.cat(next_group_parts, dim=0)
+                if next_group_parts and int(torch.cat(next_group_parts, dim=0).numel()) == int(obs.shape[0])
+                else group
+            )
+            vehicle_ids = (
+                torch.cat(vehicle_parts, dim=0)
+                if vehicle_parts and int(torch.cat(vehicle_parts, dim=0).numel()) == int(obs.shape[0])
+                else torch.arange(int(obs.shape[0]), device=self.device, dtype=torch.long)
+            )
+            next_obs = torch.cat(
+                [
+                    p["next_obs"] if "next_obs" in p else torch.zeros_like(p["obs"])
+                    for p in rollout_parts
+                    if "obs" in p and torch.is_tensor(p.get("obs")) and int(p["obs"].shape[0]) > 0
+                ],
+                dim=0,
+            )
+            next_valid = torch.cat(
+                [
+                    p["next_valid"]
+                    if "next_valid" in p
+                    else torch.zeros((int(p["obs"].shape[0]),), device=self.device, dtype=torch.bool)
+                    for p in rollout_parts
+                    if "obs" in p and torch.is_tensor(p.get("obs")) and int(p["obs"].shape[0]) > 0
+                ],
+                dim=0,
+            ).to(device=self.device, dtype=torch.bool)
+            with torch.no_grad():
+                next_values = self.critic(next_obs, group_index=next_group).reshape(-1)
+                returns = _lambda_returns_by_vehicle_ids(
+                    rewards,
+                    next_values,
+                    next_valid,
+                    vehicle_ids,
+                    gamma=float(self.cfg.gamma),
+                    lambda_=float(self.cfg.ac_lambda),
+                ).detach()
             logits = self.actor.forward_logits(obs)
             safe_valid = valid.clone()
             has_valid = safe_valid.any(dim=-1)
@@ -1359,6 +1642,9 @@ class OnlineImaginedActorCritic:
             if float(self.cfg.ac_advantage_clip) > 0:
                 adv = adv.clamp(-float(self.cfg.ac_advantage_clip), float(self.cfg.ac_advantage_clip))
             active = has_valid & torch.isfinite(returns) & torch.isfinite(old_logp)
+            active = active & torch.isfinite(values) & torch.isfinite(logp)
+            if not bool(active.any().detach().cpu().item()):
+                continue
             ratio = torch.exp((logp - old_logp).clamp(-20.0, 20.0))
             if float(self.cfg.ac_ppo_clip_ratio) > 0:
                 clipped = ratio.clamp(1.0 - float(self.cfg.ac_ppo_clip_ratio), 1.0 + float(self.cfg.ac_ppo_clip_ratio))
@@ -1373,10 +1659,15 @@ class OnlineImaginedActorCritic:
             self.actor_optimizer.zero_grad(set_to_none=True)
             self.critic_optimizer.zero_grad(set_to_none=True)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), float(self.cfg.max_grad_norm))
-            torch.nn.utils.clip_grad_norm_(self.critic.parameters(), float(self.cfg.max_grad_norm))
+            actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), float(self.cfg.max_grad_norm))
+            critic_grad_norm = torch.nn.utils.clip_grad_norm_(self.critic.parameters(), float(self.cfg.max_grad_norm))
             self.actor_optimizer.step()
             self.critic_optimizer.step()
+            target_var = torch.var(returns[active].detach(), unbiased=False)
+            residual_var = torch.var((returns[active] - values[active]).detach(), unbiased=False)
+            value_ev = torch.zeros((), device=self.device, dtype=values.dtype)
+            if float(target_var.detach().cpu().item()) > 1e-12:
+                value_ev = 1.0 - residual_var / target_var.clamp_min(1e-12)
             rows.append(
                 {
                     "imag_loss": float(loss.detach().cpu().item()),
@@ -1384,9 +1675,15 @@ class OnlineImaginedActorCritic:
                     "imag_value_loss": float(value_loss.detach().cpu().item()),
                     "imag_entropy": float(entropy_mean.detach().cpu().item()),
                     "imag_clip_frac": float(clip_frac.detach().cpu().item()),
+                    "imag_actor_grad_norm": float(actor_grad_norm.detach().cpu().item()),
+                    "imag_critic_grad_norm": float(critic_grad_norm.detach().cpu().item()),
                     "imag_adv_std": float((returns - values.detach()).std(unbiased=False).detach().cpu().item())
                     if int(returns.numel()) > 1
                     else 0.0,
+                    "imag_adv_mean": float((returns[active] - values[active].detach()).mean().detach().cpu().item()),
+                    "imag_value_mean": float(values[active].detach().mean().cpu().item()),
+                    "imag_value_target_ev": float(value_ev.detach().cpu().item()),
+                    "imag_next_valid_frac": float(next_valid.to(dtype=torch.float32).mean().detach().cpu().item()),
                     "imag_reward_mean": float(rewards.detach().mean().cpu().item()),
                     "imag_return_mean": float(returns.detach().mean().cpu().item()),
                     "imag_arrived_frac": float(
@@ -1450,6 +1747,7 @@ def build_gretz_online_wm_dreamer_plan(cfg: Optional[OnlineWmDreamerConfig] = No
             "wm_replay_buffer_episodes": int(resolved.wm_replay_buffer_episodes),
             "wm_update_epochs": int(resolved.wm_update_epochs),
             "wm_update_every_episodes": int(resolved.wm_update_every_episodes),
+            "wm_updates_per_collect": int(resolved.wm_updates_per_collect),
             "wm_replay_require_completion": bool(resolved.wm_replay_require_completion),
             "wm_replay_completion_threshold": float(resolved.wm_replay_completion_threshold),
             "wm_batch_size": int(resolved.wm_batch_size),
@@ -1463,7 +1761,12 @@ def build_gretz_online_wm_dreamer_plan(cfg: Optional[OnlineWmDreamerConfig] = No
             "wm_transition_hdv_action_scale": float(resolved.wm_transition_hdv_action_scale),
             "imag_horizon": int(resolved.imag_horizon),
             "imagined_updates_per_episode": int(resolved.imagined_updates_per_episode),
+            "imagined_update_passes_per_collect": int(resolved.imagined_update_passes_per_collect),
             "imagined_rollouts_per_update": int(resolved.imagined_rollouts_per_update),
+            "min_replay_episodes_before_actor": int(resolved.min_replay_episodes_before_actor),
+            "ac_lambda": float(resolved.ac_lambda),
+            "wm_prediction_diagnostic_every_episodes": int(resolved.wm_prediction_diagnostic_every_episodes),
+            "wm_prediction_diagnostic_max_steps": int(resolved.wm_prediction_diagnostic_max_steps),
             "checkpoint_paths": checkpoints,
         },
         "evaluation": {
@@ -1729,6 +2032,8 @@ class OnlineWmDreamerTrainer:
                 "dreamer_route_cost_reward_mode": str(self.cfg.reward_mode),
                 "dreamer_route_cost_reward_temperature": float(self.cfg.reward_temperature),
                 "dreamer_route_cost_reward_progress_state": "per_vehicle_route_suffix_until_arrival",
+                "dreamer_vehicle_return_target": "lambda_return_with_next_state_bootstrap",
+                "dreamer_vehicle_return_lambda": float(self.cfg.ac_lambda),
             }
         )
         state["cfg"] = cfg_dict
@@ -1755,15 +2060,46 @@ class OnlineWmDreamerTrainer:
                     row["wm_replay_skip_reason"] = ""
                 else:
                     row["wm_replay_skip_reason"] = "incomplete_episode"
+                per_pass_updates: List[Dict[str, float]] = []
                 if self._wm_update_due(ep):
-                    wm_update = self.wm_updater.update(self.replay, self.rng)
+                    for pass_idx in range(max(int(self.cfg.wm_updates_per_collect), 1)):
+                        wm_update = self.wm_updater.update(self.replay, self.rng)
+                        wm_update["update_phase"] = 0.0
+                        wm_update["update_pass"] = float(pass_idx + 1)
+                        per_pass_updates.append(wm_update)
                 else:
                     wm_update = self._skipped_wm_update(reason="interval")
-                imag_update = self.imagined_ac.update(self.replay, self.rng)
-                update = {**wm_update, **imag_update}
+                    wm_update["update_phase"] = 0.0
+                    wm_update["update_pass"] = 0.0
+                    per_pass_updates.append(wm_update)
+                if self.replay.episode_count() >= max(int(self.cfg.min_replay_episodes_before_actor), 1):
+                    for pass_idx in range(max(int(self.cfg.imagined_update_passes_per_collect), 1)):
+                        imag_update = self.imagined_ac.update(self.replay, self.rng)
+                        imag_update["update_phase"] = 1.0
+                        imag_update["update_pass"] = float(pass_idx + 1)
+                        per_pass_updates.append(imag_update)
+                else:
+                    per_pass_updates.append(
+                        {
+                            "imag_loss": 0.0,
+                            "imag_n_samples": 0.0,
+                            "imag_skipped": 1.0,
+                            "imag_skip_reason": "min_replay_episodes",
+                            "update_phase": 1.0,
+                            "update_pass": 0.0,
+                        }
+                    )
+                diag_every = max(int(self.cfg.wm_prediction_diagnostic_every_episodes), 0)
+                if diag_every > 0 and int(ep) % diag_every == 0:
+                    pred_diag = self.imagined_ac.diagnose_prediction(self.replay, self.rng)
+                    pred_diag["update_phase"] = 2.0
+                    pred_diag["update_pass"] = 0.0
+                    per_pass_updates.append(pred_diag)
+                update = _mean_update_stats(per_pass_updates)
                 row.update({f"update_{k}": v for k, v in update.items()})
                 train_rows.append(row)
-                update_rows.append({"episode": ep, **update})
+                for update_idx, update_row in enumerate(per_pass_updates, 1):
+                    update_rows.append({"episode": ep, "update_idx": int(update_idx), **update_row})
                 print(
                     f"[online-wm-dreamer] ep={ep:04d}/{int(self.cfg.train_episodes):04d} "
                     f"samples={row.get('samples', 0)} wm_trans={row.get('wm_transitions', 0)} "
@@ -1772,6 +2108,7 @@ class OnlineWmDreamerTrainer:
                     f"completion={row.get('completion_rate', float('nan')):.6f} "
                     f"unfinished={int(row.get('unfinished_all', 0))} "
                     f"wm_replay={int(row.get('wm_replay_accepted', 0))} "
+                    f"replay_eps={self.replay.episode_count()} "
                     f"wm_skip={str(update.get('wm_skip_reason', ''))} "
                     f"wm_loss={update.get('wm_loss', 0.0):.4f} "
                     f"imag_loss={update.get('imag_loss', 0.0):.4f} "
@@ -1780,7 +2117,9 @@ class OnlineWmDreamerTrainer:
                     f"imag_arrived={update.get('imag_arrived_frac', 0.0):.3f} "
                     f"entropy={update.get('imag_entropy', 0.0):.4f} "
                     f"clip={update.get('imag_clip_frac', 0.0):.3f} "
-                    f"adv_std={update.get('imag_adv_std', 0.0):.4f}",
+                    f"adv_std={update.get('imag_adv_std', 0.0):.4f} "
+                    f"actor_g={update.get('imag_actor_grad_norm', 0.0):.4f} "
+                    f"value_ev={update.get('imag_value_target_ev', 0.0):.4f}",
                     flush=True,
                 )
                 if ep in ckpt_eps:

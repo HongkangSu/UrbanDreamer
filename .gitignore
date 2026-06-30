@@ -54,6 +54,7 @@ tmp/
 *.tgz
 
 # Generated reports and presentation artifacts
+worldmodel_AAAI_2027/
 *.pptx
 *.pdf
 
