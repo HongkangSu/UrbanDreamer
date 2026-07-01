@@ -44,8 +44,11 @@ from ablation.online_no_cfm_actor_critic import (  # noqa: E402
     _resolve_path,
     build_diverse_paths_current_to_dest,
     build_eval_command as build_no_cfm_eval_command,
+    compute_a2c_loss,
     route_valid_mask_from_path_batch,
     save_policy_checkpoint,
+    samples_to_tensors,
+    selected_vehicle_route_rewards,
 )
 
 try:
@@ -91,7 +94,12 @@ from scripts.eval_sumo_io import (  # noqa: E402
     _reuse_route_artifacts_from_refs,
     _snapshot_sumo_xmls,
 )
-from scripts.eval_sumo_routing import _build_edge_adj_list  # noqa: E402
+from scripts.eval_sumo_routing import (  # noqa: E402
+    _build_edge_adj_list,
+    _edge_route_cost_matrix,
+    _route_batch_uniqueness_summary,
+    _temperature_adjust_probs,
+)
 from ablation.traci_port_fallback import patch_traci_start_port_fallback  # noqa: E402
 from dreamer4.urban_routing.data_collector import serialize_hdv_route_state  # noqa: E402
 
@@ -141,6 +149,24 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
     wm_prediction_diagnostic_every_episodes: int = 1
     wm_prediction_diagnostic_max_steps: int = 16
     direct_real_a2c_update: bool = False
+    freeze_policy_obs_world_model: bool = False
+    policy_obs_mode: str = "wm_latent"
+    actor_update_schedule: str = "fixed"
+    actor_update_min_passes: int = 0
+    actor_update_max_passes: int = 0
+    actor_update_warmup_episodes: int = 0
+    actor_update_ramp_episodes: int = 0
+    actor_update_gate_enabled: bool = False
+    actor_update_gate_min_diag_samples: int = 1
+    actor_update_gate_min_top1_match: float = 0.0
+    actor_update_gate_max_route_mae: float = 0.0
+    actor_update_gate_max_current_edge_mae: float = 0.0
+    actor_update_gate_max_regret: float = 0.0
+    actor_update_gate_fail_passes: int = 0
+    actor_update_gate_missing_passes: int = 0
+    vehicle_arrival_head_enabled: bool = True
+    vehicle_arrival_loss_coef: float = 1.0
+    vehicle_arrival_diag_horizon_seconds: float = 14.0
 
     def resolve(self) -> "OnlineWmDreamerConfig":
         values = asdict(self)
@@ -211,6 +237,21 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
             "wm_prediction_diagnostic_every_episodes",
             "wm_prediction_diagnostic_max_steps",
             "direct_real_a2c_update",
+            "freeze_policy_obs_world_model",
+            "policy_obs_mode",
+            "actor_update_schedule",
+            "actor_update_min_passes",
+            "actor_update_max_passes",
+            "actor_update_warmup_episodes",
+            "actor_update_ramp_episodes",
+            "actor_update_gate_enabled",
+            "actor_update_gate_min_diag_samples",
+            "actor_update_gate_min_top1_match",
+            "actor_update_gate_max_route_mae",
+            "actor_update_gate_max_current_edge_mae",
+            "actor_update_gate_max_regret",
+            "actor_update_gate_fail_passes",
+            "actor_update_gate_missing_passes",
         ):
             if key not in overrides:
                 values[key] = own_defaults[key]
@@ -274,6 +315,43 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
         )
         values.update({k: v for k, v in overrides.items() if v is not None})
         return cls(**values).resolve()
+
+
+def _annotate_samples_with_arrival_remaining(
+    samples: Sequence[OnlineDecisionSample],
+    vehicle_travel_times: Dict[str, float],
+) -> None:
+    for sample in samples:
+        veh_id = str(getattr(sample, "veh_id", ""))
+        travel_time = float(vehicle_travel_times.get(veh_id, float("nan")))
+        elapsed = float(getattr(sample, "elapsed_time", float("nan")))
+        if np.isfinite(travel_time) and np.isfinite(elapsed):
+            # TraCI arrival events are observed on the next tick relative to
+            # tripinfo's arrival timestamp; align the target to arrival-sim_step.
+            sample.arrival_remaining_time = float(max(travel_time - elapsed - 1.0, 0.0))
+        else:
+            sample.arrival_remaining_time = float("nan")
+
+
+def _annotate_agent_decision_rows_with_arrival(
+    rows: List[Dict[str, Any]],
+    samples: Sequence[OnlineDecisionSample],
+) -> None:
+    by_key = {
+        (int(s.episode), int(s.decision_idx), str(s.veh_id)): float(
+            getattr(s, "arrival_remaining_time", float("nan"))
+        )
+        for s in samples
+    }
+    for row in rows:
+        key = (
+            int(row.get("episode", -1)),
+            int(row.get("decision_idx", -1)),
+            str(row.get("veh_id", "")),
+        )
+        value = float(by_key.get(key, float("nan")))
+        if np.isfinite(value):
+            row["arrival_remaining_time"] = value
 
 
 @dataclass
@@ -648,6 +726,16 @@ def _mean_update_stats(rows: Sequence[Dict[str, float]]) -> Dict[str, float]:
     return out
 
 
+def _finite_metric(row: Optional[Dict[str, Any]], key: str) -> Optional[float]:
+    if not row:
+        return None
+    try:
+        value = float(row.get(key, float("nan")))
+    except (TypeError, ValueError):
+        return None
+    return value if np.isfinite(value) else None
+
+
 def _pearson_np(x: Sequence[float], y: Sequence[float]) -> float:
     xs = np.asarray([float(v) for v in x], dtype=np.float64)
     ys = np.asarray([float(v) for v in y], dtype=np.float64)
@@ -790,6 +878,7 @@ class OnlineWmDreamerCollector(OnlineNoCfmCollector):
             and self._should_apply_routerl_hdv_learning("train", veh_travel_times)
         ):
             self.connector.apply_routerl_hdv_learning(veh_travel_times)
+        _annotate_samples_with_arrival_remaining(self._episode_samples, self._last_ep_vehicle_tt)
 
         episode_reward = float(np.mean(ep_rewards)) if ep_rewards else 0.0
         self._write_urb_episode_csv(int(episode_id), episode_reward)
@@ -837,7 +926,327 @@ class OnlineWmDreamerCollector(OnlineNoCfmCollector):
                 self._update_hdv_gawron(self._collect_flow(state))
         new_xmls = _new_sumo_xmls_since(xml_snapshot_before, sumo_output_folder, fallback_latest=2)
         self._register_protocol_xml_aliases(new_xmls, int(episode_id))
+        _annotate_agent_decision_rows_with_arrival(
+            getattr(self, "_dynamic_agent_decision_rows", []),
+            samples,
+        )
         return samples, row, list(getattr(self, "_wm_episode_steps", []))
+
+
+class OnlineWmToyLiveCollector(OnlineWmDreamerCollector):
+    """Online-WM collector whose real-SUMO policy observations match toy no-WM AC."""
+
+    def _policy_logits_for_active_ids(
+        self,
+        obs: torch.Tensor,
+        active_ids: Sequence[str],
+    ) -> torch.Tensor:
+        active_logits = getattr(self._policy_eval, "forward_logits_for_active_ids", None)
+        if callable(active_logits):
+            return active_logits(obs, active_ids)
+        return self._policy_eval.forward_logits(obs)
+
+    def _live_edge_features(self, state: Dict[str, Any]) -> np.ndarray:
+        edge_state = state.get("edges", {}) if isinstance(state, dict) else {}
+        feats = self._edge_registry.extract_flow(edge_state if isinstance(edge_state, dict) else {})
+        return np.asarray(feats, dtype=np.float32)
+
+    def _collect_single_episode(  # type: ignore[override]
+        self,
+        episode_id: int,
+        max_steps: int,
+    ) -> Tuple[List[OnlineDecisionSample], Dict[str, Any]]:
+        self._first_decision_routes: Dict[str, List[str]] = {}
+        return super()._collect_single_episode(episode_id, max_steps)
+
+    def _select_av_actions(self, state: Dict[str, Any], rng: np.random.RandomState) -> Dict[str, List[str]]:
+        stats = getattr(self, "_av_decision_skip_stats", None)
+        if stats is None:
+            stats = {}
+            self._av_decision_skip_stats = stats
+
+        def inc(name: str, amount: int = 1) -> None:
+            stats[name] = int(stats.get(name, 0)) + int(amount)
+
+        inc("calls")
+        in_network = state.get("vehicles", {})
+        active_avs = sorted(self._av_vehicles & set(in_network.keys()))
+        inc("active_av_seen", len(active_avs))
+        if not active_avs:
+            inc("no_active_av_calls")
+            return {}
+
+        edge_feats_dyn = self._live_edge_features(state)
+        edge_to_idx = getattr(self._edge_registry, "_edge_to_idx", {})
+        live_edge_cost = self._live_current_edge_tt(state)
+        freeflow_edge_cost = self._freeflow_edge_tt()
+        obs_edge_cost = live_edge_cost if live_edge_cost is not None else freeflow_edge_cost
+        candidate_edge_cost = freeflow_edge_cost
+        if self._av_candidate_source == "current_shortest_live":
+            candidate_edge_cost = live_edge_cost
+        elif self._av_candidate_source == "current_shortest_freeflow":
+            candidate_edge_cost = freeflow_edge_cost
+        elif self._av_candidate_source == "current_shortest_wm":
+            candidate_edge_cost = freeflow_edge_cost
+            inc("candidate_wm_source_fallback_freeflow")
+        if self._av_candidate_source != "od_suffix" and candidate_edge_cost is None:
+            inc("candidate_edge_cost_missing_calls")
+
+        path_batch: List[List[List[int]]] = []
+        route_batch: List[List[List[str]]] = []
+        active_ids: List[str] = []
+        active_current_edges: List[str] = []
+        candidate_dynamic_count = 0
+        candidate_fallback_count = 0
+        for veh_id in active_avs:
+            veh_info = in_network.get(veh_id)
+            if not isinstance(veh_info, dict):
+                inc("skip_bad_vehicle_info")
+                continue
+            current_edge = str(veh_info.get("edge", ""))
+            if (not current_edge) or current_edge.startswith(":"):
+                inc("skip_bad_current_edge")
+                continue
+            candidates: List[List[str]] = []
+            if self._av_candidate_source != "od_suffix":
+                candidates = self._current_to_dest_route_candidates(
+                    veh_id,
+                    current_edge,
+                    candidate_edge_cost,
+                )
+                if candidates:
+                    candidate_dynamic_count += 1
+                else:
+                    candidate_fallback_count += 1
+            if not candidates:
+                candidates = self._candidate_route_suffixes(veh_id, current_edge)
+            if candidates:
+                candidates = self._filter_safe_reroute_candidates(veh_id, current_edge, candidates)
+            if not candidates:
+                inc("skip_no_candidates")
+                continue
+            idx_paths: List[List[int]] = []
+            named_paths: List[List[str]] = []
+            for route in candidates[: int(self.n_routes)]:
+                idxs = [int(edge_to_idx[e]) for e in route if e in edge_to_idx]
+                if idxs:
+                    idx_paths.append(idxs)
+                    named_paths.append(list(route))
+            if not idx_paths:
+                inc("skip_no_idx_paths")
+                continue
+            while len(idx_paths) < int(self.n_routes):
+                idx_paths.append(list(idx_paths[0]))
+                named_paths.append(list(named_paths[0]))
+            path_batch.append(idx_paths[: int(self.n_routes)])
+            route_batch.append(named_paths[: int(self.n_routes)])
+            active_ids.append(veh_id)
+            active_current_edges.append(current_edge)
+
+        if not path_batch:
+            inc("no_path_batch_calls")
+            return {}
+        inc("selected_vehicle_count", len(active_ids))
+
+        obs_base = build_vehicle_obs_vectorized(
+            edge_feats_dyn=edge_feats_dyn,
+            path_batch=path_batch,
+            include_global=bool(self._cfg.include_global),
+            route_stats=self._vehicle_obs_route_stats,
+            edge_cost=obs_edge_cost,
+            include_route_costs=bool(self._vehicle_obs_include_route_costs),
+            include_fleet_pressure=False,
+        )
+
+        selected_indices = np.zeros((len(active_ids),), dtype=np.int64)
+        policy_probs: List[np.ndarray] = []
+        obs_rows: List[np.ndarray] = []
+        if self._vehicle_obs_include_fleet_pressure:
+            fleet_counts = np.zeros((int(self.n_routes),), dtype=np.float32)
+            fleet_pressure = np.zeros((len(getattr(self._edge_registry, "edge_ids", [])),), dtype=np.float32)
+            for i in range(len(active_ids)):
+                fleet_i = build_vehicle_fleet_pressure_obs_features(
+                    path_batch=[path_batch[i]],
+                    n_edges=len(getattr(self._edge_registry, "edge_ids", [])),
+                    n_routes=int(self.n_routes),
+                    selected_route_counts=fleet_counts,
+                    selected_edge_pressure=fleet_pressure,
+                )
+                obs_i_np = _append_vehicle_context_features(
+                    np.concatenate([obs_base[i : i + 1], fleet_i], axis=1),
+                    step_idx=int(getattr(self.connector, "current_step", 0)),
+                    episode_steps=int(self._cfg.episode_steps),
+                    n_active_av=len(active_ids),
+                    n_total_av=max(len(self._av_vehicles), 1),
+                )
+                obs_i = torch.from_numpy(obs_i_np).to(device=self._policy_eval_device, dtype=torch.float32)
+                with torch.no_grad():
+                    logits_i = self._policy_logits_for_active_ids(obs_i, [active_ids[i]])
+                    probs_i = torch.softmax(logits_i, dim=-1).detach().cpu().numpy().astype(np.float32)[0]
+                probs_i = _temperature_adjust_probs(
+                    probs_i,
+                    float(self._cfg.av_policy_sample_temperature),
+                    int(self.n_routes),
+                )
+                selected_i = int(rng.choice(int(self.n_routes), p=probs_i))
+                selected_i = int(np.clip(selected_i, 0, len(route_batch[i]) - 1))
+                selected_indices[i] = selected_i
+                policy_probs.append(probs_i.astype(np.float32))
+                obs_rows.append(obs_i_np[0].astype(np.float32))
+                fleet_counts[selected_i] += 1.0
+                for edge_idx in path_batch[i][selected_i]:
+                    edge_i = int(edge_idx)
+                    if 0 <= edge_i < int(fleet_pressure.shape[0]):
+                        fleet_pressure[edge_i] += 1.0
+            obs_vehicle_np = np.stack(obs_rows, axis=0).astype(np.float32)
+            probs_np = np.stack(policy_probs, axis=0).astype(np.float32)
+        else:
+            obs_vehicle_np = _append_vehicle_context_features(
+                obs_base,
+                step_idx=int(getattr(self.connector, "current_step", 0)),
+                episode_steps=int(self._cfg.episode_steps),
+                n_active_av=len(active_ids),
+                n_total_av=max(len(self._av_vehicles), 1),
+            )
+            obs_t = torch.from_numpy(obs_vehicle_np).to(device=self._policy_eval_device, dtype=torch.float32)
+            with torch.no_grad():
+                logits = self._policy_logits_for_active_ids(obs_t, active_ids)
+                probs_np = torch.softmax(logits, dim=-1).detach().cpu().numpy().astype(np.float32)
+            for i in range(len(active_ids)):
+                probs = _temperature_adjust_probs(
+                    probs_np[i],
+                    float(self._cfg.av_policy_sample_temperature),
+                    int(self.n_routes),
+                )
+                selected_indices[i] = int(rng.choice(int(self.n_routes), p=probs))
+                selected_indices[i] = int(np.clip(selected_indices[i], 0, len(route_batch[i]) - 1))
+                probs_np[i] = probs.astype(np.float32)
+
+        live_cost_matrix = (
+            _edge_route_cost_matrix(
+                path_batch,
+                live_edge_cost,
+                n_routes=int(self.n_routes),
+                length_norm=str(self._cfg.route_cost_length_norm),
+            )
+            if live_edge_cost is not None
+            else np.full((len(active_ids), int(self.n_routes)), np.inf, dtype=np.float32)
+        )
+        valid_mask = route_valid_mask_from_path_batch(path_batch, n_routes=int(self.n_routes))
+        elapsed = self._vehicle_elapsed_seconds(
+            active_ids,
+            int(getattr(self.connector, "current_step", 0)),
+        )
+        rewards = selected_vehicle_route_rewards(
+            route_costs=live_cost_matrix,
+            route_valid=valid_mask,
+            selected_idx=selected_indices,
+            reward_mode=str(self._cfg.reward_mode),
+            reward_weight=float(self._cfg.reward_weight),
+            reward_scale=float(self._cfg.reward_scale),
+            step_interval=float(self._cfg.step_interval),
+            elapsed_time=elapsed,
+            progress_cap=float(self._cfg.progress_cap),
+            remaining_tt_eps=float(self._cfg.remaining_tt_eps),
+            reward_temperature=float(self._cfg.reward_temperature),
+        ).detach().cpu().numpy().astype(np.float32)
+
+        actions: Dict[str, List[str]] = {}
+        for i, veh_id in enumerate(active_ids):
+            ridx = int(np.clip(int(selected_indices[i]), 0, len(route_batch[i]) - 1))
+            self._av_route_idx[veh_id] = ridx
+            actions[veh_id] = route_batch[i][ridx]
+            sample = OnlineDecisionSample(
+                episode=int(self._current_episode_id_eval),
+                decision_idx=int(self._current_decision_idx_eval),
+                sim_step=int(getattr(self.connector, "current_step", -1)),
+                veh_id=str(veh_id),
+                obs=obs_vehicle_np[i].astype(np.float32),
+                action=int(ridx),
+                old_log_prob=float(np.log(max(float(probs_np[i, ridx]), 1e-8))),
+                reward=float(rewards[i]),
+                valid_mask=valid_mask[i].astype(bool),
+                route_costs=live_cost_matrix[i].astype(np.float32),
+                elapsed_time=float(elapsed[i]),
+                path_batch=[list(path) for path in path_batch[i]],
+                current_edge_idx=int(edge_to_idx.get(active_current_edges[i], -1))
+                if i < len(active_current_edges)
+                else -1,
+                dest_edge_idx=int(edge_to_idx.get(str(self._veh_dest.get(veh_id, "")), -1)),
+            )
+            self._episode_samples.append(sample)
+            self._all_training_samples.append(sample)
+
+        unique_mean, unique_min, unique_max = _route_batch_uniqueness_summary(route_batch)
+        counts = np.bincount(selected_indices.clip(0, int(self.n_routes) - 1), minlength=int(self.n_routes))
+        mean_probs = np.mean(probs_np[:, : int(self.n_routes)], axis=0)
+        decision_row: Dict[str, Any] = {
+            "episode": int(self._current_episode_id_eval),
+            "decision_idx": int(self._current_decision_idx_eval),
+            "sim_step": int(getattr(self.connector, "current_step", -1)),
+            "active_av": int(len(active_ids)),
+            "candidate_dynamic_count": int(candidate_dynamic_count),
+            "candidate_fallback_count": int(candidate_fallback_count),
+            "candidate_unique_mean": float(unique_mean),
+            "candidate_unique_min": int(unique_min),
+            "candidate_unique_max": int(unique_max),
+            "reward_mean": float(np.mean(rewards)) if len(rewards) else float("nan"),
+            "reward_sum": float(np.sum(rewards)) if len(rewards) else 0.0,
+            "cfm_transition_used": 0,
+            "wm_rollout_rerank_used": 0,
+            "obs_source": "live_edge_registry_extract_flow",
+        }
+        for k in range(int(self.n_routes)):
+            decision_row[f"mean_prob_route{k}"] = float(mean_probs[k])
+            decision_row[f"selected_count_route{k}"] = int(counts[k])
+            vals = live_cost_matrix[:, k]
+            vals = vals[np.isfinite(vals)]
+            decision_row[f"live_mean_route_cost_route{k}"] = float(vals.mean()) if vals.size else float("nan")
+        self._dynamic_decision_rows.append(decision_row)
+
+        for i, veh_id in enumerate(active_ids):
+            agent_row: Dict[str, Any] = {
+                "episode": int(self._current_episode_id_eval),
+                "decision_idx": int(self._current_decision_idx_eval),
+                "sim_step": int(getattr(self.connector, "current_step", -1)),
+                "veh_id": str(veh_id),
+                "current_edge": active_current_edges[i] if i < len(active_current_edges) else "",
+                "dest_edge": str(self._veh_dest.get(veh_id, "")),
+                "selected_route": int(selected_indices[i]),
+                "reward": float(rewards[i]),
+                "elapsed_time": float(elapsed[i]),
+            }
+            for k in range(int(self.n_routes)):
+                agent_row[f"prob_route{k}"] = float(probs_np[i, k])
+                agent_row[f"valid_route{k}"] = int(bool(valid_mask[i, k]))
+                agent_row[f"live_cost_route{k}"] = (
+                    float(live_cost_matrix[i, k])
+                    if np.isfinite(live_cost_matrix[i, k])
+                    else float("nan")
+                )
+            self._dynamic_agent_decision_rows.append(agent_row)
+
+        if str(getattr(self, "_av_execution_mode", "dynamic")).lower() in {
+            "first_only",
+            "first_decision_only",
+            "static_first",
+        }:
+            locked = getattr(self, "_first_decision_routes", None)
+            if locked is None:
+                locked = {}
+                self._first_decision_routes = locked
+            filtered_actions: Dict[str, List[str]] = {}
+            suppressed = 0
+            for veh_id, route in actions.items():
+                if veh_id not in locked:
+                    locked[veh_id] = list(route)
+                    filtered_actions[veh_id] = route
+                else:
+                    suppressed += 1
+            if suppressed:
+                inc("first_decision_only_suppressed", suppressed)
+            return filtered_actions
+        return actions
 
 
 class OnlineWorldModelUpdater:
@@ -1071,6 +1480,120 @@ def capped_step_cost_reward_matrix(
     return torch.where(route_valid, rewards, torch.zeros_like(rewards))
 
 
+def _safe_corr_torch(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    if int(a.numel()) <= 1 or int(b.numel()) <= 1:
+        return torch.zeros((), device=a.device, dtype=a.dtype)
+    a0 = a - a.mean()
+    b0 = b - b.mean()
+    denom = torch.sqrt(torch.square(a0).mean().clamp_min(1e-12)) * torch.sqrt(
+        torch.square(b0).mean().clamp_min(1e-12)
+    )
+    if float(denom.detach().cpu().item()) <= 1e-12:
+        return torch.zeros((), device=a.device, dtype=a.dtype)
+    return (a0 * b0).mean() / denom
+
+
+def _arrival_head_loss_and_diag(
+    *,
+    critic: CentralizedVehicleValueCritic,
+    obs: torch.Tensor,
+    actions: torch.Tensor,
+    valid_mask: torch.Tensor,
+    group_index: Optional[torch.Tensor],
+    arrival_remaining: torch.Tensor,
+    route_costs: torch.Tensor,
+    horizon_seconds: float,
+) -> Dict[str, torch.Tensor]:
+    zero = obs.sum() * 0.0
+    predict = getattr(critic, "predict_arrival_log_time", None)
+    if not callable(predict):
+        return {"loss": zero, "n": zero.detach(), "skipped": torch.ones((), device=obs.device, dtype=obs.dtype)}
+    pred_log_all = predict(obs, group_index=group_index)
+    if pred_log_all.numel() == 0:
+        return {"loss": zero, "n": zero.detach(), "skipped": torch.ones((), device=obs.device, dtype=obs.dtype)}
+    n = min(
+        int(obs.shape[0]),
+        int(actions.reshape(-1).numel()),
+        int(arrival_remaining.reshape(-1).numel()),
+        int(valid_mask.shape[0]),
+        int(pred_log_all.shape[0]),
+    )
+    if n <= 0:
+        return {"loss": zero, "n": zero.detach(), "skipped": torch.ones((), device=obs.device, dtype=obs.dtype)}
+    pred_log_all = pred_log_all[:n]
+    action_t = actions.to(device=obs.device, dtype=torch.long).reshape(-1)[:n]
+    action_t = action_t.clamp(0, int(pred_log_all.shape[1]) - 1)
+    target = arrival_remaining.to(device=obs.device, dtype=obs.dtype).reshape(-1)[:n]
+    valid = valid_mask.to(device=obs.device, dtype=torch.bool)[:n]
+    rows = torch.arange(n, device=obs.device)
+    selected_valid = valid[rows, action_t]
+    active = selected_valid & torch.isfinite(target) & (target >= 0.0)
+    if not bool(active.any().detach().cpu().item()):
+        return {"loss": zero, "n": zero.detach(), "skipped": torch.ones((), device=obs.device, dtype=obs.dtype)}
+
+    pred_selected_log = pred_log_all[rows, action_t]
+    pred_selected = torch.expm1(pred_selected_log.clamp(min=0.0, max=12.0)).clamp_min(0.0)
+    target_log = torch.log1p(target.clamp_min(0.0))
+    loss = torch.nn.functional.smooth_l1_loss(pred_selected_log[active], target_log[active])
+
+    pred_err = pred_selected[active].detach() - target[active].detach()
+    pred_abs = pred_err.abs()
+    route_cost_t = route_costs.to(device=obs.device, dtype=obs.dtype)
+    if route_cost_t.dim() == 2 and int(route_cost_t.shape[0]) >= n and int(route_cost_t.shape[1]) >= int(pred_log_all.shape[1]):
+        route_selected = route_cost_t[:n, : int(pred_log_all.shape[1])][rows, action_t]
+    else:
+        route_selected = torch.full((n,), float("nan"), device=obs.device, dtype=obs.dtype)
+    progress_active = active & torch.isfinite(route_selected) & (route_selected >= 0.0)
+    if bool(progress_active.any().detach().cpu().item()):
+        progress_err = route_selected[progress_active].detach() - target[progress_active].detach()
+        progress_abs = progress_err.abs()
+        progress_mae = progress_abs.mean()
+        progress_bias = progress_err.mean()
+        progress_corr = _safe_corr_torch(route_selected[progress_active].detach(), target[progress_active].detach())
+    else:
+        progress_mae = zero.detach()
+        progress_bias = zero.detach()
+        progress_corr = zero.detach()
+
+    horizon = float(max(horizon_seconds, 0.0))
+    true_arrive = target[active] <= horizon
+    pred_arrive = pred_selected[active] <= horizon
+    tp = (true_arrive & pred_arrive).to(dtype=obs.dtype).sum()
+    fp = ((~true_arrive) & pred_arrive).to(dtype=obs.dtype).sum()
+    fn = (true_arrive & (~pred_arrive)).to(dtype=obs.dtype).sum()
+    precision = tp / (tp + fp).clamp_min(1.0)
+    recall = tp / (tp + fn).clamp_min(1.0)
+    if bool(progress_active.any().detach().cpu().item()):
+        true_arrive_p = target[progress_active] <= horizon
+        progress_arrive = route_selected[progress_active] <= horizon
+        tp_p = (true_arrive_p & progress_arrive).to(dtype=obs.dtype).sum()
+        fp_p = ((~true_arrive_p) & progress_arrive).to(dtype=obs.dtype).sum()
+        fn_p = (true_arrive_p & (~progress_arrive)).to(dtype=obs.dtype).sum()
+        progress_precision = tp_p / (tp_p + fp_p).clamp_min(1.0)
+        progress_recall = tp_p / (tp_p + fn_p).clamp_min(1.0)
+    else:
+        progress_precision = zero.detach()
+        progress_recall = zero.detach()
+    return {
+        "loss": loss,
+        "n": active.to(dtype=obs.dtype).sum().detach(),
+        "skipped": torch.zeros((), device=obs.device, dtype=obs.dtype),
+        "mae": pred_abs.mean().detach(),
+        "bias": pred_err.mean().detach(),
+        "corr": _safe_corr_torch(pred_selected[active].detach(), target[active].detach()).detach(),
+        "target_mean": target[active].detach().mean(),
+        "pred_mean": pred_selected[active].detach().mean(),
+        "precision": precision.detach(),
+        "recall": recall.detach(),
+        "progress_n": progress_active.to(dtype=obs.dtype).sum().detach(),
+        "progress_mae": progress_mae.detach(),
+        "progress_bias": progress_bias.detach(),
+        "progress_corr": progress_corr.detach(),
+        "progress_precision": progress_precision.detach(),
+        "progress_recall": progress_recall.detach(),
+    }
+
+
 def _edge_tt_numpy_from_z(wm, z: torch.Tensor, cfg: OnlineWmDreamerConfig) -> np.ndarray:
     try:
         _edge_dyn, _v_e, _free_flow, edge_tt = edge_tt_from_latent_state(
@@ -1090,6 +1613,46 @@ def _edge_tt_numpy_from_z(wm, z: torch.Tensor, cfg: OnlineWmDreamerConfig) -> np
         if lengths is None or speeds is None:
             return np.ones((int(wm.n_edges),), dtype=np.float32)
         return np.asarray(lengths, dtype=np.float32) / np.maximum(np.asarray(speeds, dtype=np.float32), 0.1)
+
+
+def _decoded_edge_features_numpy_from_z(
+    wm,
+    z: torch.Tensor,
+    cfg: OnlineWmDreamerConfig,
+    *,
+    expected_dim: int,
+) -> np.ndarray:
+    n_edges = int(getattr(wm, "n_edges", 0) or 0)
+    try:
+        edge_dyn, _v_e, _free_flow, _edge_tt = edge_tt_from_latent_state(
+            wm=wm,
+            z=z.detach(),
+            bpr_alpha=0.15,
+            bpr_beta=4.0,
+            edge_cost_source=str(cfg.wm_edge_cost_source),
+            decoded_speed_min_ratio=float(cfg.wm_decoded_speed_min_ratio),
+            decoded_speed_max_ratio=float(cfg.wm_decoded_speed_max_ratio),
+            decoded_speed_excess_scale=float(cfg.wm_decoded_speed_excess_scale),
+        )
+        edge_feats = np.asarray(edge_dyn, dtype=np.float32)
+    except Exception:
+        edge_feats = np.zeros((n_edges, max(int(expected_dim), 1)), dtype=np.float32)
+    if edge_feats.ndim != 2:
+        edge_feats = np.asarray(edge_feats, dtype=np.float32).reshape(n_edges, -1)
+    if n_edges > 0 and int(edge_feats.shape[0]) != n_edges:
+        fixed = np.zeros((n_edges, int(edge_feats.shape[1])), dtype=np.float32)
+        rows = min(n_edges, int(edge_feats.shape[0]))
+        if rows > 0:
+            fixed[:rows] = edge_feats[:rows]
+        edge_feats = fixed
+    expected = max(int(expected_dim), 1)
+    if int(edge_feats.shape[1]) < expected:
+        padded = np.zeros((int(edge_feats.shape[0]), expected), dtype=np.float32)
+        padded[:, : int(edge_feats.shape[1])] = edge_feats
+        edge_feats = padded
+    elif int(edge_feats.shape[1]) > expected:
+        edge_feats = edge_feats[:, :expected]
+    return np.nan_to_num(edge_feats, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
 
 def _route_cost_matrix_torch(
@@ -1261,7 +1824,19 @@ class OnlineImaginedActorCritic:
     ) -> Tuple[torch.Tensor, torch.Tensor, np.ndarray]:
         with torch.no_grad():
             z_obs = z.detach().clone()
-            edge_feats = self.wm.latent_edge_features(z_obs).detach().cpu().numpy().astype(np.float32)
+            if str(getattr(self.cfg, "policy_obs_mode", "wm_latent") or "wm_latent").strip().lower() in {
+                "toy_live",
+                "live_toy",
+                "live_edge_registry",
+            }:
+                edge_feats = _decoded_edge_features_numpy_from_z(
+                    self.wm,
+                    z_obs,
+                    self.cfg,
+                    expected_dim=8,
+                )
+            else:
+                edge_feats = self.wm.latent_edge_features(z_obs).detach().cpu().numpy().astype(np.float32)
             edge_tt = (
                 np.asarray(edge_tt_override, dtype=np.float32).reshape(-1)
                 if edge_tt_override is not None
@@ -1734,10 +2309,12 @@ def build_gretz_online_wm_dreamer_plan(cfg: Optional[OnlineWmDreamerConfig] = No
         },
         "world_model_usage": {
             "encoder_for_actor_obs": True,
+            "policy_obs_mode": str(resolved.policy_obs_mode),
             "cfm_transition_in_training": True,
             "world_model_online_update": True,
             "updated_modules": ["flow_projector", "cfm_dynamics"],
             "direct_real_a2c_update": bool(resolved.direct_real_a2c_update),
+            "freeze_policy_obs_world_model": bool(resolved.freeze_policy_obs_world_model),
             "wm_grad_enabled": True,
         },
         "training": {
@@ -1765,8 +2342,31 @@ def build_gretz_online_wm_dreamer_plan(cfg: Optional[OnlineWmDreamerConfig] = No
             "imagined_rollouts_per_update": int(resolved.imagined_rollouts_per_update),
             "min_replay_episodes_before_actor": int(resolved.min_replay_episodes_before_actor),
             "ac_lambda": float(resolved.ac_lambda),
+            "actor_lr": float(resolved.lr),
+            "critic_lr": float(resolved.critic_lr),
+            "value_coef": float(resolved.value_coef),
+            "entropy_coef": float(resolved.entropy_coef),
+            "ac_advantage_clip": float(resolved.ac_advantage_clip),
+            "ac_ppo_clip_ratio": float(resolved.ac_ppo_clip_ratio),
+            "ac_normalize_advantages": bool(resolved.ac_normalize_advantages),
+            "route_cost_logit_bias": float(resolved.route_cost_logit_bias),
+            "av_policy_sample_temperature": float(resolved.av_policy_sample_temperature),
+            "max_grad_norm": float(resolved.max_grad_norm),
             "wm_prediction_diagnostic_every_episodes": int(resolved.wm_prediction_diagnostic_every_episodes),
             "wm_prediction_diagnostic_max_steps": int(resolved.wm_prediction_diagnostic_max_steps),
+            "actor_update_schedule": str(resolved.actor_update_schedule),
+            "actor_update_min_passes": int(resolved.actor_update_min_passes),
+            "actor_update_max_passes": int(resolved.actor_update_max_passes),
+            "actor_update_warmup_episodes": int(resolved.actor_update_warmup_episodes),
+            "actor_update_ramp_episodes": int(resolved.actor_update_ramp_episodes),
+            "actor_update_gate_enabled": bool(resolved.actor_update_gate_enabled),
+            "actor_update_gate_min_diag_samples": int(resolved.actor_update_gate_min_diag_samples),
+            "actor_update_gate_min_top1_match": float(resolved.actor_update_gate_min_top1_match),
+            "actor_update_gate_max_route_mae": float(resolved.actor_update_gate_max_route_mae),
+            "actor_update_gate_max_current_edge_mae": float(resolved.actor_update_gate_max_current_edge_mae),
+            "actor_update_gate_max_regret": float(resolved.actor_update_gate_max_regret),
+            "actor_update_gate_fail_passes": int(resolved.actor_update_gate_fail_passes),
+            "actor_update_gate_missing_passes": int(resolved.actor_update_gate_missing_passes),
             "checkpoint_paths": checkpoints,
         },
         "evaluation": {
@@ -1790,9 +2390,20 @@ class OnlineWmDreamerTrainer:
         self.rng = np.random.default_rng(int(self.cfg.seed))
         self.device = torch.device(self.cfg.device if torch.cuda.is_available() else "cpu")
         self.wm = self._load_world_model()
+        self.policy_obs_mode = str(getattr(self.cfg, "policy_obs_mode", "wm_latent") or "wm_latent").strip().lower()
+        if self.policy_obs_mode in {"", "wm", "wm_latent", "latent"}:
+            self.policy_obs_mode = "wm_latent"
+        elif self.policy_obs_mode in {"toy_live", "live_toy", "live_edge_registry"}:
+            self.policy_obs_mode = "toy_live"
+        else:
+            raise ValueError(f"Unsupported policy_obs_mode={self.cfg.policy_obs_mode!r}")
+        # Loading the world model consumes torch RNG; reset before actor/critic init so
+        # real-A2C-only can be compared against the no-WM online AC baseline.
+        torch.manual_seed(int(self.cfg.seed))
+        policy_d_obs = 8 if self.policy_obs_mode == "toy_live" else int(self.wm.d_obs)
         self.obs_dim = vehicle_mode_obs_dim(
             n_routes=int(self.cfg.n_routes),
-            d_obs=int(self.wm.d_obs),
+            d_obs=int(policy_d_obs),
             include_global=bool(self.cfg.include_global),
             route_stats=str(self.cfg.route_stats),
             include_route_costs=bool(self.cfg.include_route_costs),
@@ -1817,10 +2428,18 @@ class OnlineWmDreamerTrainer:
             architecture=str(self.cfg.critic_architecture),
             n_attention_heads=int(self.cfg.critic_attention_heads),
             output_dim=1,
+            arrival_output_dim=int(self.cfg.n_routes)
+            if bool(getattr(self.cfg, "vehicle_arrival_head_enabled", True))
+            else 0,
         ).to(self.device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=float(self.cfg.lr))
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=float(self.cfg.critic_lr))
         self.wm_updater = OnlineWorldModelUpdater(self.wm, self.cfg, self.device)
+        self.policy_obs_wm = self._load_world_model() if bool(self.cfg.freeze_policy_obs_world_model) else self.wm
+        self.policy_obs_wm.eval()
+        if bool(self.cfg.freeze_policy_obs_world_model):
+            for param in self.policy_obs_wm.parameters():
+                param.requires_grad_(False)
         self.imagined_ac = OnlineImaginedActorCritic(
             wm=self.wm,
             actor=self.actor,
@@ -1861,6 +2480,248 @@ class OnlineWmDreamerTrainer:
             "wm_skip_reason": reason,
         }
 
+    def _direct_real_a2c_update(
+        self,
+        samples: Sequence[OnlineDecisionSample],
+        *,
+        replay_episodes: int = 1,
+    ) -> Dict[str, float]:
+        if not bool(getattr(self.cfg, "direct_real_a2c_update", False)):
+            return {"real_a2c_enabled": 0.0, "real_a2c_skipped": 1.0, "real_a2c_skip_reason": "disabled"}
+        if len(samples) < int(self.cfg.min_samples_per_update):
+            return {
+                "real_a2c_enabled": 1.0,
+                "real_a2c_skipped": 1.0,
+                "real_a2c_skip_reason": "min_samples",
+                "real_a2c_n_samples": float(len(samples)),
+                "real_a2c_replay_episodes": float(max(int(replay_episodes), 0)),
+            }
+        tensors = samples_to_tensors(
+            samples,
+            device=self.device,
+            gamma=float(self.cfg.gamma),
+            return_horizon_steps=int(self.cfg.return_horizon_steps),
+        )
+        self.actor.train()
+        self.critic.train()
+        rows: List[Dict[str, float]] = []
+        update_epochs = max(int(self.cfg.replay_update_epochs), 1)
+        for _epoch in range(update_epochs):
+            result = compute_a2c_loss(
+                actor=self.actor,
+                critic=self.critic,
+                obs=tensors["obs"],
+                actions=tensors["actions"],
+                returns=tensors["returns"],
+                valid_mask=tensors["valid_mask"],
+                old_log_probs=tensors["old_log_probs"],
+                group_index=tensors["group_index"],
+                entropy_coef=float(self.cfg.entropy_coef),
+                value_coef=float(self.cfg.value_coef),
+                temperature=float(self.cfg.av_policy_sample_temperature),
+                advantage_clip=float(self.cfg.ac_advantage_clip),
+                ppo_clip_ratio=float(self.cfg.ac_ppo_clip_ratio),
+                normalize_advantages=bool(self.cfg.ac_normalize_advantages),
+                entropy_target_frac=float(self.cfg.ac_entropy_target_frac),
+                entropy_floor_coef=float(self.cfg.ac_entropy_floor_coef),
+            )
+            arrival_diag = _arrival_head_loss_and_diag(
+                critic=self.critic,
+                obs=tensors["obs"],
+                actions=tensors["actions"],
+                valid_mask=tensors["valid_mask"],
+                group_index=tensors["group_index"],
+                arrival_remaining=tensors.get("arrival_remaining", torch.zeros((0,), device=self.device)),
+                route_costs=tensors.get("route_costs", torch.zeros((0, 0), device=self.device)),
+                horizon_seconds=float(getattr(self.cfg, "vehicle_arrival_diag_horizon_seconds", 14.0)),
+            )
+            arrival_loss = arrival_diag.get("loss", result["loss"] * 0.0)
+            loss = result["loss"] + float(getattr(self.cfg, "vehicle_arrival_loss_coef", 1.0)) * arrival_loss
+            self.actor_optimizer.zero_grad(set_to_none=True)
+            self.critic_optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            actor_grad = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), float(self.cfg.max_grad_norm))
+            critic_grad = torch.nn.utils.clip_grad_norm_(self.critic.parameters(), float(self.cfg.max_grad_norm))
+            self.actor_optimizer.step()
+            self.critic_optimizer.step()
+
+            def _value(name: str) -> float:
+                value = result.get(name)
+                if torch.is_tensor(value):
+                    return float(value.detach().cpu().item())
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return 0.0
+
+            rows.append(
+                {
+                    "real_a2c_loss": _value("loss"),
+                    "real_a2c_policy_loss": _value("policy_loss"),
+                    "real_a2c_value_loss": _value("value_loss"),
+                    "real_a2c_entropy": _value("entropy"),
+                    "real_a2c_n_samples": _value("n_samples"),
+                    "real_a2c_return_mean": _value("return_mean"),
+                    "real_a2c_return_std": _value("return_std"),
+                    "real_a2c_adv_mean": _value("adv_mean"),
+                    "real_a2c_adv_std": _value("adv_std"),
+                    "real_a2c_clip_frac": _value("clip_frac"),
+                    "real_a2c_actor_grad_norm": float(actor_grad.detach().cpu().item()),
+                    "real_a2c_critic_grad_norm": float(critic_grad.detach().cpu().item()),
+                    "real_a2c_arrival_loss": float(arrival_loss.detach().cpu().item())
+                    if torch.is_tensor(arrival_loss)
+                    else 0.0,
+                    "real_a2c_arrival_n": float(arrival_diag.get("n", torch.zeros(())).detach().cpu().item())
+                    if torch.is_tensor(arrival_diag.get("n"))
+                    else 0.0,
+                    "real_a2c_arrival_mae": float(arrival_diag.get("mae", torch.zeros(())).detach().cpu().item())
+                    if torch.is_tensor(arrival_diag.get("mae"))
+                    else float("nan"),
+                    "real_a2c_arrival_bias": float(arrival_diag.get("bias", torch.zeros(())).detach().cpu().item())
+                    if torch.is_tensor(arrival_diag.get("bias"))
+                    else float("nan"),
+                    "real_a2c_arrival_corr": float(arrival_diag.get("corr", torch.zeros(())).detach().cpu().item())
+                    if torch.is_tensor(arrival_diag.get("corr"))
+                    else float("nan"),
+                    "real_a2c_arrival_pred_mean": float(arrival_diag.get("pred_mean", torch.zeros(())).detach().cpu().item())
+                    if torch.is_tensor(arrival_diag.get("pred_mean"))
+                    else float("nan"),
+                    "real_a2c_arrival_target_mean": float(arrival_diag.get("target_mean", torch.zeros(())).detach().cpu().item())
+                    if torch.is_tensor(arrival_diag.get("target_mean"))
+                    else float("nan"),
+                    "real_a2c_arrival_precision": float(arrival_diag.get("precision", torch.zeros(())).detach().cpu().item())
+                    if torch.is_tensor(arrival_diag.get("precision"))
+                    else float("nan"),
+                    "real_a2c_arrival_recall": float(arrival_diag.get("recall", torch.zeros(())).detach().cpu().item())
+                    if torch.is_tensor(arrival_diag.get("recall"))
+                    else float("nan"),
+                    "real_a2c_progress_arrival_n": float(arrival_diag.get("progress_n", torch.zeros(())).detach().cpu().item())
+                    if torch.is_tensor(arrival_diag.get("progress_n"))
+                    else 0.0,
+                    "real_a2c_progress_arrival_mae": float(arrival_diag.get("progress_mae", torch.zeros(())).detach().cpu().item())
+                    if torch.is_tensor(arrival_diag.get("progress_mae"))
+                    else float("nan"),
+                    "real_a2c_progress_arrival_bias": float(arrival_diag.get("progress_bias", torch.zeros(())).detach().cpu().item())
+                    if torch.is_tensor(arrival_diag.get("progress_bias"))
+                    else float("nan"),
+                    "real_a2c_progress_arrival_corr": float(arrival_diag.get("progress_corr", torch.zeros(())).detach().cpu().item())
+                    if torch.is_tensor(arrival_diag.get("progress_corr"))
+                    else float("nan"),
+                    "real_a2c_progress_arrival_precision": float(arrival_diag.get("progress_precision", torch.zeros(())).detach().cpu().item())
+                    if torch.is_tensor(arrival_diag.get("progress_precision"))
+                    else float("nan"),
+                    "real_a2c_progress_arrival_recall": float(arrival_diag.get("progress_recall", torch.zeros(())).detach().cpu().item())
+                    if torch.is_tensor(arrival_diag.get("progress_recall"))
+                    else float("nan"),
+                }
+            )
+
+        def _mean(name: str) -> float:
+            vals = [float(row[name]) for row in rows if name in row and np.isfinite(float(row[name]))]
+            return float(np.mean(vals)) if vals else 0.0
+
+        return {
+            "real_a2c_enabled": 1.0,
+            "real_a2c_skipped": 0.0,
+            "real_a2c_replay_episodes": float(max(int(replay_episodes), 0)),
+            "real_a2c_update_epochs": float(update_epochs),
+            "real_a2c_loss": _mean("real_a2c_loss"),
+            "real_a2c_policy_loss": _mean("real_a2c_policy_loss"),
+            "real_a2c_value_loss": _mean("real_a2c_value_loss"),
+            "real_a2c_entropy": _mean("real_a2c_entropy"),
+            "real_a2c_n_samples": _mean("real_a2c_n_samples"),
+            "real_a2c_return_mean": _mean("real_a2c_return_mean"),
+            "real_a2c_return_std": _mean("real_a2c_return_std"),
+            "real_a2c_adv_mean": _mean("real_a2c_adv_mean"),
+            "real_a2c_adv_std": _mean("real_a2c_adv_std"),
+            "real_a2c_clip_frac": _mean("real_a2c_clip_frac"),
+            "real_a2c_actor_grad_norm": _mean("real_a2c_actor_grad_norm"),
+            "real_a2c_critic_grad_norm": _mean("real_a2c_critic_grad_norm"),
+            "real_a2c_arrival_loss": _mean("real_a2c_arrival_loss"),
+            "real_a2c_arrival_n": _mean("real_a2c_arrival_n"),
+            "real_a2c_arrival_mae": _mean("real_a2c_arrival_mae"),
+            "real_a2c_arrival_bias": _mean("real_a2c_arrival_bias"),
+            "real_a2c_arrival_corr": _mean("real_a2c_arrival_corr"),
+            "real_a2c_arrival_pred_mean": _mean("real_a2c_arrival_pred_mean"),
+            "real_a2c_arrival_target_mean": _mean("real_a2c_arrival_target_mean"),
+            "real_a2c_arrival_precision": _mean("real_a2c_arrival_precision"),
+            "real_a2c_arrival_recall": _mean("real_a2c_arrival_recall"),
+            "real_a2c_progress_arrival_n": _mean("real_a2c_progress_arrival_n"),
+            "real_a2c_progress_arrival_mae": _mean("real_a2c_progress_arrival_mae"),
+            "real_a2c_progress_arrival_bias": _mean("real_a2c_progress_arrival_bias"),
+            "real_a2c_progress_arrival_corr": _mean("real_a2c_progress_arrival_corr"),
+            "real_a2c_progress_arrival_precision": _mean("real_a2c_progress_arrival_precision"),
+            "real_a2c_progress_arrival_recall": _mean("real_a2c_progress_arrival_recall"),
+        }
+
+    def _actor_update_passes_for_episode(self, episode: int) -> Tuple[int, str]:
+        base = max(int(self.cfg.imagined_update_passes_per_collect), 0)
+        schedule = str(getattr(self.cfg, "actor_update_schedule", "fixed") or "fixed").strip().lower()
+        if schedule in {"", "fixed", "constant"}:
+            return base, "fixed"
+        min_passes = max(int(getattr(self.cfg, "actor_update_min_passes", 0)), 0)
+        max_passes_cfg = int(getattr(self.cfg, "actor_update_max_passes", 0))
+        max_passes = max(base, max_passes_cfg, min_passes)
+        warmup = max(int(getattr(self.cfg, "actor_update_warmup_episodes", 0)), 0)
+        if int(episode) <= warmup:
+            return min_passes, "warmup"
+        if schedule == "linear":
+            ramp = max(int(getattr(self.cfg, "actor_update_ramp_episodes", 0)), 1)
+            progress = min(max((int(episode) - warmup) / float(ramp), 0.0), 1.0)
+            passes = int(round(float(min_passes) + progress * float(max_passes - min_passes)))
+            return max(min(passes, max_passes), 0), "linear"
+        if schedule == "diagnostic":
+            return max_passes, "diagnostic"
+        if schedule == "stair":
+            ramp = max(int(getattr(self.cfg, "actor_update_ramp_episodes", 0)), 1)
+            if int(episode) <= warmup + ramp:
+                return max(min(base, max_passes), min_passes), "stair_mid"
+            return max_passes, "stair_high"
+        return base, f"unknown_schedule:{schedule}"
+
+    def _actor_gate_passes(
+        self,
+        *,
+        target_passes: int,
+        diag: Optional[Dict[str, Any]],
+    ) -> Tuple[int, str]:
+        target = max(int(target_passes), 0)
+        if target <= 0:
+            return 0, "target_zero"
+        if not bool(getattr(self.cfg, "actor_update_gate_enabled", False)):
+            return target, "gate_disabled"
+        missing_passes = max(int(getattr(self.cfg, "actor_update_gate_missing_passes", 0)), 0)
+        fail_passes = max(int(getattr(self.cfg, "actor_update_gate_fail_passes", 0)), 0)
+        samples = _finite_metric(diag, "wm_pred_diag_samples")
+        min_samples = max(int(getattr(self.cfg, "actor_update_gate_min_diag_samples", 1)), 0)
+        if samples is None or samples < float(min_samples):
+            return min(target, missing_passes), "missing_diag"
+
+        failures: List[str] = []
+        min_top1 = float(getattr(self.cfg, "actor_update_gate_min_top1_match", 0.0) or 0.0)
+        top1 = _finite_metric(diag, "wm_pred_diag_top1_match")
+        if min_top1 > 0.0 and (top1 is None or top1 < min_top1):
+            failures.append("top1")
+
+        max_route_mae = float(getattr(self.cfg, "actor_update_gate_max_route_mae", 0.0) or 0.0)
+        route_mae = _finite_metric(diag, "wm_pred_diag_route_mae")
+        if max_route_mae > 0.0 and (route_mae is None or route_mae > max_route_mae):
+            failures.append("route_mae")
+
+        max_current_mae = float(getattr(self.cfg, "actor_update_gate_max_current_edge_mae", 0.0) or 0.0)
+        current_mae = _finite_metric(diag, "wm_pred_diag_current_edge_mae")
+        if max_current_mae > 0.0 and (current_mae is None or current_mae > max_current_mae):
+            failures.append("current_edge_mae")
+
+        max_regret = float(getattr(self.cfg, "actor_update_gate_max_regret", 0.0) or 0.0)
+        regret = _finite_metric(diag, "wm_pred_diag_wm_best_live_regret")
+        if max_regret > 0.0 and (regret is None or regret > max_regret):
+            failures.append("regret")
+
+        if failures:
+            return min(target, fail_passes), "gate_fail:" + ",".join(failures)
+        return target, "gate_pass"
+
     def _load_world_model(self):
         from dreamer4.urban_routing.urban_world_model import UrbanWorldModel
 
@@ -1885,7 +2746,7 @@ class OnlineWmDreamerTrainer:
         self.actor.load_state_dict(state.get("actor") or state.get("policy"))
         critic_state = state.get("critic") or state.get("vehicle_critic")
         if critic_state is not None:
-            self.critic.load_state_dict(critic_state)
+            self.critic.load_state_dict(critic_state, strict=False)
         if "flow_projector" in state:
             self.wm.flow_projector.load_state_dict(state["flow_projector"], strict=False)
         if "dynamics" in state:
@@ -1921,8 +2782,9 @@ class OnlineWmDreamerTrainer:
             )
             + float(self.cfg.sim_buffer_after_last_depart)
         )
-        collector = OnlineWmDreamerCollector(
-            wm=self.wm,
+        collector_cls = OnlineWmToyLiveCollector if self.policy_obs_mode == "toy_live" else OnlineWmDreamerCollector
+        collector = collector_cls(
+            wm=self.policy_obs_wm,
             actor=self.actor,
             cfg=self.cfg,
             loaded_hdv_state=loaded_hdv_state,
@@ -1975,6 +2837,8 @@ class OnlineWmDreamerTrainer:
                 collector._loaded_hdv_state_eval = loaded_hdv_state
             if hasattr(collector.connector, "_episode_count"):
                 collector.connector._episode_count = int(post_state.get("mutation_episode_index", 0))
+        if self.policy_obs_mode == "toy_live":
+            collector._av_execution_mode = str(getattr(self.cfg, "av_execution_mode", "dynamic"))
         self.collector = collector
         self.rollout_max_steps = (
             int(self.cfg.max_steps_per_episode)
@@ -2028,7 +2892,8 @@ class OnlineWmDreamerTrainer:
                 "wm_projector_ckpt": str(projector_path),
                 "wm_dynamics_ckpt": str(dynamics_path),
                 "world_model_online_update": True,
-                "direct_real_a2c_update": False,
+                "direct_real_a2c_update": bool(self.cfg.direct_real_a2c_update),
+                "policy_obs_mode": str(self.policy_obs_mode),
                 "dreamer_route_cost_reward_mode": str(self.cfg.reward_mode),
                 "dreamer_route_cost_reward_temperature": float(self.cfg.reward_temperature),
                 "dreamer_route_cost_reward_progress_state": "per_vehicle_route_suffix_until_arrival",
@@ -2052,8 +2917,27 @@ class OnlineWmDreamerTrainer:
         start_episode = max(0, int(start_episode))
         start = time.time()
         try:
+            real_a2c_replay: List[List[OnlineDecisionSample]] = []
+            real_a2c_replay_capacity = max(int(self.cfg.replay_buffer_episodes), 1)
+            real_a2c_replay_max_age = max(int(self.cfg.replay_actor_max_age_episodes), 1)
             for ep in range(start_episode + 1, int(self.cfg.train_episodes) + 1):
-                _samples, row, wm_steps = collector.run_train_episode(ep, int(self.rollout_max_steps))
+                samples, row, wm_steps = collector.run_train_episode(ep, int(self.rollout_max_steps))
+                real_a2c_replay.append(list(samples))
+                if len(real_a2c_replay) > real_a2c_replay_capacity:
+                    real_a2c_replay = real_a2c_replay[-real_a2c_replay_capacity:]
+                real_a2c_min_episode = int(ep) - int(real_a2c_replay_max_age) + 1
+                real_a2c_batches = [
+                    batch
+                    for batch in real_a2c_replay
+                    if batch and int(batch[0].episode) >= real_a2c_min_episode
+                ]
+                if not real_a2c_batches:
+                    real_a2c_batches = [list(samples)]
+                real_a2c_samples = [
+                    sample
+                    for batch in real_a2c_batches
+                    for sample in batch
+                ]
                 row["wm_replay_accepted"] = int(self._episode_allowed_for_wm_replay(row))
                 if int(row["wm_replay_accepted"]):
                     self.replay.append_episode(wm_steps)
@@ -2061,40 +2945,72 @@ class OnlineWmDreamerTrainer:
                 else:
                     row["wm_replay_skip_reason"] = "incomplete_episode"
                 per_pass_updates: List[Dict[str, float]] = []
-                if self._wm_update_due(ep):
-                    for pass_idx in range(max(int(self.cfg.wm_updates_per_collect), 1)):
+                real_a2c_update = self._direct_real_a2c_update(
+                    real_a2c_samples,
+                    replay_episodes=len(real_a2c_batches),
+                )
+                real_a2c_update["update_phase"] = 0.5
+                real_a2c_update["update_pass"] = 0.0
+                per_pass_updates.append(real_a2c_update)
+                n_wm_updates = max(int(self.cfg.wm_updates_per_collect), 0)
+                if self._wm_update_due(ep) and n_wm_updates > 0:
+                    for pass_idx in range(n_wm_updates):
                         wm_update = self.wm_updater.update(self.replay, self.rng)
                         wm_update["update_phase"] = 0.0
                         wm_update["update_pass"] = float(pass_idx + 1)
                         per_pass_updates.append(wm_update)
                 else:
-                    wm_update = self._skipped_wm_update(reason="interval")
+                    wm_update = self._skipped_wm_update(
+                        reason="disabled" if n_wm_updates <= 0 else "interval"
+                    )
                     wm_update["update_phase"] = 0.0
                     wm_update["update_pass"] = 0.0
                     per_pass_updates.append(wm_update)
-                if self.replay.episode_count() >= max(int(self.cfg.min_replay_episodes_before_actor), 1):
-                    for pass_idx in range(max(int(self.cfg.imagined_update_passes_per_collect), 1)):
-                        imag_update = self.imagined_ac.update(self.replay, self.rng)
-                        imag_update["update_phase"] = 1.0
-                        imag_update["update_pass"] = float(pass_idx + 1)
-                        per_pass_updates.append(imag_update)
-                else:
-                    per_pass_updates.append(
-                        {
-                            "imag_loss": 0.0,
-                            "imag_n_samples": 0.0,
-                            "imag_skipped": 1.0,
-                            "imag_skip_reason": "min_replay_episodes",
-                            "update_phase": 1.0,
-                            "update_pass": 0.0,
-                        }
-                    )
+                pred_diag: Optional[Dict[str, float]] = None
                 diag_every = max(int(self.cfg.wm_prediction_diagnostic_every_episodes), 0)
                 if diag_every > 0 and int(ep) % diag_every == 0:
                     pred_diag = self.imagined_ac.diagnose_prediction(self.replay, self.rng)
                     pred_diag["update_phase"] = 2.0
                     pred_diag["update_pass"] = 0.0
                     per_pass_updates.append(pred_diag)
+
+                target_actor_passes, actor_schedule_reason = self._actor_update_passes_for_episode(ep)
+                actor_passes, actor_gate_reason = self._actor_gate_passes(
+                    target_passes=int(target_actor_passes),
+                    diag=pred_diag,
+                )
+                actor_control_row: Dict[str, float] = {
+                    "actor_update_target_passes": float(target_actor_passes),
+                    "actor_update_effective_passes": float(actor_passes),
+                    "actor_update_schedule_reason": actor_schedule_reason,
+                    "actor_update_gate_reason": actor_gate_reason,
+                    "update_phase": 1.5,
+                    "update_pass": 0.0,
+                }
+                per_pass_updates.append(actor_control_row)
+
+                if self.replay.episode_count() >= max(int(self.cfg.min_replay_episodes_before_actor), 1) and actor_passes > 0:
+                    for pass_idx in range(int(actor_passes)):
+                        imag_update = self.imagined_ac.update(self.replay, self.rng)
+                        imag_update["update_phase"] = 1.0
+                        imag_update["update_pass"] = float(pass_idx + 1)
+                        per_pass_updates.append(imag_update)
+                else:
+                    skip_reason = (
+                        "min_replay_episodes"
+                        if self.replay.episode_count() < max(int(self.cfg.min_replay_episodes_before_actor), 1)
+                        else "actor_gate"
+                    )
+                    per_pass_updates.append(
+                        {
+                            "imag_loss": 0.0,
+                            "imag_n_samples": 0.0,
+                            "imag_skipped": 1.0,
+                            "imag_skip_reason": skip_reason,
+                            "update_phase": 1.0,
+                            "update_pass": 0.0,
+                        }
+                    )
                 update = _mean_update_stats(per_pass_updates)
                 row.update({f"update_{k}": v for k, v in update.items()})
                 train_rows.append(row)
@@ -2105,12 +3021,20 @@ class OnlineWmDreamerTrainer:
                     f"samples={row.get('samples', 0)} wm_trans={row.get('wm_transitions', 0)} "
                     f"reward_mean={row.get('reward_mean', float('nan')):.4f} "
                     f"t_all_arrived={row.get('t_all', float('nan')):.3f} "
+                    f"t_CAV={row.get('t_CAV', float('nan')):.3f} "
+                    f"t_HDV={row.get('t_HDV', float('nan')):.3f} "
                     f"completion={row.get('completion_rate', float('nan')):.6f} "
                     f"unfinished={int(row.get('unfinished_all', 0))} "
                     f"wm_replay={int(row.get('wm_replay_accepted', 0))} "
                     f"replay_eps={self.replay.episode_count()} "
                     f"wm_skip={str(update.get('wm_skip_reason', ''))} "
                     f"wm_loss={update.get('wm_loss', 0.0):.4f} "
+                    f"real_ac={int(update.get('real_a2c_enabled', 0.0))}:{int(update.get('real_a2c_skipped', 1.0))} "
+                    f"real_g={update.get('real_a2c_actor_grad_norm', 0.0):.4f} "
+                    f"real_adv={update.get('real_a2c_adv_std', 0.0):.4f} "
+                    f"real_ent={update.get('real_a2c_entropy', 0.0):.4f} "
+                    f"actor_passes={int(actor_passes)}/{int(target_actor_passes)} "
+                    f"gate={actor_gate_reason} "
                     f"imag_loss={update.get('imag_loss', 0.0):.4f} "
                     f"imag_reward={update.get('imag_reward_mean', 0.0):.4f} "
                     f"imag_return={update.get('imag_return_mean', 0.0):.4f} "

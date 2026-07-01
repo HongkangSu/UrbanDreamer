@@ -112,6 +112,22 @@ def _append_vehicle_context_features(
     return np.concatenate([obs_vehicle_np, np.tile(context, (obs_vehicle_np.shape[0], 1))], axis=1)
 
 
+def normalize_av_candidate_source(value: str | None) -> str:
+    source = str(value or "current_shortest_freeflow").strip().lower()
+    aliases = {
+        "current_to_dest": "current_shortest_freeflow",
+        "current2dest": "current_shortest_freeflow",
+        "current-to-dest": "current_shortest_freeflow",
+        "current_shortest": "current_shortest_freeflow",
+        "freeflow": "current_shortest_freeflow",
+        "free_flow": "current_shortest_freeflow",
+        "ff": "current_shortest_freeflow",
+        "live": "current_shortest_live",
+        "wm": "current_shortest_wm",
+    }
+    return aliases.get(source, source)
+
+
 @dataclass
 class OnlineNoCfmConfig:
     """Configuration for the Gretz online no-CFM actor-critic ablation."""
@@ -282,6 +298,9 @@ class OnlineNoCfmConfig:
             "incident_end": _as_float(settings.get("INCIDENT_END"), cfg.incident_end),
             "incident_speed": _as_float(settings.get("INCIDENT_SPEED"), cfg.incident_speed),
             "route_generator": settings.get("ROUTE_GENERATOR", cfg.route_generator),
+            "av_candidate_source": normalize_av_candidate_source(
+                settings.get("EVAL_CANDIDATE_SOURCE", settings.get("AV_CANDIDATE_SOURCE", cfg.av_candidate_source))
+            ),
             "path_gen_beta": _as_float(settings.get("PATH_GEN_BETA"), cfg.path_gen_beta),
             "path_num_samples": _as_int(settings.get("PATH_NUM_SAMPLES"), cfg.path_num_samples),
             "hdv_gawron_mode": settings.get("HDV_GAWRON_MODE", cfg.hdv_gawron_mode),
@@ -333,6 +352,7 @@ class OnlineDecisionSample:
     path_batch: Optional[List[List[int]]] = None
     current_edge_idx: int = -1
     dest_edge_idx: int = -1
+    arrival_remaining_time: float = float("nan")
 
 
 def _resolve_path(value: str | os.PathLike[str]) -> Path:
@@ -786,7 +806,7 @@ class OnlineNoCfmCollector(DataCollector):
         **collector_kwargs: Any,
     ):
         collector_kwargs.setdefault("loaded_hdv_state", loaded_hdv_state)
-        candidate_source = str(cfg.av_candidate_source or "current_shortest_freeflow").strip().lower()
+        candidate_source = normalize_av_candidate_source(cfg.av_candidate_source)
         base_candidate_source = "od_suffix" if candidate_source == "od_suffix" else "current_to_dest"
         collector_kwargs.setdefault("av_candidate_source", base_candidate_source)
         super().__init__(**collector_kwargs)
@@ -1485,6 +1505,8 @@ def samples_to_tensors(
             "old_log_probs": torch.zeros((0,), device=device),
             "valid_mask": torch.zeros((0, 0), dtype=torch.bool, device=device),
             "group_index": torch.zeros((0,), dtype=torch.long, device=device),
+            "route_costs": torch.zeros((0, 0), dtype=torch.float32, device=device),
+            "arrival_remaining": torch.zeros((0,), device=device),
         }
     returns = discounted_vehicle_returns(
         samples,
@@ -1493,6 +1515,7 @@ def samples_to_tensors(
     )
     obs_np = np.stack([s.obs for s in samples], axis=0).astype(np.float32)
     valid_np = np.stack([s.valid_mask for s in samples], axis=0).astype(bool)
+    route_costs_np = np.stack([s.route_costs for s in samples], axis=0).astype(np.float32)
     group_ids: Dict[Tuple[int, int], int] = {}
     groups: List[int] = []
     for sample in samples:
@@ -1508,6 +1531,12 @@ def samples_to_tensors(
         "old_log_probs": torch.tensor([float(s.old_log_prob) for s in samples], device=device, dtype=torch.float32),
         "valid_mask": torch.from_numpy(valid_np).to(device=device, dtype=torch.bool),
         "group_index": torch.from_numpy(group_np).to(device=device, dtype=torch.long),
+        "route_costs": torch.from_numpy(route_costs_np).to(device=device, dtype=torch.float32),
+        "arrival_remaining": torch.tensor(
+            [float(getattr(s, "arrival_remaining_time", float("nan"))) for s in samples],
+            device=device,
+            dtype=torch.float32,
+        ),
     }
 
 
@@ -1569,7 +1598,7 @@ class OnlineNoCfmTrainer:
         self.actor.load_state_dict(actor_state)
         critic_state = state.get("critic") or state.get("vehicle_critic")
         if critic_state is not None:
-            self.critic.load_state_dict(critic_state)
+            self.critic.load_state_dict(critic_state, strict=False)
         episode = int(state.get("episode", 0) or 0)
         print(
             f"[online-no-cfm] resumed actor/critic from {path} at episode {episode}",

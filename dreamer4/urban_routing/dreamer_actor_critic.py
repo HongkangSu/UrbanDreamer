@@ -332,12 +332,14 @@ class CentralizedVehicleValueCritic(nn.Module):
         architecture: str = "self_attention",
         n_attention_heads: int = 4,
         output_dim: int = 1,
+        arrival_output_dim: int = 0,
     ):
         super().__init__()
         self.obs_dim = int(obs_dim)
         self.context_dim = int(max(context_dim, 0))
         self.hidden_dim = int(hidden_dim)
         self.output_dim = int(max(output_dim, 1))
+        self.arrival_output_dim = int(max(arrival_output_dim, 0))
         self.architecture = str(architecture or "self_attention").strip().lower()
         if self.architecture in {"attention", "transformer"}:
             self.architecture = "self_attention"
@@ -369,12 +371,19 @@ class CentralizedVehicleValueCritic(nn.Module):
             self.vehicle_attention = None
             self.output_norm = None
         self.value_head = nn.Linear(self.hidden_dim, self.output_dim)
+        self.arrival_head = (
+            nn.Linear(self.hidden_dim, self.arrival_output_dim)
+            if self.arrival_output_dim > 0
+            else None
+        )
 
         for m in self.modules():
             if isinstance(m, nn.Linear):
                 nn.init.orthogonal_(m.weight, gain=math.sqrt(2))
                 nn.init.zeros_(m.bias)
         nn.init.orthogonal_(self.value_head.weight, gain=1.0)
+        if self.arrival_head is not None:
+            nn.init.orthogonal_(self.arrival_head.weight, gain=0.1)
 
     def _prepare_context(self, context: Optional[torch.Tensor], batch_size: int) -> torch.Tensor:
         if self.context_dim <= 0:
@@ -398,7 +407,7 @@ class CentralizedVehicleValueCritic(nn.Module):
             context = context[:, : self.context_dim]
         return context
 
-    def forward(
+    def _encode(
         self,
         obs: torch.Tensor,
         context: Optional[torch.Tensor] = None,
@@ -408,7 +417,7 @@ class CentralizedVehicleValueCritic(nn.Module):
             raise ValueError(f"expected obs shape (N, {self.obs_dim}), got {tuple(obs.shape)}")
         batch_size = int(obs.shape[0])
         if batch_size <= 0:
-            return torch.zeros((0, self.output_dim), device=obs.device, dtype=obs.dtype)
+            return torch.zeros((0, self.hidden_dim), device=obs.device, dtype=obs.dtype)
 
         critic_in = obs
         if self.context_dim > 0:
@@ -438,7 +447,27 @@ class CentralizedVehicleValueCritic(nn.Module):
                 attended[mask] = self.output_norm(tokens.squeeze(0) + attn_out.squeeze(0))
             h = attended
 
+        return h
+
+    def forward(
+        self,
+        obs: torch.Tensor,
+        context: Optional[torch.Tensor] = None,
+        group_index: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        h = self._encode(obs, context=context, group_index=group_index)
         return self.value_head(h)
+
+    def predict_arrival_log_time(
+        self,
+        obs: torch.Tensor,
+        context: Optional[torch.Tensor] = None,
+        group_index: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        if self.arrival_head is None:
+            return torch.zeros((int(obs.shape[0]), 0), device=obs.device, dtype=obs.dtype)
+        h = self._encode(obs, context=context, group_index=group_index)
+        return self.arrival_head(h)
 
 
 def lambda_return(

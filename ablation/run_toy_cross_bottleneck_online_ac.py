@@ -74,6 +74,16 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
     def __init__(self, *, actor: VehicleRouteActor, cfg: OnlineNoCfmConfig, **collector_kwargs: Any):
         super().__init__(wm=None, actor=actor, cfg=cfg, **collector_kwargs)
 
+    def _policy_logits_for_active_ids(
+        self,
+        obs: torch.Tensor,
+        active_ids: Sequence[str],
+    ) -> torch.Tensor:
+        active_logits = getattr(self._policy_eval, "forward_logits_for_active_ids", None)
+        if callable(active_logits):
+            return active_logits(obs, active_ids)
+        return self._policy_eval.forward_logits(obs)
+
     def _live_edge_features(self, state: Dict[str, Any]) -> np.ndarray:
         edge_state = state.get("edges", {}) if isinstance(state, dict) else {}
         feats = self._edge_registry.extract_flow(edge_state if isinstance(edge_state, dict) else {})
@@ -109,11 +119,23 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
         live_edge_cost = self._live_current_edge_tt(state)
         freeflow_edge_cost = self._freeflow_edge_tt()
         obs_edge_cost = live_edge_cost if live_edge_cost is not None else freeflow_edge_cost
+        candidate_edge_cost = freeflow_edge_cost
+        if self._av_candidate_source == "current_shortest_live":
+            candidate_edge_cost = live_edge_cost
+        elif self._av_candidate_source == "current_shortest_freeflow":
+            candidate_edge_cost = freeflow_edge_cost
+        elif self._av_candidate_source == "current_shortest_wm":
+            candidate_edge_cost = freeflow_edge_cost
+            inc("candidate_wm_source_fallback_freeflow")
+        if self._av_candidate_source != "od_suffix" and candidate_edge_cost is None:
+            inc("candidate_edge_cost_missing_calls")
 
         path_batch: List[List[List[int]]] = []
         route_batch: List[List[List[str]]] = []
         active_ids: List[str] = []
         active_current_edges: List[str] = []
+        candidate_dynamic_count = 0
+        candidate_fallback_count = 0
         for veh_id in active_avs:
             veh_info = in_network.get(veh_id)
             if not isinstance(veh_info, dict):
@@ -123,7 +145,19 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
             if (not current_edge) or current_edge.startswith(":"):
                 inc("skip_bad_current_edge")
                 continue
-            candidates = self._candidate_route_suffixes(veh_id, current_edge)
+            candidates: List[List[str]] = []
+            if self._av_candidate_source != "od_suffix":
+                candidates = self._current_to_dest_route_candidates(
+                    veh_id,
+                    current_edge,
+                    candidate_edge_cost,
+                )
+                if candidates:
+                    candidate_dynamic_count += 1
+                else:
+                    candidate_fallback_count += 1
+            if not candidates:
+                candidates = self._candidate_route_suffixes(veh_id, current_edge)
             if candidates:
                 candidates = self._filter_safe_reroute_candidates(veh_id, current_edge, candidates)
             if not candidates:
@@ -185,7 +219,7 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
                 )
                 obs_i = torch.from_numpy(obs_i_np).to(device=self._policy_eval_device, dtype=torch.float32)
                 with torch.no_grad():
-                    logits_i = self._policy_eval.forward_logits(obs_i)
+                    logits_i = self._policy_logits_for_active_ids(obs_i, [active_ids[i]])
                     probs_i = torch.softmax(logits_i, dim=-1).detach().cpu().numpy().astype(np.float32)[0]
                 probs_i = _temperature_adjust_probs(
                     probs_i,
@@ -214,7 +248,7 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
             )
             obs_t = torch.from_numpy(obs_vehicle_np).to(device=self._policy_eval_device, dtype=torch.float32)
             with torch.no_grad():
-                logits = self._policy_eval.forward_logits(obs_t)
+                logits = self._policy_logits_for_active_ids(obs_t, active_ids)
                 probs_np = torch.softmax(logits, dim=-1).detach().cpu().numpy().astype(np.float32)
             for i in range(len(active_ids)):
                 probs = _temperature_adjust_probs(
@@ -289,8 +323,8 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
             "decision_idx": int(self._current_decision_idx_eval),
             "sim_step": int(getattr(self.connector, "current_step", -1)),
             "active_av": int(len(active_ids)),
-            "candidate_dynamic_count": 0,
-            "candidate_fallback_count": int(len(active_ids)),
+            "candidate_dynamic_count": int(candidate_dynamic_count),
+            "candidate_fallback_count": int(candidate_fallback_count),
             "candidate_unique_mean": float(unique_mean),
             "candidate_unique_min": int(unique_min),
             "candidate_unique_max": int(unique_max),
@@ -736,9 +770,8 @@ def build_config(args: argparse.Namespace) -> OnlineNoCfmConfig:
         / TOY_NETWORK_NAME
         / f"online_ac_hdvlearn_{time.strftime('%Y%m%d_%H%M%S')}"
     )
-    cfg = OnlineNoCfmConfig(
+    overrides = dict(
         tag=TOY_NETWORK_NAME,
-        settings="",
         output_dir=str(output_dir),
         network_name=TOY_NETWORK_NAME,
         network_dir=str(network_dir),
@@ -789,6 +822,10 @@ def build_config(args: argparse.Namespace) -> OnlineNoCfmConfig:
         sumo_time_to_teleport=str(args.sumo_time_to_teleport),
         sumo_extra_args=str(args.sumo_extra_args or ""),
     )
+    if str(args.settings or "").strip():
+        cfg = OnlineNoCfmConfig.from_settings(str(args.settings), **overrides)
+    else:
+        cfg = OnlineNoCfmConfig(settings="", **overrides)
     resolved = cfg.resolve()
     setattr(resolved, "av_execution_mode", str(args.av_execution_mode))
     return resolved
@@ -810,6 +847,11 @@ def validate_paths(cfg: OnlineNoCfmConfig) -> None:
 
 def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--settings",
+        default="",
+        help="Optional URB settings env file used to align toy online AC with WM runs.",
+    )
     parser.add_argument("--network-dir", default=str(REPO_ROOT / "networks" / TOY_NETWORK_NAME))
     parser.add_argument("--output-dir", default="")
     parser.add_argument("--generate-network", action="store_true", help="Generate toy network artifacts before training.")

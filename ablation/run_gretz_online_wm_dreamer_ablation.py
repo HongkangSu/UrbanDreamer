@@ -110,8 +110,72 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--imagined-rollouts-per-update", type=int, default=1)
     parser.add_argument("--min-replay-episodes-before-actor", type=int, default=1)
     parser.add_argument("--ac-lambda", type=float, default=0.95)
+    parser.add_argument("--lr", type=float, default=2e-4, help="Vehicle actor learning rate.")
+    parser.add_argument("--critic-lr", type=float, default=3e-4, help="Vehicle critic learning rate.")
+    parser.add_argument("--value-coef", type=float, default=1.0)
+    parser.add_argument("--entropy-coef", type=float, default=0.002)
+    parser.add_argument("--advantage-clip", type=float, default=2.5)
+    parser.add_argument("--ppo-clip-ratio", type=float, default=0.075)
+    parser.add_argument("--entropy-target-frac", type=float, default=0.65)
+    parser.add_argument("--entropy-floor-coef", type=float, default=0.02)
+    parser.add_argument("--replay-buffer-episodes", type=int, default=1)
+    parser.add_argument("--replay-update-epochs", type=int, default=1)
+    parser.add_argument("--replay-actor-max-age-episodes", type=int, default=8)
+    parser.add_argument("--return-horizon-steps", type=int, default=0)
+    parser.add_argument("--min-samples-per-update", type=int, default=1)
+    parser.add_argument("--route-cost-logit-bias", type=float, default=0.0)
+    parser.add_argument("--policy-sample-temperature", type=float, default=1.0)
+    parser.add_argument("--max-grad-norm", type=float, default=10.0)
+    parser.add_argument(
+        "--no-normalize-advantages",
+        dest="ac_normalize_advantages",
+        action="store_false",
+        help="Disable imagined actor-critic advantage normalization.",
+    )
+    parser.set_defaults(ac_normalize_advantages=True)
     parser.add_argument("--wm-prediction-diagnostic-every-episodes", type=int, default=1)
     parser.add_argument("--wm-prediction-diagnostic-max-steps", type=int, default=16)
+    parser.add_argument("--vehicle-arrival-loss-coef", type=float, default=1.0)
+    parser.add_argument("--vehicle-arrival-diag-horizon-seconds", type=float, default=14.0)
+    parser.add_argument(
+        "--disable-vehicle-arrival-head",
+        action="store_true",
+        help="Disable the vehicle-level route-conditioned arrival auxiliary head.",
+    )
+    parser.add_argument(
+        "--direct-real-a2c-update",
+        action="store_true",
+        help="Also run one real-SUMO A2C actor/critic update after each collection episode.",
+    )
+    parser.add_argument(
+        "--freeze-policy-obs-world-model",
+        action="store_true",
+        help="Use a frozen checkpoint copy for real-SUMO actor observations while online WM updates train a separate model.",
+    )
+    parser.add_argument(
+        "--policy-obs-mode",
+        default="wm_latent",
+        choices=["wm_latent", "toy_live"],
+        help="Observation path for real-SUMO actor decisions; toy_live matches the toy no-WM AC collector.",
+    )
+    parser.add_argument(
+        "--actor-update-schedule",
+        default="fixed",
+        choices=["fixed", "linear", "stair", "diagnostic"],
+        help="Schedule for imagined actor-critic update passes per collected real episode.",
+    )
+    parser.add_argument("--actor-update-min-passes", type=int, default=0)
+    parser.add_argument("--actor-update-max-passes", type=int, default=0)
+    parser.add_argument("--actor-update-warmup-episodes", type=int, default=0)
+    parser.add_argument("--actor-update-ramp-episodes", type=int, default=0)
+    parser.add_argument("--actor-update-gate-enabled", action="store_true")
+    parser.add_argument("--actor-update-gate-min-diag-samples", type=int, default=1)
+    parser.add_argument("--actor-update-gate-min-top1-match", type=float, default=0.0)
+    parser.add_argument("--actor-update-gate-max-route-mae", type=float, default=0.0)
+    parser.add_argument("--actor-update-gate-max-current-edge-mae", type=float, default=0.0)
+    parser.add_argument("--actor-update-gate-max-regret", type=float, default=0.0)
+    parser.add_argument("--actor-update-gate-fail-passes", type=int, default=0)
+    parser.add_argument("--actor-update-gate-missing-passes", type=int, default=0)
     parser.add_argument("--episode-steps", type=int, default=None)
     parser.add_argument("--sim-buffer-after-last-depart", type=int, default=None)
     parser.add_argument("--max-steps-per-episode", type=int, default=None)
@@ -184,8 +248,44 @@ def build_config(args: argparse.Namespace) -> OnlineWmDreamerConfig:
         "imagined_rollouts_per_update": int(args.imagined_rollouts_per_update),
         "min_replay_episodes_before_actor": int(args.min_replay_episodes_before_actor),
         "ac_lambda": float(args.ac_lambda),
+        "lr": float(args.lr),
+        "critic_lr": float(args.critic_lr),
+        "value_coef": float(args.value_coef),
+        "entropy_coef": float(args.entropy_coef),
+        "ac_advantage_clip": float(args.advantage_clip),
+        "ac_ppo_clip_ratio": float(args.ppo_clip_ratio),
+        "ac_normalize_advantages": bool(args.ac_normalize_advantages),
+        "ac_entropy_target_frac": float(args.entropy_target_frac),
+        "ac_entropy_floor_coef": float(args.entropy_floor_coef),
+        "replay_buffer_episodes": int(args.replay_buffer_episodes),
+        "replay_update_epochs": int(args.replay_update_epochs),
+        "replay_actor_max_age_episodes": int(args.replay_actor_max_age_episodes),
+        "return_horizon_steps": int(args.return_horizon_steps),
+        "min_samples_per_update": int(args.min_samples_per_update),
+        "route_cost_logit_bias": float(args.route_cost_logit_bias),
+        "av_policy_sample_temperature": float(args.policy_sample_temperature),
+        "max_grad_norm": float(args.max_grad_norm),
         "wm_prediction_diagnostic_every_episodes": int(args.wm_prediction_diagnostic_every_episodes),
         "wm_prediction_diagnostic_max_steps": int(args.wm_prediction_diagnostic_max_steps),
+        "vehicle_arrival_head_enabled": not bool(args.disable_vehicle_arrival_head),
+        "vehicle_arrival_loss_coef": float(args.vehicle_arrival_loss_coef),
+        "vehicle_arrival_diag_horizon_seconds": float(args.vehicle_arrival_diag_horizon_seconds),
+        "direct_real_a2c_update": bool(args.direct_real_a2c_update),
+        "freeze_policy_obs_world_model": bool(args.freeze_policy_obs_world_model),
+        "policy_obs_mode": str(args.policy_obs_mode),
+        "actor_update_schedule": str(args.actor_update_schedule),
+        "actor_update_min_passes": int(args.actor_update_min_passes),
+        "actor_update_max_passes": int(args.actor_update_max_passes),
+        "actor_update_warmup_episodes": int(args.actor_update_warmup_episodes),
+        "actor_update_ramp_episodes": int(args.actor_update_ramp_episodes),
+        "actor_update_gate_enabled": bool(args.actor_update_gate_enabled),
+        "actor_update_gate_min_diag_samples": int(args.actor_update_gate_min_diag_samples),
+        "actor_update_gate_min_top1_match": float(args.actor_update_gate_min_top1_match),
+        "actor_update_gate_max_route_mae": float(args.actor_update_gate_max_route_mae),
+        "actor_update_gate_max_current_edge_mae": float(args.actor_update_gate_max_current_edge_mae),
+        "actor_update_gate_max_regret": float(args.actor_update_gate_max_regret),
+        "actor_update_gate_fail_passes": int(args.actor_update_gate_fail_passes),
+        "actor_update_gate_missing_passes": int(args.actor_update_gate_missing_passes),
         "disable_human_learning_after_mutation": bool(args.disable_human_learning_after_mutation),
         "eval_python": str(args.eval_python),
         "extra_eval_args": tuple(passthrough),
