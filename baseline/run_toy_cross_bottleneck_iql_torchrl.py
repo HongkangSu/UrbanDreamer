@@ -92,7 +92,7 @@ from dreamer4.urban_routing.urb_fair_protocol import derive_fixed_roles, load_po
 class ToyIqlTorchRLConfig(OnlineNoCfmConfig):
     """Toy fixed-role IQL config aligned with ``../URB/scripts/iql_torchrl.py``."""
 
-    agent_frames_per_batch: int = 10
+    agent_frames_per_batch: int = 1
     n_iters: int = 0
     checkpoint_interval: int = 100
     num_epochs: int = 1
@@ -198,6 +198,9 @@ class TorchRLIqlQNetwork(torch.nn.Module):
         self.slot_by_vehicle = {veh_id: idx for idx, veh_id in enumerate(self.machine_ids)}
         self.device_ref = device
         self.epsilon = float(cfg.eps_init)
+        self.include_global = bool(cfg.include_global)
+        self.include_route_costs = bool(cfg.include_route_costs)
+        self.include_fleet_pressure = bool(cfg.include_fleet_pressure)
 
         self.q_net = MultiAgentMLP(
             n_agent_inputs=int(obs_dim),
@@ -248,6 +251,27 @@ class TorchRLIqlQNetwork(torch.nn.Module):
             raise KeyError(f"vehicle {key!r} is not in fixed IQL machine roles")
         return int(self.slot_by_vehicle[key])
 
+    def _route_cost_valid_mask(self, obs: torch.Tensor) -> Optional[torch.Tensor]:
+        if not self.include_route_costs:
+            return None
+        context_dim = 3
+        cost_dim = 3 * int(self.n_routes)
+        fleet_dim = 2 * int(self.n_routes) if self.include_fleet_pressure else 0
+        denom = int(self.n_routes) + (1 if self.include_global else 0)
+        route_and_global = int(self.obs_dim) - context_dim - cost_dim - fleet_dim
+        if denom <= 0 or route_and_global <= 0 or route_and_global % denom != 0:
+            return None
+        route_feature_dim = route_and_global // denom
+        base_feature_dim = route_feature_dim * denom
+        valid_start = base_feature_dim + 2 * int(self.n_routes)
+        valid_end = valid_start + int(self.n_routes)
+        if valid_start < 0 or int(obs.shape[-1]) < valid_end:
+            return None
+        mask = obs[..., valid_start:valid_end].to(dtype=torch.bool)
+        mask = mask.clone()
+        mask[~mask.any(dim=-1), :] = True
+        return mask
+
     def _group_observation_td(
         self,
         obs: torch.Tensor,
@@ -283,11 +307,27 @@ class TorchRLIqlQNetwork(torch.nn.Module):
         self,
         obs: torch.Tensor,
         active_ids: Sequence[str],
+        action_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        q_values = self.forward_action_values_for_active_ids(obs, active_ids)
+        obs_t = obs.to(device=self.device_ref, dtype=torch.float32)
+        q_values = self.forward_action_values_for_active_ids(obs_t, active_ids)
+        if action_mask is not None:
+            mask = action_mask.to(device=q_values.device, dtype=torch.bool)
+        else:
+            mask = self._route_cost_valid_mask(obs_t)
+            if mask is not None:
+                mask = mask.to(device=q_values.device, dtype=torch.bool)
+        if mask is None:
+            mask = torch.ones_like(q_values, dtype=torch.bool)
+        if mask.shape != q_values.shape:
+            raise ValueError(f"action_mask shape {tuple(mask.shape)} does not match q_values {tuple(q_values.shape)}")
+        safe_mask = mask.clone()
+        safe_mask[~safe_mask.any(dim=-1), :] = True
+        q_values = q_values.masked_fill(~safe_mask, -1.0e9)
         eps = float(self.epsilon) if self.training else 0.0
         greedy = torch.argmax(q_values, dim=-1, keepdim=True)
-        probs = torch.full_like(q_values, fill_value=eps / float(max(self.n_routes, 1)))
+        valid_count = safe_mask.sum(dim=-1, keepdim=True).to(dtype=q_values.dtype).clamp_min(1.0)
+        probs = safe_mask.to(dtype=q_values.dtype) * (eps / valid_count)
         probs.scatter_add_(
             dim=-1,
             index=greedy,
@@ -1099,7 +1139,7 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--av-execution-mode", default="dynamic", choices=["dynamic", "first_decision_only"])
     parser.add_argument("--lr", type=float, default=3e-3)
     parser.add_argument("--max-grad-norm", type=float, default=3.0)
-    parser.add_argument("--agent-frames-per-batch", type=int, default=10)
+    parser.add_argument("--agent-frames-per-batch", type=int, default=1)
     parser.add_argument(
         "--n-iters",
         type=int,

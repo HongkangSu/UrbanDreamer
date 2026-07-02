@@ -68,6 +68,34 @@ from scripts.eval_sumo_routing import (
 from dreamer4.urban_routing.urb_fair_protocol import derive_fixed_roles, load_post_mutation_state
 
 
+def _apply_route_valid_mask_to_probs(
+    probs: np.ndarray,
+    valid_mask: np.ndarray,
+    n_routes: int,
+) -> np.ndarray:
+    arr = np.asarray(probs, dtype=np.float64).reshape(-1)
+    k = int(max(n_routes, 1))
+    if arr.shape[0] != k:
+        arr = np.ones((k,), dtype=np.float64)
+    else:
+        arr = arr[:k].copy()
+    valid = np.asarray(valid_mask, dtype=bool).reshape(-1)
+    if valid.shape[0] != k:
+        valid = np.ones((k,), dtype=bool)
+    if not bool(valid.any()):
+        valid = np.ones((k,), dtype=bool)
+
+    arr[~np.isfinite(arr)] = 0.0
+    arr = np.maximum(arr, 0.0)
+    arr[~valid] = 0.0
+    total = float(arr.sum())
+    if total <= 0.0:
+        arr[valid] = 1.0 / float(valid.sum())
+    else:
+        arr /= total
+    return arr.astype(np.float32)
+
+
 class ToyOnlineAcCollector(OnlineNoCfmCollector):
     """Online no-CFM collector whose actor observes live toy edge features."""
 
@@ -196,6 +224,7 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
             include_fleet_pressure=False,
         )
 
+        valid_mask = route_valid_mask_from_path_batch(path_batch, n_routes=int(self.n_routes))
         selected_indices = np.zeros((len(active_ids),), dtype=np.int64)
         policy_probs: List[np.ndarray] = []
         obs_rows: List[np.ndarray] = []
@@ -224,6 +253,11 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
                 probs_i = _temperature_adjust_probs(
                     probs_i,
                     float(self._cfg.av_policy_sample_temperature),
+                    int(self.n_routes),
+                )
+                probs_i = _apply_route_valid_mask_to_probs(
+                    probs_i,
+                    valid_mask[i],
                     int(self.n_routes),
                 )
                 selected_i = int(rng.choice(int(self.n_routes), p=probs_i))
@@ -256,6 +290,11 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
                     float(self._cfg.av_policy_sample_temperature),
                     int(self.n_routes),
                 )
+                probs = _apply_route_valid_mask_to_probs(
+                    probs,
+                    valid_mask[i],
+                    int(self.n_routes),
+                )
                 selected_indices[i] = int(rng.choice(int(self.n_routes), p=probs))
                 selected_indices[i] = int(np.clip(selected_indices[i], 0, len(route_batch[i]) - 1))
                 probs_np[i] = probs.astype(np.float32)
@@ -270,7 +309,6 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
             if live_edge_cost is not None
             else np.full((len(active_ids), int(self.n_routes)), np.inf, dtype=np.float32)
         )
-        valid_mask = route_valid_mask_from_path_batch(path_batch, n_routes=int(self.n_routes))
         elapsed = self._vehicle_elapsed_seconds(
             active_ids,
             int(getattr(self.connector, "current_step", 0)),

@@ -19,10 +19,9 @@ import pandas as pd
 import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
-from torch.distributions import Categorical
 from torchrl.data import Categorical as CategoricalSpec
 from torchrl.data import Composite
-from torchrl.modules import MultiAgentMLP, ProbabilisticActor
+from torchrl.modules import MaskedCategorical, MultiAgentMLP, ProbabilisticActor
 from torchrl.objectives import ClipPPOLoss
 
 
@@ -93,7 +92,7 @@ from dreamer4.urban_routing.urb_fair_protocol import derive_fixed_roles, load_po
 class ToyIppoTorchRLConfig(OnlineNoCfmConfig):
     """Toy fixed-role IPPO config aligned with ``../URB/scripts/ippo_torchrl.py``."""
 
-    agent_frames_per_batch: int = 10
+    agent_frames_per_batch: int = 1
     n_iters: int = 0
     checkpoint_interval: int = 100
     num_epochs: int = 1
@@ -200,6 +199,9 @@ class TorchRLIppoActorCritic(torch.nn.Module):
         self.n_agents = int(max(len(self.machine_ids), 1))
         self.slot_by_vehicle = {veh_id: idx for idx, veh_id in enumerate(self.machine_ids)}
         self.device_ref = device
+        self.include_global = bool(cfg.include_global)
+        self.include_route_costs = bool(cfg.include_route_costs)
+        self.include_fleet_pressure = bool(cfg.include_fleet_pressure)
 
         self.policy_net = torch.nn.Sequential(
             MultiAgentMLP(
@@ -232,9 +234,12 @@ class TorchRLIppoActorCritic(torch.nn.Module):
         self.policy = ProbabilisticActor(
             module=self.policy_module,
             spec=action_spec,
-            in_keys=[("agents", "logits")],
+            in_keys={
+                "logits": ("agents", "logits"),
+                "mask": ("agents", "action_mask"),
+            },
             out_keys=[("agents", "action")],
-            distribution_class=Categorical,
+            distribution_class=MaskedCategorical,
             return_log_prob=True,
             log_prob_key=("agents", "sample_log_prob"),
         )
@@ -263,6 +268,27 @@ class TorchRLIppoActorCritic(torch.nn.Module):
             raise KeyError(f"vehicle {key!r} is not in fixed IPPO machine roles")
         return int(self.slot_by_vehicle[key])
 
+    def _route_cost_valid_mask(self, obs: torch.Tensor) -> Optional[torch.Tensor]:
+        if not self.include_route_costs:
+            return None
+        context_dim = 3
+        cost_dim = 3 * int(self.n_routes)
+        fleet_dim = 2 * int(self.n_routes) if self.include_fleet_pressure else 0
+        denom = int(self.n_routes) + (1 if self.include_global else 0)
+        route_and_global = int(self.obs_dim) - context_dim - cost_dim - fleet_dim
+        if denom <= 0 or route_and_global <= 0 or route_and_global % denom != 0:
+            return None
+        route_feature_dim = route_and_global // denom
+        base_feature_dim = route_feature_dim * denom
+        valid_start = base_feature_dim + 2 * int(self.n_routes)
+        valid_end = valid_start + int(self.n_routes)
+        if valid_start < 0 or int(obs.shape[-1]) < valid_end:
+            return None
+        mask = obs[..., valid_start:valid_end].to(dtype=torch.bool)
+        mask = mask.clone()
+        mask[~mask.any(dim=-1), :] = True
+        return mask
+
     def _group_observation_td(
         self,
         obs: torch.Tensor,
@@ -287,12 +313,27 @@ class TorchRLIppoActorCritic(torch.nn.Module):
         self,
         obs: torch.Tensor,
         active_ids: Sequence[str],
+        action_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        td, slots = self._group_observation_td(obs, active_ids)
+        obs_t = obs.to(device=self.device_ref, dtype=torch.float32)
+        td, slots = self._group_observation_td(obs_t, active_ids)
         out = self.policy_module(td)
         logits = out.get(("agents", "logits"))
         rows = torch.arange(int(logits.shape[0]), device=logits.device)
-        return logits[rows, slots]
+        active_logits = logits[rows, slots]
+        if action_mask is not None:
+            mask = action_mask.to(device=active_logits.device, dtype=torch.bool)
+        else:
+            mask = self._route_cost_valid_mask(obs_t)
+            if mask is not None:
+                mask = mask.to(device=active_logits.device, dtype=torch.bool)
+        if mask is not None:
+            if mask.shape != active_logits.shape:
+                raise ValueError(f"action_mask shape {tuple(mask.shape)} does not match logits {tuple(active_logits.shape)}")
+            active_logits = active_logits.masked_fill(~mask, -1.0e9)
+            all_invalid = ~mask.any(dim=-1, keepdim=True)
+            active_logits = torch.where(all_invalid, torch.zeros_like(active_logits), active_logits)
+        return active_logits
 
 
 def _loss_matrix(value: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
@@ -377,7 +418,7 @@ def _build_ippo_minibatch_td(
     )
     action = torch.zeros((n, n_agents), device=device, dtype=torch.long)
     old_log_prob = torch.zeros((n, n_agents), device=device, dtype=torch.float32)
-    action_mask = torch.zeros((n, n_agents, n_routes), device=device, dtype=torch.bool)
+    action_mask = torch.ones((n, n_agents, n_routes), device=device, dtype=torch.bool)
     active_mask = torch.zeros((n, n_agents), device=device, dtype=torch.bool)
     rewards = torch.zeros((n, n_agents, 1), device=device, dtype=torch.float32)
     advantage = torch.zeros((n, n_agents, 1), device=device, dtype=torch.float32)
@@ -516,7 +557,7 @@ def build_torchrl_ippo_batch(
     obs = torch.zeros((n, n_agents, obs_dim), device=device, dtype=torch.float32)
     action = torch.zeros((n, n_agents), device=device, dtype=torch.long)
     old_log_prob = torch.zeros((n, n_agents), device=device, dtype=torch.float32)
-    action_mask = torch.zeros((n, n_agents, n_routes), device=device, dtype=torch.bool)
+    action_mask = torch.ones((n, n_agents, n_routes), device=device, dtype=torch.bool)
     active_mask = torch.zeros((n, n_agents), device=device, dtype=torch.bool)
     rewards = torch.zeros((n, n_agents, 1), device=device, dtype=torch.float32)
     slot_rows: List[int] = []
@@ -1156,7 +1197,7 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--av-execution-mode", default="dynamic", choices=["dynamic", "first_decision_only"])
     parser.add_argument("--lr", type=float, default=3e-3)
     parser.add_argument("--max-grad-norm", type=float, default=3.0)
-    parser.add_argument("--agent-frames-per-batch", type=int, default=10)
+    parser.add_argument("--agent-frames-per-batch", type=int, default=1)
     parser.add_argument(
         "--n-iters",
         type=int,
