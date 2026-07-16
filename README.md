@@ -9,6 +9,39 @@ minimal compatibility package needed by that path:
 3. train the imagined Dreamer CTDE policy;
 4. run SUMO evaluation probes and select the best checkpoint summary.
 
+## Installation
+
+The reproducible environment targets Linux x86_64, CPython 3.12, and an
+NVIDIA driver capable of running the CUDA runtime installed with PyTorch.
+Create it in one command from the repository root:
+
+```bash
+conda env create -f environment.yaml
+```
+
+Then activate it and expose the pip-installed SUMO runtime:
+
+```bash
+conda activate URB
+export SUMO_HOME="$CONDA_PREFIX"
+```
+
+For an existing Python 3.12 virtual environment, install the same locked stack
+directly:
+
+```bash
+python -m pip install -r requirements.txt
+export SUMO_HOME="$(python -c 'import sys; print(sys.prefix)')"
+```
+
+Verify the GPU, SUMO binary, and Python imports before launching a long run:
+
+```bash
+python -c "import torch, routerl, traci; print(torch.__version__, torch.cuda.is_available())"
+"$SUMO_HOME/bin/sumo" --version
+python -m pytest tests/test_three_city_online_wm_full_pipeline.py -q
+```
+
 The public network-switching contract is:
 
 ```bash

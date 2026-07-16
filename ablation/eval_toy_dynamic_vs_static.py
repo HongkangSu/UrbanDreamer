@@ -17,12 +17,12 @@ for path in (REPO_ROOT, REPO_ROOT / "dreamer4", REPO_ROOT / "dreamer4" / "urban_
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from ablation.run_toy_cross_bottleneck_online_ac import (
+from baseline.run_toy_cross_bottleneck_online_ac import (
     TOY_NETWORK_NAME,
     ToyOnlineAcTrainer,
     validate_paths,
 )
-from ablation.run_toy_cross_bottleneck_online_ac import build_config as build_train_config
+from baseline.run_toy_cross_bottleneck_online_ac import build_config as build_train_config
 from scripts.eval_sumo_hdv_state import _load_hdv_learning_state
 
 
@@ -55,6 +55,7 @@ def _run_mode(
     args.output_dir = str(output_dir)
     cfg = build_train_config(args)
     cfg.disable_human_learning_after_mutation = bool(base_args.disable_human_learning_after_mutation)
+    cfg.real_policy_route_selection = "argmax"
     validate_paths(cfg)
 
     trainer = ToyOnlineAcTrainer(cfg)

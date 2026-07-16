@@ -23,12 +23,13 @@ for path in (REPO_ROOT, REPO_ROOT / "dreamer4", REPO_ROOT / "dreamer4" / "urban_
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from ablation.create_toy_cross_bottleneck_network import NETWORK_NAME as TOY_NETWORK_NAME
-from ablation.create_toy_cross_bottleneck_network import generate as generate_toy_network
-from ablation.online_no_cfm_actor_critic import (
+from baseline.create_toy_cross_bottleneck_network import NETWORK_NAME as TOY_NETWORK_NAME
+from baseline.create_toy_cross_bottleneck_network import generate as generate_toy_network
+from baseline.online_actor_critic import (
     OnlineDecisionSample,
     OnlineNoCfmCollector,
     OnlineNoCfmConfig,
+    _select_real_policy_route_index,
     _append_vehicle_context_features,
     _as_float,
     _as_int,
@@ -40,7 +41,7 @@ from ablation.online_no_cfm_actor_critic import (
     save_policy_checkpoint,
     selected_vehicle_route_rewards,
 )
-from ablation.traci_port_fallback import patch_traci_start_port_fallback
+from baseline.traci_port_fallback import patch_traci_start_port_fallback
 from dreamer4.urban_routing.dreamer_actor_critic import (
     CentralizedVehicleValueCritic,
     VehicleRouteActor,
@@ -111,6 +112,17 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
         if callable(active_logits):
             return active_logits(obs, active_ids)
         return self._policy_eval.forward_logits(obs)
+
+    def _select_policy_route_index(
+        self,
+        probs: np.ndarray,
+        rng: np.random.RandomState,
+    ) -> int:
+        return _select_real_policy_route_index(
+            probs,
+            mode=self._cfg.real_policy_route_selection,
+            rng=rng,
+        )
 
     def _live_edge_features(self, state: Dict[str, Any]) -> np.ndarray:
         edge_state = state.get("edges", {}) if isinstance(state, dict) else {}
@@ -260,7 +272,7 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
                     valid_mask[i],
                     int(self.n_routes),
                 )
-                selected_i = int(rng.choice(int(self.n_routes), p=probs_i))
+                selected_i = self._select_policy_route_index(probs_i, rng)
                 selected_i = int(np.clip(selected_i, 0, len(route_batch[i]) - 1))
                 selected_indices[i] = selected_i
                 policy_probs.append(probs_i.astype(np.float32))
@@ -295,7 +307,7 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
                     valid_mask[i],
                     int(self.n_routes),
                 )
-                selected_indices[i] = int(rng.choice(int(self.n_routes), p=probs))
+                selected_indices[i] = self._select_policy_route_index(probs, rng)
                 selected_indices[i] = int(np.clip(selected_indices[i], 0, len(route_batch[i]) - 1))
                 probs_np[i] = probs.astype(np.float32)
 
@@ -371,6 +383,7 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
             "cfm_transition_used": 0,
             "wm_rollout_rerank_used": 0,
             "obs_source": "live_edge_registry_extract_flow",
+            "policy_route_selection": str(self._cfg.real_policy_route_selection),
         }
         for k in range(int(self.n_routes)):
             decision_row[f"mean_prob_route{k}"] = float(mean_probs[k])
@@ -389,6 +402,7 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
                 "current_edge": active_current_edges[i] if i < len(active_current_edges) else "",
                 "dest_edge": str(self._veh_dest.get(veh_id, "")),
                 "selected_route": int(selected_indices[i]),
+                "policy_route_selection": str(self._cfg.real_policy_route_selection),
                 "reward": float(rewards[i]),
                 "elapsed_time": float(elapsed[i]),
             }
@@ -774,7 +788,7 @@ class ToyOnlineAcTrainer:
         )
         _save_hdv_learning_state(self.output_dir / "hdv_learning_state_after_online_train.json", latest_hdv_state)
         summary = {
-            "ablation": "toy_cross_bottleneck_online_actor_critic",
+            "baseline": "online_actor_critic",
             "config": {
                 **_jsonable_config(self.cfg),
                 "av_execution_mode": str(getattr(self.cfg, "av_execution_mode", "dynamic")),
@@ -833,7 +847,7 @@ def build_config(args: argparse.Namespace) -> OnlineNoCfmConfig:
         device=str(args.device),
         reward_mode=str(args.reward_mode),
         reward_temperature=float(args.reward_temperature),
-        gamma=1.0,
+        gamma=float(args.gamma),
         lr=float(args.lr),
         critic_lr=float(args.critic_lr),
         value_coef=float(args.value_coef),
@@ -916,6 +930,7 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-steps-per-episode", type=int, default=0)
     parser.add_argument("--reward-mode", default="capped_step_cost", choices=["progress_fraction", "capped_step_cost"])
     parser.add_argument("--reward-temperature", type=float, default=60.0)
+    parser.add_argument("--gamma", type=float, default=1.0)
     parser.add_argument("--replay-buffer-episodes", type=int, default=8)
     parser.add_argument("--replay-update-epochs", type=int, default=2)
     parser.add_argument("--replay-actor-max-age-episodes", type=int, default=8)
@@ -955,11 +970,12 @@ def main(argv: List[str] | None = None) -> int:
         )
     cfg = build_config(args)
     plan = {
-        "ablation": "toy_cross_bottleneck_online_actor_critic",
+        "baseline": "online_actor_critic",
         "network": cfg.network_name,
         "setting_match": {
             "reward_mode": cfg.reward_mode,
             "reward_temperature": cfg.reward_temperature,
+            "gamma": cfg.gamma,
             "ratio_machines": cfg.ratio_machines,
             "episode_steps": cfg.episode_steps,
             "av_execution_mode": str(getattr(cfg, "av_execution_mode", "dynamic")),

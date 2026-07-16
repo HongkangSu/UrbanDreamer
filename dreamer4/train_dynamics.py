@@ -454,6 +454,44 @@ def _slice_model_actions_time(actions, stop: int):
     return actions[:, :t_stop]
 
 
+def _slice_model_actions_range(actions, start: int, stop: Optional[int] = None):
+    """Slice graph_cond or flat model actions on the time axis."""
+    if actions is None:
+        return None
+    t_start = int(start)
+    t_stop = None if stop is None else int(stop)
+    if isinstance(actions, tuple):
+        return tuple(None if a is None else a[:, t_start:t_stop] for a in actions)
+    return actions[:, t_start:t_stop]
+
+
+def _flatten_model_actions_time(actions):
+    """Flatten (B,T,...) model-action sequences into independent one-step samples."""
+    if actions is None:
+        return None
+
+    def _flatten_tensor(x: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+        if x is None:
+            return None
+        if x.dim() < 2:
+            return x
+        b, t = int(x.shape[0]), int(x.shape[1])
+        return x.contiguous().reshape(b * t, 1, *x.shape[2:])
+
+    if isinstance(actions, tuple):
+        return tuple(_flatten_tensor(a) for a in actions)
+    return _flatten_tensor(actions)
+
+
+def _last_model_action_token(actions):
+    """Keep only the last time token, preserving graph_cond tuples."""
+    if actions is None:
+        return None
+    if isinstance(actions, tuple):
+        return tuple(None if a is None else a[:, -1:] for a in actions)
+    return actions[:, -1:]
+
+
 def _infer_model_action_dim(
     *,
     raw_action_dim: int,
@@ -617,6 +655,7 @@ def cfm_loss(
     cfm_active_threshold: float = 0.0,
     cfm_max_weight: float = 50.0,
     volume_index: int = 2,
+    init_mode: str = "randn",
 ) -> tuple[torch.Tensor, Dict[str, torch.Tensor]]:
     """
     Conditional Flow Matching loss.
@@ -630,14 +669,39 @@ def cfm_loss(
       - Optionally adds L_hdv (CE between Stackelberg HDV output and real HDV data)
     """
     device = z1.device
-    B, T = z1.shape[:2]
+    mode = str(init_mode).strip().lower()
+    if mode not in {"randn", "zero", "current"}:
+        raise ValueError(f"Unsupported CFM init_mode={init_mode!r}; expected 'randn', 'zero', or 'current'")
 
-    x0 = torch.randn_like(z1)
+    if mode == "current":
+        if int(z1.shape[1]) < 2:
+            raise ValueError("CFM init_mode='current' requires at least two latent timesteps")
+        source_z = z1[:, :-1].contiguous()
+        target_z = z1[:, 1:].contiguous()
+        B0, T0 = target_z.shape[:2]
+        z_target = target_z.reshape(B0 * T0, 1, *target_z.shape[2:])
+        x0 = source_z.reshape(B0 * T0, 1, *source_z.shape[2:])
+        actions = _flatten_model_actions_time(_slice_model_actions_range(actions, 1, int(z1.shape[1])))
+        hdv_actions = _flatten_model_actions_time(_slice_model_actions_range(hdv_actions, 1, int(z1.shape[1])))
+        if hdv_target is not None:
+            hdv_target = hdv_target[:, 1:].contiguous().reshape(B0 * T0, 1, *hdv_target.shape[2:])
+        if flow_targets is not None:
+            flow_targets = flow_targets[:, 1:].contiguous().reshape(B0 * T0, 1, *flow_targets.shape[2:])
+        if agent_tokens is not None:
+            agent_tokens = agent_tokens[:, 1:].contiguous().reshape(B0 * T0, 1, *agent_tokens.shape[2:])
+    else:
+        z_target = z1
+        if mode == "zero":
+            x0 = torch.zeros_like(z_target)
+        else:
+            x0 = torch.randn_like(z_target)
+
+    B, T = z_target.shape[:2]
     t = torch.rand(B, T, device=device, dtype=torch.float32)
 
     t_expand = t[..., None, None]
-    x_t = (1.0 - t_expand) * x0 + t_expand * z1
-    target_v = z1 - x0
+    x_t = (1.0 - t_expand) * x0 + t_expand * z_target
+    target_v = z_target - x0
 
     want_hdv = (hdv_target is not None) and (float(hdv_policy_weight) > 0.0)
     want_action_recon = float(action_reconstruction_weight) > 0.0
@@ -842,15 +906,24 @@ def cfm_predict_one_timestep(
     act_mask: Optional[torch.Tensor] = None,
     n_steps: int = 1,                   # 1=Euler, 2=Midpoint-like fixed-step
     initial_state: Optional[torch.Tensor] = None,
+    init_mode: str = "randn",
 ) -> torch.Tensor:
     """Differentiable CFM ODE prediction for one-timestep transition supervision."""
     device = past_packed.device
     dtype = past_packed.dtype
     B, t = past_packed.shape[:2]
     n_spatial, d_spatial = past_packed.shape[2], past_packed.shape[3]
+    mode = str(init_mode).strip().lower()
+    if mode not in {"randn", "zero", "current"}:
+        raise ValueError(f"Unsupported CFM init_mode={init_mode!r}; expected 'randn', 'zero', or 'current'")
 
     if initial_state is None:
-        x = torch.randn((B, 1, n_spatial, d_spatial), device=device, dtype=dtype)
+        if mode == "current":
+            x = past_packed[:, -1:].detach().clone()
+        elif mode == "zero":
+            x = torch.zeros((B, 1, n_spatial, d_spatial), device=device, dtype=dtype)
+        else:
+            x = torch.randn((B, 1, n_spatial, d_spatial), device=device, dtype=dtype)
     else:
         x = initial_state.to(device=device, dtype=dtype).clone()
         if tuple(x.shape) != (B, 1, n_spatial, d_spatial):
@@ -866,13 +939,18 @@ def cfm_predict_one_timestep(
 
     for i in range(n_steps):
         t_val = float(i) * dt
-        flow_time_ctx = torch.zeros(B, t, device=device, dtype=torch.float32)
-        flow_time_new = torch.full((B, 1), t_val, device=device, dtype=torch.float32)
-        flow_time = torch.cat([flow_time_ctx, flow_time_new], dim=1)  # (B,t+1)
-
-        packed_seq = torch.cat([past_packed, x], dim=1)
-        actions_in = _slice_model_actions_time(actions, t + 1)
-        actmask_in = None if act_mask is None else act_mask[:, : t + 1]
+        if mode == "current" and initial_state is None:
+            flow_time = torch.full((B, 1), t_val, device=device, dtype=torch.float32)
+            packed_seq = x
+            actions_in = _last_model_action_token(_slice_model_actions_time(actions, t + 1))
+            actmask_in = None if act_mask is None else act_mask[:, -1:]
+        else:
+            flow_time_ctx = torch.zeros(B, t, device=device, dtype=torch.float32)
+            flow_time_new = torch.full((B, 1), t_val, device=device, dtype=torch.float32)
+            flow_time = torch.cat([flow_time_ctx, flow_time_new], dim=1)  # (B,t+1)
+            packed_seq = torch.cat([past_packed, x], dim=1)
+            actions_in = _slice_model_actions_time(actions, t + 1)
+            actmask_in = None if act_mask is None else act_mask[:, : t + 1]
 
         with torch.autocast(device_type=device.type, enabled=(device.type == "cuda")):
             v_pred, _ = dyn(
@@ -918,23 +996,30 @@ def adm_multistep_cfm_loss(
         raise ValueError("ADM context/target batch mismatch")
 
     mode = str(init_mode).strip().lower()
-    if mode == "zero":
+    if mode == "current":
+        x0 = context_z[:, -1:].detach().clone()
+    elif mode == "zero":
         x0 = torch.zeros_like(target_z)
     elif mode == "randn":
         x0 = torch.randn_like(target_z)
     else:
-        raise ValueError(f"Unsupported ADM init_mode={init_mode!r}; expected 'zero' or 'randn'")
+        raise ValueError(f"Unsupported ADM init_mode={init_mode!r}; expected 'zero', 'randn', or 'current'")
 
     tau = torch.rand(N, 1, device=device, dtype=torch.float32)
     tau_expand = tau[..., None, None]
     x_tau = (1.0 - tau_expand) * x0 + tau_expand * target_z
     target_v = target_z - x0
 
-    packed = torch.cat([context_z, x_tau], dim=1)
-    flow_time = torch.cat([
-        torch.ones(N, k, device=device, dtype=torch.float32),
-        tau,
-    ], dim=1)
+    if mode == "current":
+        packed = x_tau
+        flow_time = tau
+        actions = _last_model_action_token(actions)
+    else:
+        packed = torch.cat([context_z, x_tau], dim=1)
+        flow_time = torch.cat([
+            torch.ones(N, k, device=device, dtype=torch.float32),
+            tau,
+        ], dim=1)
 
     v_pred, _ = dynamics(
         actions,
@@ -995,25 +1080,33 @@ def adm_predict_k_timestep_direct(
     N, k = context_z.shape[:2]
     n_spatial, d_spatial = context_z.shape[2], context_z.shape[3]
     mode = str(init_mode).strip().lower()
-    if mode == "zero":
+    if mode == "current":
+        x = context_z[:, -1:].detach().clone()
+    elif mode == "zero":
         x = torch.zeros((N, 1, n_spatial, d_spatial), device=device, dtype=dtype)
     elif mode == "randn":
         x = torch.randn((N, 1, n_spatial, d_spatial), device=device, dtype=dtype)
     else:
-        raise ValueError(f"Unsupported ADM init_mode={init_mode!r}; expected 'zero' or 'randn'")
+        raise ValueError(f"Unsupported ADM init_mode={init_mode!r}; expected 'zero', 'randn', or 'current'")
 
     n_steps = max(1, int(n_steps))
     dt = 1.0 / float(n_steps)
     for i in range(n_steps):
         t_val = float(i) * dt
-        packed = torch.cat([context_z, x], dim=1)
-        flow_time = torch.cat([
-            torch.ones(N, k, device=device, dtype=torch.float32),
-            torch.full((N, 1), t_val, device=device, dtype=torch.float32),
-        ], dim=1)
+        if mode == "current":
+            packed = x
+            flow_time = torch.full((N, 1), t_val, device=device, dtype=torch.float32)
+            actions_in = _last_model_action_token(actions)
+        else:
+            packed = torch.cat([context_z, x], dim=1)
+            flow_time = torch.cat([
+                torch.ones(N, k, device=device, dtype=torch.float32),
+                torch.full((N, 1), t_val, device=device, dtype=torch.float32),
+            ], dim=1)
+            actions_in = actions
         with torch.autocast(device_type=device.type, enabled=(device.type == "cuda")):
             v_pred, _ = dyn(
-                actions,
+                actions_in,
                 None,
                 None,
                 packed,
@@ -1412,8 +1505,11 @@ def train(args):
     if route_distill_length_norm not in {"sum", "mean"}:
         raise ValueError(f"Unsupported route_distill_length_norm={route_distill_length_norm!r}; expected 'sum' or 'mean'")
     transition_cfm_init_mode = str(getattr(args, "transition_cfm_init_mode", "randn")).strip().lower()
-    if transition_cfm_init_mode not in {"randn", "zero"}:
-        raise ValueError(f"Unsupported transition_cfm_init_mode={transition_cfm_init_mode!r}; expected 'randn' or 'zero'")
+    if transition_cfm_init_mode not in {"randn", "zero", "current"}:
+        raise ValueError(
+            f"Unsupported transition_cfm_init_mode={transition_cfm_init_mode!r}; "
+            "expected 'randn', 'zero', or 'current'"
+        )
     cfm_active_weight = float(getattr(args, "cfm_active_weight", 0.0))
     cfm_busy_weight = float(getattr(args, "cfm_busy_weight", 0.0))
     cfm_busy_threshold = float(getattr(args, "cfm_busy_threshold", getattr(args, "decoded_busy_threshold", 0.05)))
@@ -1425,8 +1521,11 @@ def train(args):
     adm_decoded_supervision_weight = float(getattr(args, "adm_decoded_supervision_weight", 0.0))
     adm_max_windows = int(getattr(args, "adm_max_windows", 0))
     adm_cfm_init_mode = str(getattr(args, "adm_cfm_init_mode", transition_cfm_init_mode)).strip().lower()
-    if adm_cfm_init_mode not in {"randn", "zero"}:
-        raise ValueError(f"Unsupported adm_cfm_init_mode={adm_cfm_init_mode!r}; expected 'randn' or 'zero'")
+    if adm_cfm_init_mode not in {"randn", "zero", "current"}:
+        raise ValueError(
+            f"Unsupported adm_cfm_init_mode={adm_cfm_init_mode!r}; "
+            "expected 'randn', 'zero', or 'current'"
+        )
     if is_rank0():
         print(f"n_spatial={n_spatial} (edges), d_spatial={d_spatial}, d_feat={_d_feat}")
 
@@ -2074,6 +2173,7 @@ def train(args):
                         cfm_active_threshold=cfm_active_threshold,
                         cfm_max_weight=cfm_max_weight,
                         volume_index=bpr_veh_index,
+                        init_mode=transition_cfm_init_mode,
                     )
                     decoder_recon_loss, decoder_recon_aux = decoder_reconstruction_loss(
                         decoded_dyn=decoded_dyn,
@@ -2231,7 +2331,7 @@ def train(args):
                                 device=z1.device,
                                 dtype=z1.dtype,
                             )
-                        elif transition_action_contrast_weight > 0.0:
+                        elif transition_cfm_init_mode != "current" and transition_action_contrast_weight > 0.0:
                             transition_initial_state = torch.randn(
                                 (z1.shape[0], 1, z1.shape[2], z1.shape[3]),
                                 device=z1.device,
@@ -2244,6 +2344,7 @@ def train(args):
                             act_mask=act_mask,
                             n_steps=int(getattr(args, "n_ode_steps", 1)),
                             initial_state=transition_initial_state,
+                            init_mode=transition_cfm_init_mode,
                         )
                         if transition_decoded_supervision_weight > 0.0:
                             transition_sup_loss, transition_aux = transition_decoded_supervision_loss(
@@ -2359,6 +2460,7 @@ def train(args):
                                 act_mask=act_mask,
                                 n_steps=int(getattr(args, "n_ode_steps", 1)),
                                 initial_state=transition_initial_state,
+                                init_mode=transition_cfm_init_mode,
                             )
                             if transition_action_contrast_metric_name == "total":
                                 shuffle_sup_loss, shuffle_aux = transition_decoded_supervision_loss(
@@ -3325,8 +3427,8 @@ if __name__ == "__main__":
                    help="Soft margin for transition top-k ranking loss in raw veh/cap units.")
     p.add_argument("--transition_zero_volume_weight", type=float, default=None,
                    help="If set, overrides true-zero false-alarm penalty for transition decoded supervision.")
-    p.add_argument("--transition_cfm_init_mode", type=str, default="randn", choices=["randn", "zero"],
-                   help="Initial source state used by differentiable transition decoded supervision.")
+    p.add_argument("--transition_cfm_init_mode", type=str, default="randn", choices=["randn", "zero", "current"],
+                   help="Initial source state used by CFM. current uses z_t as x0 and removes z_t as a context token.")
     p.add_argument("--transition_action_contrast_weight", type=float, default=0.0,
                    help="Weight for contrastive loss requiring real-action transition error to beat shuffled-action error.")
     p.add_argument("--transition_action_contrast_margin", type=float, default=0.05,
@@ -3372,7 +3474,7 @@ if __name__ == "__main__":
                    help="Weight for decoded supervision on ADM direct k-step sampled states.")
     p.add_argument("--adm_max_windows", type=int, default=0,
                    help="If >0, randomly subsample this many direct k-step windows per horizon to cap memory.")
-    p.add_argument("--adm_cfm_init_mode", type=str, default="zero", choices=["randn", "zero"],
+    p.add_argument("--adm_cfm_init_mode", type=str, default="zero", choices=["randn", "zero", "current"],
                    help="Initial source state for ADM direct k-step CFM sampling/supervision.")
     p.add_argument("--decoder_full_weight", type=float, default=1.0,
                    help="Weight for full decoded-channel reconstruction loss on FlowProjector.decode outputs.")

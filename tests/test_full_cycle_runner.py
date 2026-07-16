@@ -108,7 +108,7 @@ def test_full_cycle_runner_translates_public_network_flags(tmp_path):
     assert plan.collect_command[plan.collect_command.index("--max_runtime_episodes") + 1] == "1000"
     assert "--allow_incomplete_episodes" not in plan.collect_command
     assert "--min_arrival_fraction" not in plan.collect_command
-    assert plan.collect_command[plan.collect_command.index("--random_av_fraction") + 1] == "0.6"
+    assert plan.collect_command[plan.collect_command.index("--random_av_fraction") + 1] == "0.0"
     assert plan.collect_command[plan.collect_command.index("--epsilon") + 1] == "0.4"
     assert plan.collect_command[plan.collect_command.index("--safe_reroute_min_remaining_m") + 1] == "35.0"
     assert plan.collect_command[plan.collect_command.index("--completion_drain_steps") + 1] == "7200"
@@ -153,6 +153,7 @@ def test_full_cycle_runner_translates_public_network_flags(tmp_path):
     assert plan.eval_commands[0][plan.eval_commands[0].index("--av_candidate_source") + 1] == "current_shortest_freeflow"
     assert "--av_route_cost_policy" not in plan.eval_commands[0]
     assert plan.eval_commands[0][plan.eval_commands[0].index("--post_mutation_state_in") + 1] == str(state_in.resolve())
+    assert plan.eval_commands[0][plan.eval_commands[0].index("--av_policy_route_selection") + 1] == "sample"
     assert plan.eval_commands[0][plan.eval_commands[0].index("--sumo_time_to_teleport") + 1] == "-1"
     assert plan.eval_commands[0][plan.eval_commands[0].index("--sumo_extra_args") + 1] == "--collision.action warn"
     assert "--keep_human_learning_after_mutation" not in plan.eval_commands[0]
@@ -172,6 +173,37 @@ def test_full_cycle_runner_translates_public_network_flags(tmp_path):
     assert "WM_CANDIDATE_EDGE_COST_SOURCE=\"freeflow\"" in generated
     assert "AV_CANDIDATE_SOURCE=\"current_to_dest\"" in generated
 
+
+def test_full_cycle_runner_keeps_argmax_as_explicit_eval_ablation(tmp_path):
+    network = tmp_path / "network"
+    _write_network(network)
+
+    args = parse_args(
+        [
+            "--network-dir",
+            str(network),
+            "--network-name",
+            "toy_net",
+            "--generated-config-dir",
+            str(tmp_path / "generated"),
+            "--output-root",
+            str(tmp_path / "data"),
+            "--logs-root",
+            str(tmp_path / "logs"),
+            "--results-root",
+            str(tmp_path / "results"),
+            "--checkpoint-episodes",
+            "100",
+            "--no-require-incident",
+            "--eval-av-policy-route-selection",
+            "argmax",
+        ]
+    )
+
+    plan = build_plan(args)
+    eval_command = plan.eval_commands[0]
+
+    assert eval_command[eval_command.index("--av_policy_route_selection") + 1] == "argmax"
 
 def test_full_cycle_runner_allows_overriding_marl_actor_horizon(tmp_path):
     network = tmp_path / "network"

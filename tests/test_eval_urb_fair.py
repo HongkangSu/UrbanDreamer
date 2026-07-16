@@ -79,6 +79,7 @@ def test_eval_urb_fair_injects_alignment_defaults(tmp_path):
     assert argv[argv.index("--reuse_artifacts_dir") + 1] == str(artifacts_dir)
     assert "--disable_human_learning_after_mutation" in argv
     assert "--keep_human_learning_after_mutation" not in argv
+    assert argv[argv.index("--av_policy_route_selection") + 1] == "sample"
     assert "--hdv_state_out" in argv
     assert "--post_mutation_state_out" in argv
 
@@ -91,12 +92,19 @@ def test_eval_urb_fair_respects_explicit_override_flags(tmp_path):
     argv = build_eval_urb_fair_argv(
         settings_path=str(settings),
         policy_ckpt="logs/toy_net/marl/latest.pt",
-        passthrough=["--route_generator", "routerl", "--keep_human_learning_after_mutation"],
+        passthrough=[
+            "--route_generator",
+            "routerl",
+            "--keep_human_learning_after_mutation",
+            "--av_policy_route_selection",
+            "argmax",
+        ],
     )
 
     assert argv[argv.index("--route_generator") + 1] == "routerl"
     assert "--disable_human_learning_after_mutation" not in argv
     assert "--keep_human_learning_after_mutation" in argv
+    assert argv[argv.index("--av_policy_route_selection") + 1] == "argmax"
 
 
 def test_eval_urb_fair_post_mutation_state_follows_results_dir_override(tmp_path):

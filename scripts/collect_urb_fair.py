@@ -10,9 +10,9 @@ URB-fair evaluation:
 3. Derive and fix the post-mutation machine/human set.
 4. Continue collecting episodes in that post-mutation regime.
 
-The collection policy itself may still use exploration (random / epsilon-greedy
-or DAgger); the fairness target here is the environment protocol, not the
-policy-generation scheme.
+The mainline collection policy assigns every fixed CAV the same per-decision
+epsilon-greedy rule. Permanently random CAVs and DAgger remain explicit
+diagnostic overrides rather than mainline defaults.
 """
 
 from __future__ import annotations
@@ -294,6 +294,7 @@ def _write_collection_manifest(
     post_mutation_state_path: Optional[Path],
     hdv_state_in_path: Optional[Path],
     hdv_state_out_path: Optional[Path],
+    post_mutation_hdv_learning: bool = False,
     partial: bool = False,
     episodes_saved: Optional[int] = None,
 ) -> Path:
@@ -305,7 +306,8 @@ def _write_collection_manifest(
         "network": cfg.get("NETWORK_NAME", ""),
         "ratio_machines": float(cfg.get("RATIO_MACHINES", "0") or 0.0),
         "human_model": "gawron",
-        "should_humans_adapt": False,
+        "should_humans_adapt": bool(post_mutation_hdv_learning),
+        "post_mutation_hdv_learning": bool(post_mutation_hdv_learning),
         "warmup_episodes": int(warmup_episodes),
         "num_episodes": int(num_episodes),
         "episodes_saved": int(episodes_saved) if episodes_saved is not None else int(num_episodes),
@@ -342,6 +344,7 @@ def _flush_partial_collection(
     hdv_state_in_path: Optional[Path],
     hdv_state_out_path: Optional[Path],
     loaded_hdv_state: Optional[Dict[str, Any]],
+    post_mutation_hdv_learning: bool = False,
     all_episodes: List[int],
     all_av_edge_actions: List[Any],
     all_hdv_edge_actions: List[Any],
@@ -376,6 +379,7 @@ def _flush_partial_collection(
         post_mutation_state_path=post_mutation_state_path,
         hdv_state_in_path=hdv_state_in_path,
         hdv_state_out_path=hdv_state_out_path,
+        post_mutation_hdv_learning=bool(post_mutation_hdv_learning),
         partial=True,
         episodes_saved=len(set(all_episodes)),
     )
@@ -408,10 +412,39 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--hdv_state_out", type=str, default="")
     p.add_argument("--post_mutation_hdv_state_out", type=str, default="",
                    help="Path to save the HDV learning state immediately after warmup/mutation.")
+    post_mutation_hdv_group = p.add_mutually_exclusive_group()
+    post_mutation_hdv_group.add_argument(
+        "--post_mutation_hdv_learning",
+        "--keep_human_learning_after_mutation",
+        dest="post_mutation_hdv_learning",
+        action="store_true",
+        default=False,
+        help="Continue HDV/Gawron learning during Phase-2 post-mutation collection.",
+    )
+    post_mutation_hdv_group.add_argument(
+        "--disable_post_mutation_hdv_learning",
+        "--disable_human_learning_after_mutation",
+        dest="post_mutation_hdv_learning",
+        action="store_false",
+        help="Keep the legacy Phase-2 behavior: fixed HDV policy after mutation.",
+    )
     p.add_argument("--policy_ckpt", type=str, default="",
                    help="Optional MARL policy checkpoint for DAgger collection.")
-    p.add_argument("--random_av_fraction", type=float, default=0.3)
-    p.add_argument("--epsilon", type=float, default=0.2)
+    p.add_argument(
+        "--random_av_fraction",
+        type=float,
+        default=0.0,
+        help=(
+            "Fraction of dynamically assigned CAVs using a permanently random policy. "
+            "The mainline fixed-role warmup uses 0.0 so every CAV is epsilon-greedy."
+        ),
+    )
+    p.add_argument(
+        "--epsilon",
+        type=float,
+        default=0.4,
+        help="Per-decision exploration probability for the mainline epsilon-greedy CAV warmup.",
+    )
     p.add_argument("--safe_reroute_min_remaining_m", type=float, default=35.0,
                    help="Minimum lane distance remaining for reroutes that require a lane change. Set <0 to disable.")
     p.add_argument("--completion_drain_steps", type=int, default=0,
@@ -480,6 +513,20 @@ def parse_args() -> argparse.Namespace:
                    help="Weight for busy-edge-count component in the hybrid score.")
     p.add_argument("--score_busy_edge_mass_weight", type=float, default=1.0,
                    help="Weight for busy-edge-mass component in the hybrid score.")
+    p.add_argument("--train_hdv_response_predictor", action="store_true",
+                   help="After collection, train and save the causal HDV response predictor into records_dir.")
+    p.add_argument("--hdv_response_predictor_target_source", type=str, default="auto",
+                   choices=["auto", "static_edge_demand", "episode_mean_current_occupancy"],
+                   help="Target source for optional HDV response predictor warmup training.")
+    p.add_argument("--hdv_response_predictor_epochs", type=int, default=1500)
+    p.add_argument("--hdv_response_predictor_lr", type=float, default=2e-3)
+    p.add_argument("--hdv_response_predictor_weight_decay", type=float, default=1e-4)
+    p.add_argument("--hdv_response_predictor_hidden_dim", type=int, default=128)
+    p.add_argument("--hdv_response_predictor_depth", type=int, default=2)
+    p.add_argument("--hdv_response_predictor_min_pairs", type=int, default=2)
+    p.add_argument("--hdv_response_predictor_test_fraction", type=float, default=0.25)
+    p.add_argument("--hdv_response_predictor_ckpt", type=str, default="",
+                   help="Optional output path. Defaults to records_dir/hdv_response_predictor.pt.")
     return p.parse_args()
 
 
@@ -529,7 +576,9 @@ def main() -> int:
             expected_network=cfg.get("NETWORK_NAME", ""),
             expected_ratio_machines=float(cfg.get("RATIO_MACHINES", "0") or 0.0),
             expected_human_model="gawron",
-            expected_should_humans_adapt=False,
+            expected_should_humans_adapt=(
+                None if bool(args.post_mutation_hdv_learning) else False
+            ),
             state=post_mutation_state,
         )
         if loaded_hdv_state is None:
@@ -567,7 +616,10 @@ def main() -> int:
         print(f"  HDV state in:            {hdv_state_in_path}")
     if hdv_state_out_path is not None:
         print(f"  HDV state out:           {hdv_state_out_path}")
-    print("  Human learning after mutation: disabled")
+    print(
+        "  Human learning after mutation: "
+        + ("enabled" if bool(args.post_mutation_hdv_learning) else "disabled")
+    )
 
     collector = DataCollector(
         output_dir=str(output_dir),
@@ -663,7 +715,9 @@ def main() -> int:
                 "--route_generator", str(cfg.get("ROUTE_GENERATOR", "dijkstra") or "dijkstra"),
                 "--reuse_artifacts_dir", str(records_dir),
                 "--human_learning_episodes", str(warmup_episodes),
-                "--disable_human_learning_after_mutation",
+                "--keep_human_learning_after_mutation"
+                if bool(args.post_mutation_hdv_learning)
+                else "--disable_human_learning_after_mutation",
             ],
             mutation_episode_index=int(warmup_episodes),
             machine_agent_ids=machine_agent_ids,
@@ -753,6 +807,9 @@ def main() -> int:
             finally:
                 if episode_wall_timeout > 0.0:
                     signal.setitimer(signal.ITIMER_REAL, 0.0)
+            if bool(args.post_mutation_hdv_learning):
+                _update_hdv_after_episode(collector, ep_frames)
+                loaded_hdv_state = _refresh_loaded_hdv_state(collector, loaded_hdv_state)
             selection_metrics = _episode_selection_metrics(
                 collector,
                 ep_frames,
@@ -869,6 +926,7 @@ def main() -> int:
             hdv_state_in_path=hdv_state_in_path,
             hdv_state_out_path=hdv_state_out_path,
             loaded_hdv_state=loaded_hdv_state,
+            post_mutation_hdv_learning=bool(args.post_mutation_hdv_learning),
             all_episodes=all_episodes,
             all_av_edge_actions=all_av_edge_actions,
             all_hdv_edge_actions=all_hdv_edge_actions,
@@ -896,6 +954,7 @@ def main() -> int:
             post_mutation_state_path=post_mutation_state_out_path if post_mutation_state_in_path is None else post_mutation_state_in_path,
             hdv_state_in_path=hdv_state_in_path,
             hdv_state_out_path=hdv_state_out_path,
+            post_mutation_hdv_learning=bool(args.post_mutation_hdv_learning),
             partial=True,
             episodes_saved=0,
         )
@@ -925,9 +984,52 @@ def main() -> int:
         post_mutation_state_path=post_mutation_state_out_path if post_mutation_state_in_path is None else post_mutation_state_in_path,
         hdv_state_in_path=hdv_state_in_path,
         hdv_state_out_path=hdv_state_out_path,
+        post_mutation_hdv_learning=bool(args.post_mutation_hdv_learning),
         partial=(saved_episode_id < requested_num_episodes),
         episodes_saved=saved_episode_id,
     )
+    if bool(args.train_hdv_response_predictor):
+        from scripts.train_hdv_response_predictor_warmup import train_and_save_hdv_response_predictor
+
+        predictor_ckpt = (
+            Path(args.hdv_response_predictor_ckpt).resolve()
+            if str(args.hdv_response_predictor_ckpt or "").strip()
+            else records_dir / "hdv_response_predictor.pt"
+        )
+        dataset_pt = output_dir / f"{task_name}.pt"
+        predictor_result = train_and_save_hdv_response_predictor(
+            records_dir=records_dir,
+            dataset_pt=dataset_pt if dataset_pt.exists() else None,
+            route_xml=records_dir / "route.rou.xml",
+            edge_registry=Path(str(cfg.get("EDGE_REGISTRY", ""))).resolve()
+            if str(cfg.get("EDGE_REGISTRY", "")).strip()
+            else None,
+            output_ckpt=predictor_ckpt,
+            target_source=str(args.hdv_response_predictor_target_source),
+            epochs=int(args.hdv_response_predictor_epochs),
+            lr=float(args.hdv_response_predictor_lr),
+            weight_decay=float(args.hdv_response_predictor_weight_decay),
+            hidden_dim=int(args.hdv_response_predictor_hidden_dim),
+            depth=int(args.hdv_response_predictor_depth),
+            min_pairs=int(args.hdv_response_predictor_min_pairs),
+            test_fraction=float(args.hdv_response_predictor_test_fraction),
+            seed=int(args.seed),
+            device="cpu",
+        )
+        state_path = post_mutation_state_out_path if post_mutation_state_in_path is None else post_mutation_state_in_path
+        if state_path is not None and state_path.exists():
+            state = load_post_mutation_state(state_path)
+            state["hdv_response_predictor_ref"] = str(predictor_ckpt)
+            refs = state.get("artifact_refs", {})
+            if not isinstance(refs, dict):
+                refs = {}
+            refs["hdv_response_predictor_ckpt"] = str(predictor_ckpt)
+            state["artifact_refs"] = refs
+            write_post_mutation_state(state_path, state)
+        print(
+            f"HDV response predictor checkpoint: {predictor_result['checkpoint']}",
+            flush=True,
+        )
     print(f"\nURB-fair collection manifest: {manifest_path}")
     if saved_episode_id < requested_num_episodes:
         print(

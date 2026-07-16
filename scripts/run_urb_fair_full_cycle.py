@@ -693,6 +693,8 @@ def _commands(args: argparse.Namespace, paths: dict[str, object], checkpoint_epi
                 "--device",
                 args.device,
                 "--deterministic",
+                "--av_policy_route_selection",
+                str(args.eval_av_policy_route_selection),
                 "--wm_edge_cost_source",
                 "decoded_speed",
                 "--wm_candidate_edge_cost_source",
@@ -986,7 +988,7 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--collect-max-steps", type=int, default=3600, help=hidden)
     p.add_argument("--collect-max-runtime-episodes", type=int, default=0, help=hidden)
     p.add_argument("--collect-episode-wall-timeout-seconds", type=float, default=0.0, help=hidden)
-    p.add_argument("--collect-random-av-fraction", type=float, default=0.6, help=hidden)
+    p.add_argument("--collect-random-av-fraction", type=float, default=0.0, help=hidden)
     p.add_argument("--collect-epsilon", type=float, default=0.4, help=hidden)
     p.add_argument("--collect-allow-incomplete-episodes", action="store_true", help=hidden)
     p.add_argument("--collect-min-arrival-fraction", type=float, default=1.0, help=hidden)
@@ -1132,6 +1134,12 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument("--marl-vehicle-obs-include-fleet-pressure", action="store_true", help=hidden)
     p.add_argument("--checkpoint-episodes", default=os.environ.get("CHECKPOINT_EPISODES", "100"), help=hidden)
     p.add_argument("--eval-test-eps", type=int, default=3, help=hidden)
+    p.add_argument(
+        "--eval-av-policy-route-selection",
+        choices=["sample", "argmax"],
+        default="sample",
+        help=hidden,
+    )
     p.add_argument("--eval-max-steps-per-episode", type=int, default=0, help=hidden)
     p.add_argument("--eval-sumo-time-to-teleport", default="", help=hidden)
     p.add_argument("--eval-sumo-extra-args", default="", help=hidden)

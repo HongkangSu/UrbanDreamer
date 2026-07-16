@@ -93,8 +93,10 @@ class UrbanWorldModel(nn.Module):
         self.use_amp = use_amp and torch.cuda.is_available()
         self.set_policy_obs_source(policy_obs_source)
         self.cfm_init_mode = str(cfm_init_mode).strip().lower()
-        if self.cfm_init_mode not in ("randn", "zero"):
-            raise ValueError(f"Unsupported cfm_init_mode={cfm_init_mode!r}; expected 'randn' or 'zero'")
+        if self.cfm_init_mode not in ("randn", "zero", "current"):
+            raise ValueError(
+                f"Unsupported cfm_init_mode={cfm_init_mode!r}; expected 'randn', 'zero', or 'current'"
+            )
         self.transition_mode = str(transition_mode).strip().lower()
         if self.transition_mode != "cfm":
             raise ValueError(f"Unsupported transition_mode={transition_mode!r}; expected 'cfm'")
@@ -948,7 +950,10 @@ class UrbanWorldModel(nn.Module):
         B, t   = past_packed.shape[:2]
         n_spatial, d_spatial = past_packed.shape[2], past_packed.shape[3]
 
-        x = self._init_cfm_state(B, n_spatial, d_spatial, device=device, dtype=dtype)
+        if self.cfm_init_mode == "current":
+            x = past_packed[:, -1:].clone()
+        else:
+            x = self._init_cfm_state(B, n_spatial, d_spatial, device=device, dtype=dtype)
         dt = 1.0 / float(max(1, self.n_ode_steps))
         if isinstance(actions, tuple):
             actions_in = tuple(a[:, :t + 1] for a in actions)
@@ -957,13 +962,21 @@ class UrbanWorldModel(nn.Module):
 
         for i in range(max(1, self.n_ode_steps)):
             t_val = float(i) * dt
-            flow_time = torch.zeros((B, t + 1), device=device, dtype=torch.float32)
-            flow_time[:, -1] = t_val
-
-            packed_seq = torch.cat([past_packed, x], dim=1)
+            if self.cfm_init_mode == "current":
+                flow_time = torch.full((B, 1), t_val, device=device, dtype=torch.float32)
+                packed_seq = x
+                if isinstance(actions_in, tuple):
+                    actions_step = tuple(a[:, -1:] for a in actions_in)
+                else:
+                    actions_step = actions_in[:, -1:]
+            else:
+                flow_time = torch.zeros((B, t + 1), device=device, dtype=torch.float32)
+                flow_time[:, -1] = t_val
+                packed_seq = torch.cat([past_packed, x], dim=1)
+                actions_step = actions_in
             with torch.autocast(device_type=device.type, enabled=(self.use_amp and device.type == "cuda")):
                 v_pred, _ = self.dynamics(
-                    actions_in, None, None, packed_seq,
+                    actions_step, None, None, packed_seq,
                     act_mask=None, agent_tokens=None,
                     flow_time=flow_time,
                 )
@@ -1062,10 +1075,19 @@ class UrbanWorldModel(nn.Module):
         )
 
         n_spatial, d_spatial = past_packed.shape[2], past_packed.shape[3]
-        x = self._init_cfm_state(B, n_spatial, d_spatial, device=device, dtype=dtype)
-        flow_time = torch.zeros((B, t + 1), device=device, dtype=torch.float32)
-
-        packed_seq = torch.cat([past_packed, x], dim=1)
+        if self.cfm_init_mode == "current":
+            x = past_packed[:, -1:].clone()
+            flow_time = torch.zeros((B, 1), device=device, dtype=torch.float32)
+            packed_seq = x
+            if isinstance(model_actions, tuple):
+                model_actions_step = tuple(a[:, -1:] for a in model_actions)
+            else:
+                model_actions_step = model_actions[:, -1:]
+        else:
+            x = self._init_cfm_state(B, n_spatial, d_spatial, device=device, dtype=dtype)
+            flow_time = torch.zeros((B, t + 1), device=device, dtype=torch.float32)
+            packed_seq = torch.cat([past_packed, x], dim=1)
+            model_actions_step = model_actions
 
         def _forward_dynamics(
             actions_t: torch.Tensor,
@@ -1093,13 +1115,13 @@ class UrbanWorldModel(nn.Module):
 
             v_pred = checkpoint(
                 _forward_dynamics,
-                model_actions,
+                model_actions_step,
                 packed_seq,
                 flow_time,
                 use_reentrant=False,
             )
         else:
-            v_pred = _forward_dynamics(model_actions, packed_seq, flow_time)
+            v_pred = _forward_dynamics(model_actions_step, packed_seq, flow_time)
         z_next = x + v_pred[:, -1:, :, :]
         return z_next[0, 0], info
 

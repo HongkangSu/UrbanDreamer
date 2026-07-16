@@ -1,6 +1,7 @@
 import math
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import torch
@@ -9,9 +10,12 @@ from tensordict import TensorDict
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from ablation.online_no_cfm_actor_critic import OnlineDecisionSample  # noqa: E402
-from ablation.online_no_cfm_actor_critic import _append_vehicle_context_features  # noqa: E402
-from ablation.run_toy_cross_bottleneck_online_ac import _apply_route_valid_mask_to_probs  # noqa: E402
+from baseline.online_actor_critic import OnlineDecisionSample  # noqa: E402
+from baseline.online_actor_critic import _append_vehicle_context_features  # noqa: E402
+from baseline.run_toy_cross_bottleneck_online_ac import (  # noqa: E402
+    ToyOnlineAcCollector,
+    _apply_route_valid_mask_to_probs,
+)
 from dreamer4.urban_routing.vehicle_imagination import build_vehicle_obs_vectorized  # noqa: E402
 from baseline.run_toy_cross_bottleneck_ippo_torchrl import (  # noqa: E402
     TorchRLIppoActorCritic,
@@ -136,6 +140,40 @@ def test_toy_collector_temperature_keeps_invalid_route_probability_zero():
     assert masked[1] == 0.0
     assert masked[3] == 0.0
     np.testing.assert_allclose(masked[[0, 2]].sum(), 1.0, atol=1e-6)
+
+
+def test_toy_collector_eval_selection_uses_argmax_without_sampling():
+    class FailingRng:
+        def choice(self, *_args, **_kwargs):
+            raise AssertionError("deterministic evaluation must not sample")
+
+    collector = object.__new__(ToyOnlineAcCollector)
+    collector._cfg = SimpleNamespace(real_policy_route_selection="argmax")
+
+    selected = collector._select_policy_route_index(
+        np.asarray([0.05, 0.15, 0.75, 0.05], dtype=np.float32),
+        FailingRng(),
+    )
+
+    assert selected == 2
+
+
+def test_ippo_eval_can_override_settings_drain_window():
+    args = parse_args(
+        [
+            "--eval-only",
+            "--eval-sim-buffer-after-last-depart",
+            "7200",
+            "--device",
+            "cpu",
+        ]
+    )
+
+    cfg = build_config(args)
+
+    assert cfg.sim_buffer_after_last_depart == 7200
+    assert cfg.real_policy_route_selection == "argmax"
+    assert cfg.disable_human_learning_after_mutation is True
 
 
 def test_build_torchrl_ippo_batch_preserves_active_slots_and_advantages():

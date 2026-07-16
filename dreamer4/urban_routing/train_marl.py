@@ -230,7 +230,14 @@ def _restore_dreamer_extra_state(extra_state, *, device):
     return pending_trajs, update_id
 
 
-ROUTE_COST_RETURN_DISCOUNT = 1.0
+ROUTE_COST_RETURN_DISCOUNT = 0.97
+FREEFLOW_SHORTEST_PROGRESS_MODES = {
+    "freeflow_shortest_progress",
+    "ff_shortest_progress",
+    "shortest_freeflow_progress",
+    "spff_progress",
+    "shortest_path_freeflow_progress",
+}
 LEGACY_ACTOR_ONLY_LOSS_WEIGHTS = (
     "dreamer_ac_route_advantage_weight",
     "dreamer_expected_cost_weight",
@@ -239,6 +246,10 @@ LEGACY_ACTOR_ONLY_LOSS_WEIGHTS = (
     "dreamer_grpo_rollout_vehicle_cost_weight",
     "dreamer_route_cost_aux_weight",
 )
+
+
+def _is_freeflow_shortest_progress_mode(mode: Any) -> bool:
+    return str(mode or "").strip().lower() in FREEFLOW_SHORTEST_PROGRESS_MODES
 
 
 class DreamerReturnNormalizer:
@@ -605,12 +616,11 @@ def _maybe_init_actor_probe_snapshot(
 
 
 def _dreamer_global_return_discount(cfg: Any) -> float:
-    """Use unit discount only when the scalar reward is route-duration based.
+    """Use the route-progress discount when scalar reward is route-duration based.
 
     Route cost and route-progress terms are measured in arrival-time/travel-time
-    units, so their physical total is an undiscounted sum. Other global reward
-    terms are allowed to use cfg.gamma because their semantics may not be total
-    trip duration.
+    units. Other global reward terms are allowed to use cfg.gamma because their
+    semantics may not be trip-progress credit.
     """
     non_route_weights = (
         "dreamer_all_reward_weight",
@@ -628,7 +638,12 @@ def _dreamer_global_return_discount(cfg: Any) -> float:
         for name in non_route_weights
     )
     route_scope = str(getattr(cfg, "dreamer_route_cost_reward_scope", "both") or "both").strip().lower()
-    route_cost_reaches_global = route_scope in {"both", "global", "global_critic", "step"}
+    route_cost_reaches_global = (
+        route_scope in {"both", "global", "global_critic", "step"}
+        and not _is_freeflow_shortest_progress_mode(
+            getattr(cfg, "dreamer_route_cost_reward_mode", "freeflow_shortest_progress")
+        )
+    )
     has_route_duration_reward = (
         (
             route_cost_reaches_global
@@ -675,10 +690,10 @@ def _route_cost_reward_z(cfg: Any, z_current: torch.Tensor, z_next: torch.Tensor
 def _dreamer_vehicle_return_discount(cfg: Any) -> float:
     """Discount for the per-vehicle critic target.
 
-    Route progress/cost reward keeps unit discount because it represents total
-    trip-duration progress.  Pure social reward ablations may use a conventional
-    discounted return.  Mixed route+social runs intentionally keep the unit
-    discount so the route-duration term retains its physical meaning.
+    Route progress/cost reward keeps the dedicated route-progress discount.
+    Pure social reward ablations may use a conventional discounted return.
+    Mixed route+social runs intentionally keep the route-progress discount so
+    the route-duration term has consistent return semantics.
     """
     route_scope = str(getattr(cfg, "dreamer_route_cost_reward_scope", "both") or "both").strip().lower()
     route_cost_reaches_vehicle = route_scope in {"both", "vehicle", "vehicle_critic", "per_vehicle"}
@@ -724,7 +739,12 @@ def _vehicle_route_credit_has_unit_discount(cfg: Any) -> bool:
 def _global_critic_reward_enabled(cfg: Any) -> bool:
     """Whether imagined step rewards contain a critic-visible global signal."""
     route_scope = str(getattr(cfg, "dreamer_route_cost_reward_scope", "both") or "both").strip().lower()
-    route_cost_reaches_global = route_scope in {"both", "global", "global_critic", "step"}
+    route_cost_reaches_global = (
+        route_scope in {"both", "global", "global_critic", "step"}
+        and not _is_freeflow_shortest_progress_mode(
+            getattr(cfg, "dreamer_route_cost_reward_mode", "freeflow_shortest_progress")
+        )
+    )
     weighted_terms = (
         "dreamer_all_reward_weight",
         "dreamer_remaining_time_progress_weight",
@@ -1131,7 +1151,7 @@ class TrainConfig:
     dreamer_cav_reward_weight: float = 0.0
     dreamer_route_cost_reward_weight: float = 0.0
     dreamer_route_cost_reward_scope: str = "both"
-    dreamer_route_cost_reward_mode: str = "progress_fraction"
+    dreamer_route_cost_reward_mode: str = "freeflow_shortest_progress"
     dreamer_route_cost_reward_state: str = "next"
     dreamer_pred_t_cav_proxy_reward_weight: float = 0.0
     dreamer_route_cost_reward_normalize_regret: bool = False
@@ -1328,6 +1348,31 @@ DREAMER_UPDATE_SCALAR_KEYS = (
     "actor_adv_scaled_mean", "actor_adv_scaled_std",
     "return_norm_mean", "return_norm_std", "return_norm_scale",
 )
+
+
+def _infer_decision_step_interval_from_agents_csv(
+    agents_csv: str,
+    *,
+    episode_steps: int,
+) -> Optional[float]:
+    """Infer seconds per decision step from the agents.csv departure horizon."""
+    path = str(agents_csv or "").strip()
+    if not path or int(episode_steps) <= 0 or not os.path.exists(path):
+        return None
+    max_depart: Optional[float] = None
+    with open(path, "r", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            raw = row.get("start_time", row.get("max_start_time", ""))
+            try:
+                depart = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(depart):
+                max_depart = depart if max_depart is None else max(max_depart, depart)
+    if max_depart is None or max_depart <= 0.0:
+        return None
+    return float(max_depart) / float(max(int(episode_steps), 1))
 
 
 def resolve_wm_candidate_edge_cost_source(cfg: TrainConfig) -> str:
@@ -1541,6 +1586,303 @@ def _free_flow_edge_tt_numpy(wm: UrbanWorldModel) -> np.ndarray:
         padded[:n] = out.astype(np.float32)
         return padded
     return out.astype(np.float32)
+
+
+def _reverse_shortest_edge_costs_to_dest(
+    adj_list: List[List[int]],
+    edge_costs: np.ndarray,
+    dest_edge: int,
+) -> np.ndarray:
+    """Inclusive edge-node shortest costs from every edge to one destination."""
+    import heapq
+
+    n = int(len(adj_list))
+    costs = np.asarray(edge_costs, dtype=np.float64).reshape(-1)
+    if n <= 0:
+        return np.zeros((0,), dtype=np.float64)
+    if costs.shape[0] < n:
+        padded = np.full((n,), np.inf, dtype=np.float64)
+        padded[: costs.shape[0]] = costs
+        costs = padded
+    costs = costs[:n]
+
+    dst = int(dest_edge)
+    dist = np.full((n,), np.inf, dtype=np.float64)
+    if dst < 0 or dst >= n or not np.isfinite(costs[dst]) or costs[dst] < 0.0:
+        return dist
+
+    rev_adj: List[List[int]] = [[] for _ in range(n)]
+    for src, neighbors in enumerate(adj_list):
+        for nb in neighbors:
+            nb_i = int(nb)
+            if 0 <= nb_i < n:
+                rev_adj[nb_i].append(int(src))
+
+    dist[dst] = max(float(costs[dst]), 0.0)
+    heap: List[Tuple[float, int]] = [(float(dist[dst]), dst)]
+    while heap:
+        d_cur, edge = heapq.heappop(heap)
+        if d_cur > dist[edge]:
+            continue
+        for prev in rev_adj[edge]:
+            prev_cost = float(costs[prev])
+            if not np.isfinite(prev_cost) or prev_cost < 0.0:
+                continue
+            cand = d_cur + prev_cost
+            if cand < dist[prev]:
+                dist[prev] = cand
+                heapq.heappush(heap, (float(cand), int(prev)))
+    return dist
+
+
+def _advance_route_position_for_reward(
+    *,
+    path: List[int],
+    current_edge: int,
+    current_edge_remaining: float,
+    edge_travel_times: np.ndarray,
+    step_interval: float,
+    n_edges: int,
+) -> Tuple[int, float, bool]:
+    """Pure version of vehicle time-budget advancement used for reward scoring."""
+    cur = int(current_edge)
+    valid_path = [int(e) for e in path if 0 <= int(e) < int(n_edges)]
+    if not valid_path or cur < 0 or cur >= int(n_edges):
+        return cur, 0.0, False
+
+    matches = [idx for idx, edge_idx in enumerate(valid_path) if int(edge_idx) == cur]
+    if matches:
+        pos = int(matches[-1])
+    else:
+        pos = 0
+        cur = int(valid_path[0])
+
+    edge_tt = np.asarray(edge_travel_times, dtype=np.float64).reshape(-1)
+    if edge_tt.shape[0] < int(n_edges):
+        padded = np.ones((int(n_edges),), dtype=np.float64)
+        padded[: edge_tt.shape[0]] = edge_tt
+        edge_tt = padded
+    edge_tt = np.nan_to_num(edge_tt[: int(n_edges)], nan=1.0, posinf=1.0, neginf=1.0)
+    edge_tt = np.maximum(edge_tt, 1e-6)
+
+    remaining = float(current_edge_remaining)
+    if not np.isfinite(remaining) or remaining < 0.0:
+        remaining = float(edge_tt[cur])
+    budget = max(float(step_interval), 0.0)
+    arrived = False
+    while budget > 1e-8:
+        if budget + 1e-8 < remaining:
+            remaining -= budget
+            budget = 0.0
+            break
+        budget -= remaining
+        if pos >= len(valid_path) - 1:
+            remaining = 0.0
+            arrived = True
+            break
+        pos += 1
+        cur = int(valid_path[pos])
+        remaining = float(edge_tt[cur])
+    return int(cur), float(max(remaining, 0.0)), bool(arrived)
+
+
+def _freeflow_position_remaining_time(
+    *,
+    dist_to_dest: np.ndarray,
+    freeflow_edge_times: np.ndarray,
+    dynamic_edge_times: np.ndarray,
+    edge: int,
+    dynamic_remaining: float,
+    arrived: bool,
+) -> float:
+    if bool(arrived):
+        return 0.0
+    edge_i = int(edge)
+    if edge_i < 0 or edge_i >= int(dist_to_dest.shape[0]):
+        return float("inf")
+    full_dist = float(dist_to_dest[edge_i])
+    if not np.isfinite(full_dist):
+        return float("inf")
+    ff = np.asarray(freeflow_edge_times, dtype=np.float64).reshape(-1)
+    dyn = np.asarray(dynamic_edge_times, dtype=np.float64).reshape(-1)
+    full_ff = float(ff[edge_i]) if edge_i < int(ff.shape[0]) else 1.0
+    full_dyn = float(dyn[edge_i]) if edge_i < int(dyn.shape[0]) else full_ff
+    if not np.isfinite(full_ff) or full_ff <= 0.0:
+        full_ff = 1e-6
+    if not np.isfinite(full_dyn) or full_dyn <= 1e-8:
+        full_dyn = full_ff
+    remaining_dyn = float(dynamic_remaining)
+    if not np.isfinite(remaining_dyn):
+        remaining_dyn = full_dyn
+    frac_remaining = float(np.clip(remaining_dyn / max(full_dyn, 1e-8), 0.0, 1.0))
+    successor_dist = max(0.0, full_dist - full_ff)
+    return float(successor_dist + frac_remaining * full_ff)
+
+
+def _route_remaining_freeflow_time(
+    *,
+    path: List[int],
+    current_edge: int,
+    current_edge_remaining: float,
+    dynamic_edge_times: np.ndarray,
+    freeflow_edge_times: np.ndarray,
+    arrived: bool,
+    n_edges: int,
+) -> float:
+    if bool(arrived):
+        return 0.0
+    valid_path = [int(e) for e in path if 0 <= int(e) < int(n_edges)]
+    if not valid_path:
+        return float("inf")
+
+    cur = int(current_edge)
+    matches = [idx for idx, edge_idx in enumerate(valid_path) if int(edge_idx) == cur]
+    if matches:
+        pos = int(matches[-1])
+        edge_i = cur
+        remaining_dyn = float(current_edge_remaining)
+    else:
+        pos = 0
+        edge_i = int(valid_path[0])
+        remaining_dyn = float("nan")
+
+    dyn = np.asarray(dynamic_edge_times, dtype=np.float64).reshape(-1)
+    if dyn.shape[0] < int(n_edges):
+        padded_dyn = np.ones((int(n_edges),), dtype=np.float64)
+        padded_dyn[: dyn.shape[0]] = dyn
+        dyn = padded_dyn
+    dyn = np.nan_to_num(dyn[: int(n_edges)], nan=1.0, posinf=1.0, neginf=1.0)
+    dyn = np.maximum(dyn, 1e-6)
+
+    ff = np.asarray(freeflow_edge_times, dtype=np.float64).reshape(-1)
+    if ff.shape[0] < int(n_edges):
+        padded_ff = np.ones((int(n_edges),), dtype=np.float64)
+        padded_ff[: ff.shape[0]] = ff
+        ff = padded_ff
+    ff = np.nan_to_num(ff[: int(n_edges)], nan=1.0, posinf=1.0, neginf=1.0)
+    ff = np.maximum(ff, 1e-6)
+
+    full_dyn = float(dyn[edge_i])
+    if not np.isfinite(remaining_dyn) or remaining_dyn < 0.0:
+        remaining_dyn = full_dyn
+    frac_remaining = float(np.clip(remaining_dyn / max(full_dyn, 1e-8), 0.0, 1.0))
+    current_edge_remaining_ff = frac_remaining * float(ff[edge_i])
+    suffix_ff = float(sum(float(ff[int(edge)]) for edge in valid_path[pos + 1 :]))
+    return float(current_edge_remaining_ff + suffix_ff)
+
+
+def _freeflow_shortest_progress_reward_matrix(
+    *,
+    path_batch: List[List[List[int]]],
+    current_route_batch: Optional[List[List[int]]] = None,
+    route_valid: torch.Tensor,
+    current_edges: Union[np.ndarray, torch.Tensor, List[int]],
+    dest_edges: Union[np.ndarray, torch.Tensor, List[int]],
+    origin_edges: Union[np.ndarray, torch.Tensor, List[int]],
+    current_edge_remaining: Optional[Union[np.ndarray, torch.Tensor, List[float]]],
+    edge_travel_times: Union[np.ndarray, torch.Tensor],
+    freeflow_edge_times: Union[np.ndarray, torch.Tensor],
+    adj_list: List[List[int]],
+    step_interval: float,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Normalized free-flow route switch progress for each candidate action.
+
+    r_i,t = (T_route_ff(old_path_i, pos_i(t)) - T_route_ff(action_path_i, pos_i(t+1)))
+            / max(T_sp_ff(o_i, d_i), eps)
+    """
+    device = route_valid.device
+    dtype = torch.float32 if route_valid.dtype == torch.bool else route_valid.dtype
+    valid = route_valid.to(device=device, dtype=torch.bool)
+    n_agents = int(valid.shape[0])
+    n_routes = int(valid.shape[1]) if valid.dim() == 2 else 0
+    if n_agents <= 0 or n_routes <= 0:
+        return torch.zeros((max(n_agents, 0), max(n_routes, 0)), device=device, dtype=dtype)
+
+    cur_np = np.asarray(torch.as_tensor(current_edges).detach().cpu().numpy(), dtype=np.int64).reshape(-1)
+    dst_np = np.asarray(torch.as_tensor(dest_edges).detach().cpu().numpy(), dtype=np.int64).reshape(-1)
+    org_np = np.asarray(torch.as_tensor(origin_edges).detach().cpu().numpy(), dtype=np.int64).reshape(-1)
+    if current_edge_remaining is None:
+        rem_np = np.full((n_agents,), np.nan, dtype=np.float64)
+    else:
+        rem_np = np.asarray(
+            torch.as_tensor(current_edge_remaining).detach().cpu().numpy(),
+            dtype=np.float64,
+        ).reshape(-1)
+    dyn_tt = np.asarray(torch.as_tensor(edge_travel_times).detach().cpu().numpy(), dtype=np.float64).reshape(-1)
+    ff_tt = np.asarray(torch.as_tensor(freeflow_edge_times).detach().cpu().numpy(), dtype=np.float64).reshape(-1)
+    n_edges = int(len(adj_list))
+    if n_edges <= 0:
+        return torch.zeros((n_agents, n_routes), device=device, dtype=dtype)
+
+    dist_cache: Dict[int, np.ndarray] = {}
+
+    def dist_for_dest(dst: int) -> np.ndarray:
+        dst_i = int(dst)
+        cached = dist_cache.get(dst_i)
+        if cached is None:
+            cached = _reverse_shortest_edge_costs_to_dest(adj_list, ff_tt, dst_i)
+            dist_cache[dst_i] = cached
+        return cached
+
+    rewards = np.zeros((n_agents, n_routes), dtype=np.float32)
+    for i in range(n_agents):
+        if i >= len(path_batch) or i >= int(cur_np.shape[0]) or i >= int(dst_np.shape[0]) or i >= int(org_np.shape[0]):
+            continue
+        cur = int(cur_np[i])
+        dst = int(dst_np[i])
+        org = int(org_np[i])
+        if cur < 0 or cur >= n_edges or dst < 0 or dst >= n_edges or org < 0 or org >= n_edges:
+            continue
+        dist = dist_for_dest(dst)
+        denom = float(dist[org])
+        if not np.isfinite(denom) or denom <= float(eps):
+            continue
+        current_remaining = float(rem_np[i]) if i < int(rem_np.shape[0]) else float("nan")
+        paths = path_batch[i]
+        previous_route = (
+            current_route_batch[i]
+            if current_route_batch is not None and i < len(current_route_batch) and current_route_batch[i]
+            else (paths[0] if paths else [])
+        )
+        current_route_remaining = _route_remaining_freeflow_time(
+            path=previous_route,
+            current_edge=cur,
+            current_edge_remaining=current_remaining,
+            dynamic_edge_times=dyn_tt,
+            freeflow_edge_times=ff_tt,
+            arrived=False,
+            n_edges=n_edges,
+        )
+        if not np.isfinite(current_route_remaining):
+            continue
+        for k in range(min(n_routes, len(paths))):
+            if not bool(valid[i, k].detach().cpu().item()):
+                continue
+            next_edge, next_remaining, arrived = _advance_route_position_for_reward(
+                path=paths[k],
+                current_edge=cur,
+                current_edge_remaining=current_remaining,
+                edge_travel_times=dyn_tt,
+                step_interval=float(step_interval),
+                n_edges=n_edges,
+            )
+            next_route_remaining = _route_remaining_freeflow_time(
+                path=paths[k],
+                current_edge=next_edge,
+                current_edge_remaining=next_remaining,
+                dynamic_edge_times=dyn_tt,
+                freeflow_edge_times=ff_tt,
+                arrived=arrived,
+                n_edges=n_edges,
+            )
+            if np.isfinite(next_route_remaining):
+                rewards[i, k] = float(
+                    (current_route_remaining - next_route_remaining) / max(denom, float(eps))
+                )
+
+    out = torch.from_numpy(rewards).to(device=device, dtype=dtype)
+    return out.masked_fill(~valid, 0.0)
 
 
 def _edge_tt_tensor_from_decoded(
@@ -3002,7 +3344,12 @@ def imagined_episode_dynamic_dreamer(
         and float(getattr(cfg, "dreamer_ac_route_advantage_weight", 0.0)) != 0.0
     )
     route_reward_scope = str(getattr(cfg, "dreamer_route_cost_reward_scope", "both") or "both").strip().lower()
-    route_cost_reaches_global = route_reward_scope in {"both", "global", "global_critic", "step"}
+    route_cost_reaches_global = (
+        route_reward_scope in {"both", "global", "global_critic", "step"}
+        and not _is_freeflow_shortest_progress_mode(
+            getattr(cfg, "dreamer_route_cost_reward_mode", "freeflow_shortest_progress")
+        )
+    )
     route_cost_reaches_vehicle = route_reward_scope in {"both", "vehicle", "vehicle_critic", "per_vehicle"}
     vehicle_critic_reward_needed = (
         use_discrete_actor_critic
@@ -4040,44 +4387,120 @@ def imagined_episode_dynamic_dreamer(
                             else 0.0
                         )
                         if route_reward_weight != 0.0:
-                            vehicle_route_progress_reward_for_ac = (
-                                _selected_route_vehicle_rewards_from_cost_matrix(
-                                    route_costs=vehicle_reward_costs,
+                            route_reward_mode = str(
+                                getattr(cfg, "dreamer_route_cost_reward_mode", "freeflow_shortest_progress")
+                            )
+                            if _is_freeflow_shortest_progress_mode(route_reward_mode):
+                                origin_edges_np = np.asarray(
+                                    [
+                                        int(av.get("origin_edge", current_edges_np[i]))
+                                        for i, av in enumerate(active_avs_before_action[:n_active_av])
+                                    ],
+                                    dtype=np.int64,
+                                )
+                                current_edge_remaining_np = np.asarray(
+                                    [
+                                        (
+                                            float(av.get("edge_remaining_time"))
+                                            if (
+                                                "edge_remaining_time" in av
+                                                and int(av.get("edge_remaining_edge", current_edges_np[i]))
+                                                == int(current_edges_np[i])
+                                            )
+                                            else np.nan
+                                        )
+                                        for i, av in enumerate(active_avs_before_action[:n_active_av])
+                                    ],
+                                    dtype=np.float64,
+                                )
+                                freeflow_progress_rewards = _freeflow_shortest_progress_reward_matrix(
+                                    path_batch=path_batch_for_reward,
+                                    current_route_batch=[
+                                        list(av.get("current_route", []))
+                                        for av in active_avs_before_action[:n_active_av]
+                                    ],
                                     route_valid=vehicle_reward_valid,
-                                    selected_idx=selected_route_idx_t_for_update,
-                                    reward_weight=route_reward_weight,
-                                    reward_scale=float(getattr(cfg, "vehicle_reward_scale", 1.0)),
-                                    reward_mode=str(getattr(cfg, "dreamer_route_cost_reward_mode", "progress_fraction")),
+                                    current_edges=current_edges_np,
+                                    dest_edges=dest_edges_np,
+                                    origin_edges=origin_edges_np,
+                                    current_edge_remaining=current_edge_remaining_np,
+                                    edge_travel_times=np.asarray(t_e_route_cost, dtype=np.float32),
+                                    freeflow_edge_times=_free_flow_edge_tt_numpy(wm),
+                                    adj_list=adj_list,
                                     step_interval=float(getattr(cfg, "step_interval", 30.0)),
-                                    elapsed_time=torch.from_numpy(elapsed_time_np).to(
+                                ).to(device=vehicle_reward_costs.device, dtype=vehicle_reward_costs.dtype)
+                                reward_matrix = (
+                                    float(route_reward_weight)
+                                    * float(getattr(cfg, "vehicle_reward_scale", 1.0))
+                                    * freeflow_progress_rewards
+                                )
+                                n_reward = min(
+                                    int(reward_matrix.shape[0]),
+                                    int(selected_route_idx_t_for_update.reshape(-1).shape[0]),
+                                )
+                                if n_reward > 0:
+                                    selected_idx = selected_route_idx_t_for_update.reshape(-1)[:n_reward].to(
+                                        device=reward_matrix.device,
+                                        dtype=torch.long,
+                                    )
+                                    selected_idx = selected_idx.clamp(0, max(int(reward_matrix.shape[1]) - 1, 0))
+                                    rows = torch.arange(n_reward, device=reward_matrix.device)
+                                    selected_valid = vehicle_reward_valid[:n_reward].to(device=reward_matrix.device)[
+                                        rows,
+                                        selected_idx,
+                                    ]
+                                    selected_rewards = reward_matrix[:n_reward][rows, selected_idx]
+                                    vehicle_route_progress_reward_for_ac = torch.where(
+                                        selected_valid,
+                                        selected_rewards,
+                                        torch.zeros_like(selected_rewards),
+                                    )
+                                else:
+                                    vehicle_route_progress_reward_for_ac = torch.zeros(
+                                        (0,),
                                         device=vehicle_reward_costs.device,
                                         dtype=vehicle_reward_costs.dtype,
-                                    ),
-                                    progress_cap=float(getattr(cfg, "dreamer_ac_route_credit_progress_cap", 1.0)),
-                                    remaining_tt_eps=float(getattr(cfg, "dreamer_ac_route_credit_remaining_tt_eps", 1.0)),
-                                    normalize_regret=bool(getattr(cfg, "dreamer_route_cost_reward_normalize_regret", False)),
-                                    temperature=float(getattr(cfg, "dreamer_route_cost_reward_temperature", 60.0)),
+                                    )
+                                vehicle_route_reward_matrix_for_ac = reward_matrix
+                            else:
+                                vehicle_route_progress_reward_for_ac = (
+                                    _selected_route_vehicle_rewards_from_cost_matrix(
+                                        route_costs=vehicle_reward_costs,
+                                        route_valid=vehicle_reward_valid,
+                                        selected_idx=selected_route_idx_t_for_update,
+                                        reward_weight=route_reward_weight,
+                                        reward_scale=float(getattr(cfg, "vehicle_reward_scale", 1.0)),
+                                        reward_mode=route_reward_mode,
+                                        step_interval=float(getattr(cfg, "step_interval", 30.0)),
+                                        elapsed_time=torch.from_numpy(elapsed_time_np).to(
+                                            device=vehicle_reward_costs.device,
+                                            dtype=vehicle_reward_costs.dtype,
+                                        ),
+                                        progress_cap=float(getattr(cfg, "dreamer_ac_route_credit_progress_cap", 1.0)),
+                                        remaining_tt_eps=float(getattr(cfg, "dreamer_ac_route_credit_remaining_tt_eps", 1.0)),
+                                        normalize_regret=bool(getattr(cfg, "dreamer_route_cost_reward_normalize_regret", False)),
+                                        temperature=float(getattr(cfg, "dreamer_route_cost_reward_temperature", 60.0)),
+                                    )
                                 )
-                            )
+                                vehicle_route_reward_matrix_for_ac = (
+                                    _route_vehicle_reward_matrix_from_cost_matrix(
+                                        route_costs=vehicle_reward_costs,
+                                        route_valid=vehicle_reward_valid,
+                                        reward_weight=route_reward_weight,
+                                        reward_scale=float(getattr(cfg, "vehicle_reward_scale", 1.0)),
+                                        reward_mode=route_reward_mode,
+                                        step_interval=float(getattr(cfg, "step_interval", 30.0)),
+                                        elapsed_time=torch.from_numpy(elapsed_time_np).to(
+                                            device=vehicle_reward_costs.device,
+                                            dtype=vehicle_reward_costs.dtype,
+                                        ),
+                                        progress_cap=float(getattr(cfg, "dreamer_ac_route_credit_progress_cap", 1.0)),
+                                        remaining_tt_eps=float(getattr(cfg, "dreamer_ac_route_credit_remaining_tt_eps", 1.0)),
+                                        normalize_regret=bool(getattr(cfg, "dreamer_route_cost_reward_normalize_regret", False)),
+                                        temperature=float(getattr(cfg, "dreamer_route_cost_reward_temperature", 60.0)),
+                                    )
+                                )
                             vehicle_reward_parts.append(vehicle_route_progress_reward_for_ac)
-                            vehicle_route_reward_matrix_for_ac = (
-                                _route_vehicle_reward_matrix_from_cost_matrix(
-                                    route_costs=vehicle_reward_costs,
-                                    route_valid=vehicle_reward_valid,
-                                    reward_weight=route_reward_weight,
-                                    reward_scale=float(getattr(cfg, "vehicle_reward_scale", 1.0)),
-                                    reward_mode=str(getattr(cfg, "dreamer_route_cost_reward_mode", "progress_fraction")),
-                                    step_interval=float(getattr(cfg, "step_interval", 30.0)),
-                                    elapsed_time=torch.from_numpy(elapsed_time_np).to(
-                                        device=vehicle_reward_costs.device,
-                                        dtype=vehicle_reward_costs.dtype,
-                                    ),
-                                    progress_cap=float(getattr(cfg, "dreamer_ac_route_credit_progress_cap", 1.0)),
-                                    remaining_tt_eps=float(getattr(cfg, "dreamer_ac_route_credit_remaining_tt_eps", 1.0)),
-                                    normalize_regret=bool(getattr(cfg, "dreamer_route_cost_reward_normalize_regret", False)),
-                                    temperature=float(getattr(cfg, "dreamer_route_cost_reward_temperature", 60.0)),
-                                )
-                            )
                         route_credit_reward_weight = float(
                             getattr(cfg, "dreamer_vehicle_route_credit_reward_weight", 0.0)
                         )
@@ -7207,6 +7630,7 @@ def train(cfg: TrainConfig) -> None:
         else None
     )
     critic_return_discount = _dreamer_global_return_discount(cfg)
+    vehicle_return_discount = _dreamer_vehicle_return_discount(cfg)
     logger.info(
         "Dreamer CTDE mainline active: actor_obs_dim=%d n_routes=%d d_spatial=%d batch_eps=%d actor_h=%d critic_variant=%s critic_aggregation=%s critic_context_dim=%d slow_critic_tau=%.4f return_norm=%s/%s actor_lr=%.2e actor_lr_decay=%d->%d@%.3f critic_lr=%.2e vehicle_critic=%s vehicle_critic_context_dim=%d vehicle_route_q=%s vehicle_q_actor_w=%.3f vehicle_critic_lr=%.2e critic_discount=%.4f vehicle_discount=%.4f",
         obs_dim,
@@ -7231,7 +7655,7 @@ def train(cfg: TrainConfig) -> None:
         float(getattr(cfg, "dreamer_vehicle_route_q_actor_weight", 0.0)),
         vehicle_critic_lr,
         float(critic_return_discount),
-        float(ROUTE_COST_RETURN_DISCOUNT),
+        float(vehicle_return_discount),
     )
 
     horizon_proxy: Optional[ActionHorizonProxyReward] = None
@@ -7364,6 +7788,21 @@ def train(cfg: TrainConfig) -> None:
             )
         agents_path = cfg.agents_csv or os.path.join(cfg.network_folder, "agents.csv")
         if agents_path and os.path.exists(agents_path):
+            inferred_step_interval = _infer_decision_step_interval_from_agents_csv(
+                agents_path,
+                episode_steps=int(cfg.episode_steps),
+            )
+            if inferred_step_interval is not None:
+                configured_step_interval = float(cfg.step_interval)
+                if abs(configured_step_interval - float(inferred_step_interval)) > 1e-6:
+                    logger.info(
+                        "Vehicle imagination step_interval aligned to agents.csv: %.6fs "
+                        "(configured %.6fs, episode_steps=%d)",
+                        float(inferred_step_interval),
+                        configured_step_interval,
+                        int(cfg.episode_steps),
+                    )
+                cfg.step_interval = float(inferred_step_interval)
             _departure_cap_mode = str(getattr(cfg, "dreamer_departure_cap_mode", "cfg")).strip().lower()
             if _departure_cap_mode not in {"cfg", "none"}:
                 raise ValueError(
@@ -8409,7 +8848,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--history_length",    type=int,   default=8)
     p.add_argument("--wm_schedule",       type=str,   default="shortcut")
     p.add_argument("--wm_schedule_d",     type=float, default=0.25)
-    p.add_argument("--wm_cfm_init_mode",  choices=["randn", "zero"], default="zero",
+    p.add_argument("--wm_cfm_init_mode",  choices=["randn", "zero", "current"], default="zero",
                    help="CFM rollout source for MARL imagination.")
     p.add_argument("--n_routes",          type=int,   default=4)
     p.add_argument("--n_av",              type=int,   default=0,
@@ -8880,17 +9319,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help=(
                        "Where --dreamer_route_cost_reward_weight is applied. Use vehicle_critic "
                        "for the current per-vehicle actor-critic mainline so route progress "
-                       "trains the vehicle critic without creating a noisy global step-value target."
+                       "trains the vehicle critic without creating a noisy global step-value target. "
+                       "freeflow_shortest_progress is vehicle-critic only; global route-cost reward "
+                       "is ignored for that mode."
                    ))
-    p.add_argument("--dreamer_route_cost_reward_mode", type=str, default="progress_fraction",
+    p.add_argument("--dreamer_route_cost_reward_mode", type=str, default="freeflow_shortest_progress",
                    choices=[
+                       "freeflow_shortest_progress", "ff_shortest_progress",
+                       "shortest_freeflow_progress", "spff_progress",
+                       "shortest_path_freeflow_progress",
                        "progress_fraction", "step_progress", "trip_progress_fraction",
                        "capped_step_cost", "capped_cost", "step_cost", "min_step_remaining",
                        "route_tt", "remaining_tt", "full_path", "legacy",
                    ],
                    help=(
-                       "Per-vehicle critic route reward readout. progress_fraction rewards "
-                       "min(step_interval, remaining_route_tt)/(elapsed+remaining_route_tt), "
+                       "Per-vehicle critic route reward readout. freeflow_shortest_progress "
+                       "rewards the normalized drop in candidate-route remaining free-flow time "
+                       "after the selected route is advanced one step; "
+                       "progress_fraction rewards min(step_interval, remaining_route_tt)/(elapsed+remaining_route_tt), "
                        "capped_step_cost rewards -min(step_interval, remaining_route_tt)/temperature; "
                        "route_tt/legacy keeps the old negative remaining-route-seconds reward."
                    ))
@@ -8940,7 +9386,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dreamer_vehicle_route_credit_reward_discount", type=float, default=0.99,
                    help=(
                        "Per-vehicle critic discount for pure non-progress route-credit ablations. "
-                       "If a progress-fraction route credit base is enabled, discount remains 1.0."
+                       f"If a progress-fraction route credit base is enabled, discount uses "
+                       f"the route-progress default {ROUTE_COST_RETURN_DISCOUNT:.2f}."
                    ))
     p.add_argument("--dreamer_vehicle_route_credit_reward_transform", type=str, default="negative_cost",
                    choices=[
@@ -9059,7 +9506,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--dreamer_vehicle_social_reward_discount", type=float, default=0.99,
                    help=(
                        "Per-vehicle critic discount used only for pure social-reward ablations. "
-                       "If route-cost/progress reward is enabled, vehicle return discount remains 1.0."
+                       f"If route-cost/progress reward is enabled, vehicle return discount uses "
+                       f"the route-progress default {ROUTE_COST_RETURN_DISCOUNT:.2f}."
                    ))
     p.add_argument("--dreamer_expected_cost_weight", type=float, default=0.0,
                    help=(
@@ -9352,7 +9800,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--episode_steps", type=int, default=60,
                    help="Vehicle-mode full episode length used for random-start replay.")
     p.add_argument("--step_interval", type=float, default=30.0,
-                   help="Vehicle-mode decision interval in seconds.")
+                   help=(
+                       "Vehicle-mode decision interval in seconds. When agents_csv is available, "
+                       "vehicle imagination aligns this to last departure time / episode_steps."
+                   ))
     # ── mean field multi-agent ────────────────────────────────────────────────
     p.add_argument("--agents_csv",         type=str,   default="",
                    help="agents.csv for vehicle counts")

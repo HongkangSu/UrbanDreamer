@@ -17,7 +17,7 @@ for path in (REPO_ROOT, REPO_ROOT / "dreamer4", REPO_ROOT / "dreamer4" / "urban_
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from ablation.run_toy_cross_bottleneck_online_ac import (  # noqa: E402
+from baseline.run_toy_cross_bottleneck_online_ac import (  # noqa: E402
     TOY_NETWORK_NAME,
     ToyOnlineAcTrainer,
     build_config as build_train_config,
@@ -61,6 +61,7 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-steps-per-episode", type=int, default=0)
     parser.add_argument("--reward-mode", default="capped_step_cost", choices=["progress_fraction", "capped_step_cost"])
     parser.add_argument("--reward-temperature", type=float, default=60.0)
+    parser.add_argument("--gamma", type=float, default=1.0)
     parser.add_argument("--replay-buffer-episodes", type=int, default=8)
     parser.add_argument("--replay-update-epochs", type=int, default=2)
     parser.add_argument("--replay-actor-max-age-episodes", type=int, default=8)
@@ -96,6 +97,7 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         help="Keep HDV learning enabled during dynamic evaluation.",
     )
     parser.set_defaults(
+        settings="",
         av_execution_mode="dynamic",
         generate_network=False,
         n_agents=320,
@@ -108,6 +110,14 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def build_eval_config(args: argparse.Namespace):
+    """Resolve the training-compatible config with deterministic evaluation actions."""
+    cfg = build_train_config(args)
+    cfg.disable_human_learning_after_mutation = bool(args.disable_human_learning_after_mutation)
+    cfg.real_policy_route_selection = "argmax"
+    return cfg
+
+
 def main(argv: List[str] | None = None) -> int:
     args = parse_args(argv)
     if _load_hdv_learning_state(Path(args.hdv_state_in)) is None:
@@ -115,8 +125,7 @@ def main(argv: List[str] | None = None) -> int:
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    cfg = build_train_config(args)
-    cfg.disable_human_learning_after_mutation = bool(args.disable_human_learning_after_mutation)
+    cfg = build_eval_config(args)
     validate_paths(cfg)
     trainer = ToyOnlineAcTrainer(cfg)
     collector = trainer._build_collector()

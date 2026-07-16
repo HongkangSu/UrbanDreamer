@@ -67,10 +67,19 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--reward-mode",
         default="capped_step_cost",
-        choices=["capped_step_cost"],
-        help="Imagined vehicle reward; fixed to -min(step_interval, remaining_route_tt)/temperature.",
+        choices=["progress_fraction", "capped_step_cost"],
+        help=(
+            "Vehicle reward for real/imagined actor updates. progress_fraction uses route progress; "
+            "capped_step_cost uses -min(step_interval, remaining_route_tt)/temperature."
+        ),
     )
     parser.add_argument("--reward-temperature", type=float, default=60.0)
+    parser.add_argument(
+        "--gamma",
+        type=float,
+        default=None,
+        help="Discount for real/imagined vehicle returns; omitted uses settings/default config.",
+    )
     parser.add_argument("--wm-replay-buffer-episodes", type=int, default=8)
     parser.add_argument("--wm-update-epochs", type=int, default=1)
     parser.add_argument("--wm-update-every-episodes", type=int, default=1)
@@ -91,6 +100,16 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--wm-grad-clip", type=float, default=10.0)
     parser.add_argument("--wm-transition-decoded-supervision-weight", type=float, default=1.0)
     parser.add_argument("--wm-hdv-policy-weight", type=float, default=0.05)
+    parser.add_argument(
+        "--wm-hdv-target-source",
+        default="episode_mean_current_occupancy",
+        choices=["episode_mean_current_occupancy", "static_edge_demand"],
+        help=(
+            "Edge-level HDV target/context source for online WM replay. "
+            "episode_mean_current_occupancy preserves the legacy current-occupancy mean; "
+            "static_edge_demand projects each HDV episode route decision onto edge demand."
+        ),
+    )
     parser.add_argument("--wm-hdv-policy-target-mode", default="episode_mean")
     parser.add_argument("--wm-hdv-policy-action-mode", default="window_mean")
     parser.add_argument("--wm-transition-hdv-context-mode", default="episode_response")
@@ -99,6 +118,64 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--wm-transition-hdv-action-mode", default="none")
     parser.add_argument("--wm-transition-hdv-action-weight", type=float, default=0.0)
     parser.add_argument("--wm-transition-hdv-action-scale", type=float, default=1.0)
+    parser.add_argument(
+        "--imagined-hdv-context-source",
+        default="oracle_current_occupancy",
+        choices=[
+            "oracle_current_occupancy",
+            "oracle_current",
+            "oracle_target",
+            "oracle_static",
+            "causal_response_predictor",
+            "none",
+        ],
+        help=(
+            "HDV context used inside imagined actor rollouts. The causal_response_predictor "
+            "mode uses a pre-episode prediction from the previous episode AV/HDV summary."
+        ),
+    )
+    hdv_response_group = parser.add_mutually_exclusive_group()
+    hdv_response_group.add_argument(
+        "--enable-hdv-response-predictor",
+        dest="hdv_response_predictor_enabled",
+        action="store_true",
+        default=False,
+        help="Train the causal static-HDV-demand response predictor online.",
+    )
+    hdv_response_group.add_argument(
+        "--disable-hdv-response-predictor",
+        dest="hdv_response_predictor_enabled",
+        action="store_false",
+        help="Disable the causal static-HDV-demand response predictor.",
+    )
+    parser.add_argument("--hdv-response-predictor-lr", type=float, default=2e-3)
+    parser.add_argument("--hdv-response-predictor-weight-decay", type=float, default=1e-4)
+    parser.add_argument("--hdv-response-predictor-hidden-dim", type=int, default=128)
+    parser.add_argument("--hdv-response-predictor-depth", type=int, default=2)
+    parser.add_argument("--hdv-response-predictor-update-epochs", type=int, default=64)
+    parser.add_argument("--hdv-response-predictor-min-pairs", type=int, default=2)
+    parser.add_argument(
+        "--hdv-response-predictor-ckpt",
+        default="",
+        help="Optional pretrained causal HDV response predictor checkpoint from warmup data.",
+    )
+    parser.add_argument(
+        "--hdv-response-predictor-progress-denominator",
+        type=int,
+        default=0,
+        help="Episode-progress denominator for the response predictor. 0 uses train_episodes or checkpoint metadata.",
+    )
+    parser.add_argument(
+        "--hdv-response-predictor-fallback",
+        default="prev_hdv",
+        choices=["prev_hdv", "previous_hdv", "prev_static", "zero", "none", "oracle_target", "oracle_current"],
+    )
+    parser.add_argument(
+        "--wm-cfm-init-mode",
+        choices=["randn", "zero", "current"],
+        default=None,
+        help="CFM rollout source for the world model. current uses z_t as x0 and removes z_t as a condition token.",
+    )
     parser.add_argument("--imag-horizon", type=int, default=8)
     parser.add_argument("--imagined-updates-per-episode", type=int, default=1)
     parser.add_argument(
@@ -110,6 +187,12 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--imagined-rollouts-per-update", type=int, default=1)
     parser.add_argument("--min-replay-episodes-before-actor", type=int, default=1)
     parser.add_argument("--ac-lambda", type=float, default=0.95)
+    parser.add_argument(
+        "--global-advantage-weight",
+        type=float,
+        default=1.0,
+        help="Weight of the existing global critic lambda-return advantage in every vehicle actor sample.",
+    )
     parser.add_argument("--lr", type=float, default=2e-4, help="Vehicle actor learning rate.")
     parser.add_argument("--critic-lr", type=float, default=3e-4, help="Vehicle critic learning rate.")
     parser.add_argument("--value-coef", type=float, default=1.0)
@@ -125,6 +208,24 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--min-samples-per-update", type=int, default=1)
     parser.add_argument("--route-cost-logit-bias", type=float, default=0.0)
     parser.add_argument("--policy-sample-temperature", type=float, default=1.0)
+    parser.add_argument(
+        "--real-policy-route-selection",
+        choices=["argmax", "sample"],
+        default="sample",
+        help=(
+            "Action selection used by real SUMO collection. sample preserves policy exploration; "
+            "the sampled action is reused for simulator execution, replay, and the WM one-hot condition."
+        ),
+    )
+    parser.add_argument(
+        "--eval-policy-route-selection",
+        choices=["argmax", "sample"],
+        default="sample",
+        help=(
+            "Route selection used for checkpoint evaluation. The mainline samples from the "
+            "masked actor distribution; argmax is retained as an explicit ablation."
+        ),
+    )
     parser.add_argument("--max-grad-norm", type=float, default=10.0)
     parser.add_argument(
         "--no-normalize-advantages",
@@ -135,12 +236,35 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.set_defaults(ac_normalize_advantages=True)
     parser.add_argument("--wm-prediction-diagnostic-every-episodes", type=int, default=1)
     parser.add_argument("--wm-prediction-diagnostic-max-steps", type=int, default=16)
+    trace_group = parser.add_mutually_exclusive_group()
+    trace_group.add_argument(
+        "--enable-wm-hdv-pressure-trace",
+        dest="wm_hdv_pressure_trace_enabled",
+        action="store_true",
+        default=True,
+        help="Persist per-decision true HDV edge occupancy traces for HDV-pressure diagnostics.",
+    )
+    trace_group.add_argument(
+        "--disable-wm-hdv-pressure-trace",
+        dest="wm_hdv_pressure_trace_enabled",
+        action="store_false",
+        help="Do not persist per-decision HDV edge occupancy trace npz files.",
+    )
     parser.add_argument("--vehicle-arrival-loss-coef", type=float, default=1.0)
     parser.add_argument("--vehicle-arrival-diag-horizon-seconds", type=float, default=14.0)
-    parser.add_argument(
-        "--disable-vehicle-arrival-head",
+    arrival_head_group = parser.add_mutually_exclusive_group()
+    arrival_head_group.add_argument(
+        "--enable-vehicle-arrival-head",
+        dest="vehicle_arrival_head_enabled",
         action="store_true",
-        help="Disable the vehicle-level route-conditioned arrival auxiliary head.",
+        default=False,
+        help="Enable the vehicle-level route-conditioned arrival auxiliary head.",
+    )
+    arrival_head_group.add_argument(
+        "--disable-vehicle-arrival-head",
+        dest="vehicle_arrival_head_enabled",
+        action="store_false",
+        help="Keep the vehicle-level route-conditioned arrival auxiliary head disabled.",
     )
     parser.add_argument(
         "--direct-real-a2c-update",
@@ -234,6 +358,7 @@ def build_config(args: argparse.Namespace) -> OnlineWmDreamerConfig:
         "wm_grad_clip": float(args.wm_grad_clip),
         "wm_transition_decoded_supervision_weight": float(args.wm_transition_decoded_supervision_weight),
         "wm_hdv_policy_weight": float(args.wm_hdv_policy_weight),
+        "wm_hdv_target_source": str(args.wm_hdv_target_source),
         "wm_hdv_policy_target_mode": str(args.wm_hdv_policy_target_mode),
         "wm_hdv_policy_action_mode": str(args.wm_hdv_policy_action_mode),
         "wm_transition_hdv_context_mode": str(args.wm_transition_hdv_context_mode),
@@ -242,12 +367,24 @@ def build_config(args: argparse.Namespace) -> OnlineWmDreamerConfig:
         "wm_transition_hdv_action_mode": str(args.wm_transition_hdv_action_mode),
         "wm_transition_hdv_action_weight": float(args.wm_transition_hdv_action_weight),
         "wm_transition_hdv_action_scale": float(args.wm_transition_hdv_action_scale),
+        "imagined_hdv_context_source": str(args.imagined_hdv_context_source),
+        "hdv_response_predictor_enabled": bool(args.hdv_response_predictor_enabled),
+        "hdv_response_predictor_lr": float(args.hdv_response_predictor_lr),
+        "hdv_response_predictor_weight_decay": float(args.hdv_response_predictor_weight_decay),
+        "hdv_response_predictor_hidden_dim": int(args.hdv_response_predictor_hidden_dim),
+        "hdv_response_predictor_depth": int(args.hdv_response_predictor_depth),
+        "hdv_response_predictor_update_epochs": int(args.hdv_response_predictor_update_epochs),
+        "hdv_response_predictor_min_pairs": int(args.hdv_response_predictor_min_pairs),
+        "hdv_response_predictor_ckpt": str(args.hdv_response_predictor_ckpt),
+        "hdv_response_predictor_progress_denominator": int(args.hdv_response_predictor_progress_denominator),
+        "hdv_response_predictor_fallback": str(args.hdv_response_predictor_fallback),
         "imag_horizon": int(args.imag_horizon),
         "imagined_updates_per_episode": int(args.imagined_updates_per_episode),
         "imagined_update_passes_per_collect": int(args.imagined_update_passes_per_collect),
         "imagined_rollouts_per_update": int(args.imagined_rollouts_per_update),
         "min_replay_episodes_before_actor": int(args.min_replay_episodes_before_actor),
         "ac_lambda": float(args.ac_lambda),
+        "ac_global_advantage_weight": float(args.global_advantage_weight),
         "lr": float(args.lr),
         "critic_lr": float(args.critic_lr),
         "value_coef": float(args.value_coef),
@@ -264,10 +401,13 @@ def build_config(args: argparse.Namespace) -> OnlineWmDreamerConfig:
         "min_samples_per_update": int(args.min_samples_per_update),
         "route_cost_logit_bias": float(args.route_cost_logit_bias),
         "av_policy_sample_temperature": float(args.policy_sample_temperature),
+        "real_policy_route_selection": str(args.real_policy_route_selection),
+        "eval_policy_route_selection": str(args.eval_policy_route_selection),
         "max_grad_norm": float(args.max_grad_norm),
         "wm_prediction_diagnostic_every_episodes": int(args.wm_prediction_diagnostic_every_episodes),
         "wm_prediction_diagnostic_max_steps": int(args.wm_prediction_diagnostic_max_steps),
-        "vehicle_arrival_head_enabled": not bool(args.disable_vehicle_arrival_head),
+        "wm_hdv_pressure_trace_enabled": bool(args.wm_hdv_pressure_trace_enabled),
+        "vehicle_arrival_head_enabled": bool(args.vehicle_arrival_head_enabled),
         "vehicle_arrival_loss_coef": float(args.vehicle_arrival_loss_coef),
         "vehicle_arrival_diag_horizon_seconds": float(args.vehicle_arrival_diag_horizon_seconds),
         "direct_real_a2c_update": bool(args.direct_real_a2c_update),
@@ -290,6 +430,10 @@ def build_config(args: argparse.Namespace) -> OnlineWmDreamerConfig:
         "eval_python": str(args.eval_python),
         "extra_eval_args": tuple(passthrough),
     }
+    if args.gamma is not None:
+        overrides["gamma"] = float(args.gamma)
+    if args.wm_cfm_init_mode is not None:
+        overrides["wm_cfm_init_mode"] = str(args.wm_cfm_init_mode)
     if args.sumo_extra_args is not None:
         overrides["sumo_extra_args"] = str(args.sumo_extra_args)
     if args.episode_steps is not None:
@@ -327,6 +471,14 @@ def build_config(args: argparse.Namespace) -> OnlineWmDreamerConfig:
 def run_evaluations(cfg: OnlineWmDreamerConfig, train_summary: Dict[str, object]) -> Dict[str, object]:
     eval_root = Path(cfg.output_dir) / "eval"
     eval_root.mkdir(parents=True, exist_ok=True)
+    final_hdv_state = Path(
+        str(
+            train_summary.get("final_hdv_state")
+            or (Path(cfg.output_dir) / "hdv_learning_state_after_online_wm_train.json")
+        )
+    )
+    if not final_hdv_state.exists():
+        raise FileNotFoundError(f"Final online-training HDV state not found: {final_hdv_state}")
     outputs: Dict[str, object] = {}
     checkpoint_paths = train_summary.get("checkpoint_paths", {})
     if not isinstance(checkpoint_paths, dict):
@@ -337,10 +489,13 @@ def run_evaluations(cfg: OnlineWmDreamerConfig, train_summary: Dict[str, object]
             ckpt = str(Path(cfg.output_dir) / "checkpoints" / f"checkpoint_ep{int(episode):05d}.pt")
         results_dir = eval_root / f"checkpoint_ep{int(episode):05d}"
         cmd = build_eval_command(cfg=cfg, checkpoint_path=ckpt, results_dir=results_dir)
+        hdv_state_index = cmd.index("--hdv_state_in") + 1
+        cmd[hdv_state_index] = str(final_hdv_state)
         print("[online-wm-dreamer] eval command:", " ".join(cmd), flush=True)
         subprocess.run(cmd, check=True)
         outputs[str(int(episode))] = {
             "checkpoint": str(ckpt),
+            "hdv_state_in": str(final_hdv_state),
             "results_dir": str(results_dir),
             "summary_json": str(results_dir / "collector_eval_summary.json"),
         }

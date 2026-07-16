@@ -1,6 +1,6 @@
 """Online Gretz Dreamer-style world-model actor-critic ablation.
 
-This ablation differs from ``online_no_cfm_actor_critic`` in two ways:
+This ablation differs from ``baseline.online_actor_critic`` in two ways:
 
 * Real SUMO episodes train an online replay-updated world model
   (FlowProjector + CFM Dynamics).
@@ -30,7 +30,7 @@ for _path in (str(_DREAMER4_DIR), str(_URBAN_DIR), str(_REPO_ROOT)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from ablation.online_no_cfm_actor_critic import (  # noqa: E402
+from baseline.online_actor_critic import (  # noqa: E402
     DEFAULT_CHECKPOINT_EPISODES,
     GRETZ_TAG,
     OnlineDecisionSample,
@@ -42,6 +42,7 @@ from ablation.online_no_cfm_actor_critic import (  # noqa: E402
     _jsonable_config,
     _load_json_object,
     _resolve_path,
+    _select_real_policy_route_index,
     build_diverse_paths_current_to_dest,
     build_eval_command as build_no_cfm_eval_command,
     compute_a2c_loss,
@@ -49,10 +50,12 @@ from ablation.online_no_cfm_actor_critic import (  # noqa: E402
     save_policy_checkpoint,
     samples_to_tensors,
     selected_vehicle_route_rewards,
+    normalize_real_policy_route_selection,
 )
 
 try:
     from dreamer4.urban_routing.dreamer_actor_critic import (
+        CentralizedLatentValueCritic,
         CentralizedVehicleValueCritic,
         VehicleRouteActor,
         lambda_return,
@@ -69,7 +72,12 @@ try:
     from dreamer4.dynamics_losses import transition_decoded_supervision_loss
     from dreamer4.train_dynamics import cfm_loss, cfm_predict_one_timestep
 except Exception:
-    from dreamer_actor_critic import CentralizedVehicleValueCritic, VehicleRouteActor, lambda_return
+    from dreamer_actor_critic import (
+        CentralizedLatentValueCritic,
+        CentralizedVehicleValueCritic,
+        VehicleRouteActor,
+        lambda_return,
+    )
     from dreamer_rollout import aggregate_route_probs_to_action_edge
     from experiment_settings import load_settings_file
     from routerl_shared import compute_agent_counts, load_od_data
@@ -100,7 +108,7 @@ from scripts.eval_sumo_routing import (  # noqa: E402
     _route_batch_uniqueness_summary,
     _temperature_adjust_probs,
 )
-from ablation.traci_port_fallback import patch_traci_start_port_fallback  # noqa: E402
+from baseline.traci_port_fallback import patch_traci_start_port_fallback  # noqa: E402
 from dreamer4.urban_routing.data_collector import serialize_hdv_route_state  # noqa: E402
 
 
@@ -113,6 +121,7 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
 
     output_dir: str = str(_REPO_ROOT / "results" / GRETZ_TAG / "ablation_online_wm_dreamer_ac")
     checkpoint_episodes: Tuple[int, ...] = DEFAULT_ONLINE_WM_CHECKPOINT_EPISODES
+    eval_policy_route_selection: str = "sample"
     reward_mode: str = "capped_step_cost"
     return_horizon_steps: int = 0
     wm_replay_buffer_episodes: int = 8
@@ -126,6 +135,7 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
     wm_grad_clip: float = 10.0
     wm_transition_decoded_supervision_weight: float = 1.0
     wm_hdv_policy_weight: float = 0.05
+    wm_hdv_target_source: str = "episode_mean_current_occupancy"
     wm_hdv_policy_target_mode: str = "episode_mean"
     wm_hdv_policy_action_mode: str = "window_mean"
     wm_transition_hdv_context_mode: str = "episode_response"
@@ -134,6 +144,17 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
     wm_transition_hdv_action_mode: str = "none"
     wm_transition_hdv_action_weight: float = 0.0
     wm_transition_hdv_action_scale: float = 1.0
+    imagined_hdv_context_source: str = "oracle_current_occupancy"
+    hdv_response_predictor_enabled: bool = False
+    hdv_response_predictor_lr: float = 2e-3
+    hdv_response_predictor_weight_decay: float = 1e-4
+    hdv_response_predictor_hidden_dim: int = 128
+    hdv_response_predictor_depth: int = 2
+    hdv_response_predictor_update_epochs: int = 64
+    hdv_response_predictor_min_pairs: int = 2
+    hdv_response_predictor_fallback: str = "prev_hdv"
+    hdv_response_predictor_ckpt: str = ""
+    hdv_response_predictor_progress_denominator: int = 0
     wm_cfm_active_weight: float = 0.0
     wm_cfm_busy_weight: float = 0.0
     wm_cfm_busy_threshold: float = 0.05
@@ -146,8 +167,10 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
     imagined_max_start_samples: int = 1
     min_replay_episodes_before_actor: int = 1
     ac_lambda: float = 0.95
+    ac_global_advantage_weight: float = 1.0
     wm_prediction_diagnostic_every_episodes: int = 1
     wm_prediction_diagnostic_max_steps: int = 16
+    wm_hdv_pressure_trace_enabled: bool = True
     direct_real_a2c_update: bool = False
     freeze_policy_obs_world_model: bool = False
     policy_obs_mode: str = "wm_latent"
@@ -164,12 +187,18 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
     actor_update_gate_max_regret: float = 0.0
     actor_update_gate_fail_passes: int = 0
     actor_update_gate_missing_passes: int = 0
-    vehicle_arrival_head_enabled: bool = True
+    vehicle_arrival_head_enabled: bool = False
     vehicle_arrival_loss_coef: float = 1.0
     vehicle_arrival_diag_horizon_seconds: float = 14.0
 
     def resolve(self) -> "OnlineWmDreamerConfig":
         values = asdict(self)
+        values["real_policy_route_selection"] = normalize_real_policy_route_selection(
+            values.get("real_policy_route_selection")
+        )
+        values["eval_policy_route_selection"] = normalize_real_policy_route_selection(
+            values.get("eval_policy_route_selection")
+        )
         for key in (
             "settings",
             "output_dir",
@@ -201,6 +230,7 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
         for key in (
             "output_dir",
             "checkpoint_episodes",
+            "eval_policy_route_selection",
             "reward_mode",
             "return_horizon_steps",
             "wm_replay_buffer_episodes",
@@ -222,6 +252,17 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
             "wm_transition_hdv_action_mode",
             "wm_transition_hdv_action_weight",
             "wm_transition_hdv_action_scale",
+            "imagined_hdv_context_source",
+            "hdv_response_predictor_enabled",
+            "hdv_response_predictor_lr",
+            "hdv_response_predictor_weight_decay",
+            "hdv_response_predictor_hidden_dim",
+            "hdv_response_predictor_depth",
+            "hdv_response_predictor_update_epochs",
+            "hdv_response_predictor_min_pairs",
+            "hdv_response_predictor_fallback",
+            "hdv_response_predictor_ckpt",
+            "hdv_response_predictor_progress_denominator",
             "wm_cfm_active_weight",
             "wm_cfm_busy_weight",
             "wm_cfm_busy_threshold",
@@ -234,8 +275,10 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
             "imagined_max_start_samples",
             "min_replay_episodes_before_actor",
             "ac_lambda",
+            "ac_global_advantage_weight",
             "wm_prediction_diagnostic_every_episodes",
             "wm_prediction_diagnostic_max_steps",
+            "wm_hdv_pressure_trace_enabled",
             "direct_real_a2c_update",
             "freeze_policy_obs_world_model",
             "policy_obs_mode",
@@ -257,7 +300,8 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
                 values[key] = own_defaults[key]
         values.update({k: v for k, v in overrides.items() if v is not None})
         settings = load_settings_file(settings_path)
-        values["wm_cfm_init_mode"] = settings.get("WM_CFM_INIT_MODE", values.get("wm_cfm_init_mode", "zero"))
+        if "wm_cfm_init_mode" not in overrides:
+            values["wm_cfm_init_mode"] = settings.get("WM_CFM_INIT_MODE", values.get("wm_cfm_init_mode", "zero"))
         values["wm_policy_obs_source"] = settings.get(
             "WM_POLICY_OBS_SOURCE",
             values.get("wm_policy_obs_source", "decoder_volume_tt"),
@@ -273,6 +317,10 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
         values["wm_hdv_policy_target_mode"] = settings.get(
             "HDV_POLICY_TARGET_MODE",
             values.get("wm_hdv_policy_target_mode", "episode_mean"),
+        )
+        values["wm_hdv_target_source"] = settings.get(
+            "HDV_TARGET_SOURCE",
+            values.get("wm_hdv_target_source", "episode_mean_current_occupancy"),
         )
         values["wm_hdv_policy_action_mode"] = settings.get(
             "HDV_POLICY_ACTION_MODE",
@@ -301,6 +349,52 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
         values["wm_transition_hdv_action_scale"] = _as_float(
             settings.get("TRANSITION_HDV_ACTION_SCALE"),
             float(values.get("wm_transition_hdv_action_scale", 1.0)),
+        )
+        values["imagined_hdv_context_source"] = settings.get(
+            "IMAGINED_HDV_CONTEXT_SOURCE",
+            values.get("imagined_hdv_context_source", "oracle_current_occupancy"),
+        )
+        values["hdv_response_predictor_enabled"] = bool(
+            _as_int(
+                settings.get("HDV_RESPONSE_PREDICTOR_ENABLED"),
+                int(bool(values.get("hdv_response_predictor_enabled", False))),
+            )
+        )
+        values["hdv_response_predictor_lr"] = _as_float(
+            settings.get("HDV_RESPONSE_PREDICTOR_LR"),
+            float(values.get("hdv_response_predictor_lr", 2e-3)),
+        )
+        values["hdv_response_predictor_weight_decay"] = _as_float(
+            settings.get("HDV_RESPONSE_PREDICTOR_WEIGHT_DECAY"),
+            float(values.get("hdv_response_predictor_weight_decay", 1e-4)),
+        )
+        values["hdv_response_predictor_hidden_dim"] = _as_int(
+            settings.get("HDV_RESPONSE_PREDICTOR_HIDDEN_DIM"),
+            int(values.get("hdv_response_predictor_hidden_dim", 128)),
+        )
+        values["hdv_response_predictor_depth"] = _as_int(
+            settings.get("HDV_RESPONSE_PREDICTOR_DEPTH"),
+            int(values.get("hdv_response_predictor_depth", 2)),
+        )
+        values["hdv_response_predictor_update_epochs"] = _as_int(
+            settings.get("HDV_RESPONSE_PREDICTOR_UPDATE_EPOCHS"),
+            int(values.get("hdv_response_predictor_update_epochs", 64)),
+        )
+        values["hdv_response_predictor_min_pairs"] = _as_int(
+            settings.get("HDV_RESPONSE_PREDICTOR_MIN_PAIRS"),
+            int(values.get("hdv_response_predictor_min_pairs", 2)),
+        )
+        values["hdv_response_predictor_fallback"] = settings.get(
+            "HDV_RESPONSE_PREDICTOR_FALLBACK",
+            values.get("hdv_response_predictor_fallback", "prev_hdv"),
+        )
+        values["hdv_response_predictor_ckpt"] = settings.get(
+            "HDV_RESPONSE_PREDICTOR_CKPT",
+            values.get("hdv_response_predictor_ckpt", ""),
+        )
+        values["hdv_response_predictor_progress_denominator"] = _as_int(
+            settings.get("HDV_RESPONSE_PREDICTOR_PROGRESS_DENOMINATOR"),
+            int(values.get("hdv_response_predictor_progress_denominator", 0)),
         )
         values["reward_mode"] = settings.get(
             "VEHICLE_REWARD_MODE",
@@ -366,26 +460,108 @@ class OnlineWorldModelStep:
     depart: np.ndarray
     context: np.ndarray
     hdv_target: Optional[np.ndarray] = None
+    hdv_static_edge_demand: Optional[np.ndarray] = None
+    hdv_predicted_edge_demand: Optional[np.ndarray] = None
+    hdv_prediction_source: str = ""
     samples: List[OnlineDecisionSample] = field(default_factory=list)
 
 
-class OnlineWorldModelReplay:
-    def __init__(self, capacity_episodes: int):
-        self.capacity_episodes = max(int(capacity_episodes), 1)
-        self._episodes: List[List[OnlineWorldModelStep]] = []
+@dataclass
+class OnlineHdvEpisodeSummary:
+    episode: int
+    av_edge_pressure: np.ndarray
+    hdv_static_edge_demand: np.ndarray
+    hdv_target: np.ndarray
+    predicted_hdv_edge_demand: Optional[np.ndarray] = None
+    prediction_source: str = ""
 
-    def append_episode(self, steps: Sequence[OnlineWorldModelStep]) -> None:
+
+class OnlineWorldModelReplay:
+    def __init__(self, capacity_episodes: int, *, hdv_target_source: str = "episode_mean_current_occupancy"):
+        self.capacity_episodes = max(int(capacity_episodes), 1)
+        self.hdv_target_source = str(hdv_target_source or "episode_mean_current_occupancy").strip().lower()
+        self._episodes: List[List[OnlineWorldModelStep]] = []
+        self._summaries: List[OnlineHdvEpisodeSummary] = []
+
+    @staticmethod
+    def _normalised_edge_vector(values: np.ndarray) -> np.ndarray:
+        arr = np.asarray(values, dtype=np.float32).reshape(-1).clip(min=0.0)
+        denom = float(arr.sum())
+        if denom > 1e-8:
+            return (arr / denom).astype(np.float32)
+        return arr.astype(np.float32)
+
+    def _episode_current_occupancy_mean(self, steps: Sequence[OnlineWorldModelStep]) -> Optional[np.ndarray]:
+        hdv_stack = _stack_np([s.hdv_action for s in steps])
+        if hdv_stack.size <= 0:
+            return None
+        return self._normalised_edge_vector(hdv_stack.clip(min=0.0).mean(axis=0))
+
+    def _episode_static_edge_demand(self, steps: Sequence[OnlineWorldModelStep]) -> Optional[np.ndarray]:
+        static_rows = [
+            np.asarray(s.hdv_static_edge_demand, dtype=np.float32)
+            for s in steps
+            if s.hdv_static_edge_demand is not None
+        ]
+        if not static_rows:
+            return None
+        static_stack = _stack_np(static_rows)
+        if static_stack.size <= 0:
+            return None
+        return self._normalised_edge_vector(static_stack.clip(min=0.0).mean(axis=0))
+
+    def _episode_av_pressure_mean(self, steps: Sequence[OnlineWorldModelStep]) -> Optional[np.ndarray]:
+        av_stack = _stack_np([s.av_action for s in steps])
+        if av_stack.size <= 0:
+            return None
+        return self._normalised_edge_vector(av_stack.clip(min=0.0).mean(axis=0))
+
+    def append_episode(
+        self,
+        steps: Sequence[OnlineWorldModelStep],
+        *,
+        predicted_hdv_edge_demand: Optional[np.ndarray] = None,
+        prediction_source: str = "",
+    ) -> None:
         if not steps:
             return
         episode_steps = list(steps)
-        hdv_stack = _stack_np([s.hdv_action for s in episode_steps])
-        if hdv_stack.size > 0:
-            hdv_mean = hdv_stack.clip(min=0.0).mean(axis=0).astype(np.float32)
-            denom = float(hdv_mean.sum())
-            if denom > 1e-8:
-                hdv_mean = hdv_mean / denom
+        source = str(self.hdv_target_source or "episode_mean_current_occupancy").strip().lower()
+        if source in {"static_edge_demand", "static_episode_edge_demand", "episode_static_edge_demand"}:
+            hdv_mean = self._episode_static_edge_demand(episode_steps)
+            if hdv_mean is None:
+                hdv_mean = self._episode_current_occupancy_mean(episode_steps)
+        elif source in {"episode_mean_current_occupancy", "current_occupancy_mean", "episode_mean", "legacy"}:
+            hdv_mean = self._episode_current_occupancy_mean(episode_steps)
+        else:
+            raise ValueError(
+                f"Unsupported wm_hdv_target_source={self.hdv_target_source!r}; "
+                "expected episode_mean_current_occupancy or static_edge_demand"
+            )
+        if hdv_mean is not None:
             for step in episode_steps:
                 step.hdv_target = hdv_mean.copy()
+        pred = None
+        if predicted_hdv_edge_demand is not None:
+            pred = self._normalised_edge_vector(np.asarray(predicted_hdv_edge_demand, dtype=np.float32))
+            for step in episode_steps:
+                step.hdv_predicted_edge_demand = pred.copy()
+                step.hdv_prediction_source = str(prediction_source or "causal_response_predictor")
+        av_mean = self._episode_av_pressure_mean(episode_steps)
+        static_mean = self._episode_static_edge_demand(episode_steps)
+        if static_mean is None:
+            static_mean = self._episode_current_occupancy_mean(episode_steps)
+        if av_mean is not None and static_mean is not None and hdv_mean is not None:
+            self._summaries.append(
+                OnlineHdvEpisodeSummary(
+                    episode=int(episode_steps[0].episode),
+                    av_edge_pressure=av_mean.astype(np.float32),
+                    hdv_static_edge_demand=static_mean.astype(np.float32),
+                    hdv_target=hdv_mean.astype(np.float32),
+                    predicted_hdv_edge_demand=None if pred is None else pred.astype(np.float32),
+                    prediction_source=str(prediction_source or ""),
+                )
+            )
         self._episodes.append(episode_steps)
         if len(self._episodes) > self.capacity_episodes:
             self._episodes = self._episodes[-self.capacity_episodes :]
@@ -393,6 +569,10 @@ class OnlineWorldModelReplay:
     @property
     def episodes(self) -> List[List[OnlineWorldModelStep]]:
         return list(self._episodes)
+
+    @property
+    def summaries(self) -> List[OnlineHdvEpisodeSummary]:
+        return list(self._summaries)
 
     def episode_count(self) -> int:
         return int(len(self._episodes))
@@ -409,12 +589,251 @@ class OnlineWorldModelReplay:
         return [steps[int(i)] for i in np.asarray(idx).reshape(-1)]
 
 
+class CausalHdvResponsePredictor(torch.nn.Module):
+    def __init__(self, n_edges: int, hidden_dim: int, depth: int):
+        super().__init__()
+        self.n_edges = int(n_edges)
+        input_dim = 2 * self.n_edges + 1
+        layers: List[torch.nn.Module] = []
+        dim = int(input_dim)
+        for _ in range(max(int(depth), 1)):
+            layers.append(torch.nn.Linear(dim, int(hidden_dim)))
+            layers.append(torch.nn.GELU())
+            layers.append(torch.nn.LayerNorm(int(hidden_dim)))
+            dim = int(hidden_dim)
+        layers.append(torch.nn.Linear(dim, self.n_edges))
+        self.net = torch.nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+class CausalHdvResponseModel:
+    def __init__(self, *, n_edges: int, cfg: OnlineWmDreamerConfig, device: torch.device):
+        self.n_edges = int(n_edges)
+        self.cfg = cfg
+        self.device = device
+        self.hidden_dim = int(cfg.hdv_response_predictor_hidden_dim)
+        self.depth = int(cfg.hdv_response_predictor_depth)
+        self.progress_denominator = int(
+            getattr(cfg, "hdv_response_predictor_progress_denominator", 0)
+            or getattr(cfg, "train_episodes", 1)
+            or 1
+        )
+        self.model = CausalHdvResponsePredictor(
+            n_edges=int(n_edges),
+            hidden_dim=int(self.hidden_dim),
+            depth=int(self.depth),
+        ).to(device)
+        self.optimizer = torch.optim.AdamW(
+            self.model.parameters(),
+            lr=float(cfg.hdv_response_predictor_lr),
+            weight_decay=float(cfg.hdv_response_predictor_weight_decay),
+        )
+        self.trained_pairs = 0
+        self.pretrained_pairs = 0
+
+    @staticmethod
+    def _normalise_np(values: np.ndarray, n_edges: int) -> np.ndarray:
+        arr = np.asarray(values, dtype=np.float32).reshape(-1)
+        if int(arr.size) != int(n_edges):
+            out = np.zeros((int(n_edges),), dtype=np.float32)
+            take = min(int(arr.size), int(n_edges))
+            if take > 0:
+                out[:take] = arr[:take]
+            arr = out
+        arr = arr.clip(min=0.0)
+        denom = float(arr.sum())
+        if denom > 1e-8:
+            arr = arr / denom
+        elif int(n_edges) > 0:
+            arr = np.full((int(n_edges),), 1.0 / float(int(n_edges)), dtype=np.float32)
+        return arr.astype(np.float32)
+
+    def _feature_np(
+        self,
+        *,
+        prev_av_edge_pressure: np.ndarray,
+        prev_hdv_static_edge_demand: np.ndarray,
+        episode: int,
+    ) -> np.ndarray:
+        prev_av = self._normalise_np(prev_av_edge_pressure, self.n_edges)
+        prev_hdv = self._normalise_np(prev_hdv_static_edge_demand, self.n_edges)
+        progress = float(max(int(episode), 1)) / float(max(int(self.progress_denominator), 1))
+        progress = float(np.clip(progress, 0.0, 1.0))
+        return np.concatenate([prev_av, prev_hdv, np.asarray([progress], dtype=np.float32)], axis=0).astype(np.float32)
+
+    def _pairs_from_summaries(
+        self,
+        summaries: Sequence[OnlineHdvEpisodeSummary],
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+        ordered = sorted(list(summaries), key=lambda s: int(s.episode))
+        if len(ordered) < 2:
+            return None, None
+        by_ep = {int(s.episode): s for s in ordered}
+        xs: List[np.ndarray] = []
+        ys: List[np.ndarray] = []
+        for current in ordered:
+            prev = by_ep.get(int(current.episode) - 1)
+            if prev is None:
+                continue
+            xs.append(
+                self._feature_np(
+                    prev_av_edge_pressure=prev.av_edge_pressure,
+                    prev_hdv_static_edge_demand=prev.hdv_static_edge_demand,
+                    episode=int(current.episode),
+                )
+            )
+            ys.append(self._normalise_np(current.hdv_static_edge_demand, self.n_edges))
+        if not xs:
+            return None, None
+        return (
+            torch.from_numpy(np.stack(xs, axis=0)).to(device=self.device, dtype=torch.float32),
+            torch.from_numpy(np.stack(ys, axis=0)).to(device=self.device, dtype=torch.float32),
+        )
+
+    def predict_for_next_episode(
+        self,
+        summaries: Sequence[OnlineHdvEpisodeSummary],
+        *,
+        episode: int,
+    ) -> Tuple[Optional[np.ndarray], Dict[str, float]]:
+        if not bool(getattr(self.cfg, "hdv_response_predictor_enabled", False)):
+            return None, {"hdv_response_pred_enabled": 0.0, "hdv_response_pred_source_code": 0.0}
+        ordered = sorted(list(summaries), key=lambda s: int(s.episode))
+        prev = ordered[-1] if ordered else None
+        if prev is None:
+            return None, {"hdv_response_pred_enabled": 1.0, "hdv_response_pred_source_code": 1.0}
+        fallback = str(getattr(self.cfg, "hdv_response_predictor_fallback", "prev_hdv") or "prev_hdv").strip().lower()
+        can_predict = self.trained_pairs >= max(int(getattr(self.cfg, "hdv_response_predictor_min_pairs", 2)), 1)
+        if can_predict:
+            self.model.eval()
+            x = torch.from_numpy(
+                self._feature_np(
+                    prev_av_edge_pressure=prev.av_edge_pressure,
+                    prev_hdv_static_edge_demand=prev.hdv_static_edge_demand,
+                    episode=int(episode),
+                )
+            ).to(device=self.device, dtype=torch.float32).unsqueeze(0)
+            with torch.no_grad():
+                pred = torch.softmax(self.model(x), dim=-1)[0].detach().cpu().numpy().astype(np.float32)
+            return pred, {
+                "hdv_response_pred_enabled": 1.0,
+                "hdv_response_pred_source_code": 2.0,
+                "hdv_response_pred_pairs": float(self.trained_pairs),
+            }
+        if fallback in {"prev_hdv", "previous_hdv", "prev_static"}:
+            return self._normalise_np(prev.hdv_static_edge_demand, self.n_edges), {
+                "hdv_response_pred_enabled": 1.0,
+                "hdv_response_pred_source_code": 1.5,
+                "hdv_response_pred_pairs": float(self.trained_pairs),
+            }
+        if fallback in {"zero", "none"}:
+            return np.zeros((self.n_edges,), dtype=np.float32), {
+                "hdv_response_pred_enabled": 1.0,
+                "hdv_response_pred_source_code": 1.25,
+                "hdv_response_pred_pairs": float(self.trained_pairs),
+            }
+        return None, {
+            "hdv_response_pred_enabled": 1.0,
+            "hdv_response_pred_source_code": 1.0,
+            "hdv_response_pred_pairs": float(self.trained_pairs),
+        }
+
+    def update(self, summaries: Sequence[OnlineHdvEpisodeSummary]) -> Dict[str, float]:
+        if not bool(getattr(self.cfg, "hdv_response_predictor_enabled", False)):
+            return {
+                "hdv_response_loss": 0.0,
+                "hdv_response_updates": 0.0,
+                "hdv_response_pairs": float(self.trained_pairs),
+            }
+        x, target = self._pairs_from_summaries(summaries)
+        if x is None or target is None:
+            return {
+                "hdv_response_loss": 0.0,
+                "hdv_response_updates": 0.0,
+                "hdv_response_pairs": float(self.trained_pairs),
+                "hdv_response_online_pairs": 0.0,
+            }
+        self.model.train()
+        losses: List[float] = []
+        for _ in range(max(int(getattr(self.cfg, "hdv_response_predictor_update_epochs", 64)), 1)):
+            logits = self.model(x)
+            log_probs = torch.log_softmax(logits.float(), dim=-1)
+            loss = -(target * log_probs).sum(dim=-1).mean()
+            self.optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 10.0)
+            self.optimizer.step()
+            losses.append(float(loss.detach().cpu().item()))
+        self.model.eval()
+        online_pairs = int(x.shape[0])
+        self.trained_pairs = int(self.pretrained_pairs) + int(online_pairs)
+        with torch.no_grad():
+            pred = torch.softmax(self.model(x), dim=-1)
+            tv = 0.5 * torch.abs(pred - target).sum(dim=-1).mean()
+        return {
+            "hdv_response_loss": float(np.mean(losses)) if losses else 0.0,
+            "hdv_response_updates": float(len(losses)),
+            "hdv_response_pairs": float(self.trained_pairs),
+            "hdv_response_online_pairs": float(online_pairs),
+            "hdv_response_train_tv": float(tv.detach().cpu().item()),
+        }
+
+    def save_checkpoint(self, path: str | Path, *, metrics: Optional[Dict[str, Any]] = None) -> Path:
+        ckpt_path = Path(path)
+        ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "format": "causal_hdv_response_predictor_v1",
+                "model_state_dict": self.model.state_dict(),
+                "optimizer_state_dict": self.optimizer.state_dict(),
+                "trained_pairs": int(self.trained_pairs),
+                "pretrained_pairs": int(self.pretrained_pairs),
+                "n_edges": int(self.n_edges),
+                "hidden_dim": int(self.hidden_dim),
+                "depth": int(self.depth),
+                "progress_denominator": int(self.progress_denominator),
+                "metrics": dict(metrics or {}),
+            },
+            ckpt_path,
+        )
+        return ckpt_path
+
+    def load_checkpoint(self, path: str | Path, *, load_optimizer: bool = False) -> Dict[str, Any]:
+        ckpt_path = Path(path)
+        state = torch.load(str(ckpt_path), map_location=self.device, weights_only=False)
+        if not isinstance(state, dict):
+            raise RuntimeError(f"HDV response predictor checkpoint is not a dict: {ckpt_path}")
+        expected_edges = int(state.get("n_edges", self.n_edges))
+        if expected_edges != int(self.n_edges):
+            raise RuntimeError(
+                f"HDV response predictor n_edges mismatch: checkpoint={expected_edges}, model={self.n_edges}"
+            )
+        model_state = state.get("model_state_dict") or state.get("model")
+        if model_state is None:
+            raise RuntimeError(f"HDV response predictor checkpoint has no model_state_dict: {ckpt_path}")
+        self.model.load_state_dict(model_state, strict=True)
+        if bool(load_optimizer) and state.get("optimizer_state_dict") is not None:
+            self.optimizer.load_state_dict(state["optimizer_state_dict"])
+        saved_trained_pairs = int(state.get("trained_pairs", self.trained_pairs) or 0)
+        saved_pretrained_pairs = state.get("pretrained_pairs")
+        if saved_pretrained_pairs is None or int(saved_pretrained_pairs or 0) <= 0:
+            self.pretrained_pairs = int(saved_trained_pairs)
+        else:
+            self.pretrained_pairs = int(saved_pretrained_pairs)
+        self.trained_pairs = int(self.pretrained_pairs)
+        self.progress_denominator = int(state.get("progress_denominator", self.progress_denominator) or 1)
+        return state
+
+
 @dataclass
 class ImaginedVehicleRouteState:
     candidate_paths: List[List[int]]
     current_edge: int
     dest_edge: int
     current_edge_remaining: float
+    elapsed_time: float
     arrived: bool = False
 
 
@@ -425,6 +844,32 @@ class ImaginedRouteAdvance:
     current_edge_remaining: float
     arrived: bool
     remaining_path: List[int]
+
+
+def _imagined_route_remaining_time(
+    *,
+    path: Sequence[int],
+    edge_tt: np.ndarray,
+    current_edge: int,
+    current_edge_remaining: float,
+) -> float:
+    n_edges = int(np.asarray(edge_tt).reshape(-1).shape[0])
+    route = _sanitise_path(path, n_edges=n_edges)
+    if not route:
+        return 0.0
+    suffix = _suffix_path_from_edge(route, int(current_edge))
+    if suffix:
+        route = suffix
+    if not route:
+        return 0.0
+    total = (
+        float(current_edge_remaining)
+        if int(route[0]) == int(current_edge) and float(current_edge_remaining) > 0.0
+        else _edge_tt_seconds(edge_tt, int(route[0]))
+    )
+    for edge in route[1:]:
+        total += _edge_tt_seconds(edge_tt, int(edge))
+    return float(max(total, 0.0))
 
 
 def _stack_np(items: Sequence[np.ndarray], *, dtype=np.float32) -> np.ndarray:
@@ -879,6 +1324,10 @@ class OnlineWmDreamerCollector(OnlineNoCfmCollector):
         ):
             self.connector.apply_routerl_hdv_learning(veh_travel_times)
         _annotate_samples_with_arrival_remaining(self._episode_samples, self._last_ep_vehicle_tt)
+        hdv_static_edge_demand = self._compute_hdv_static_edge_demand()
+        if hdv_static_edge_demand is not None:
+            for step in self._wm_episode_steps:
+                step.hdv_static_edge_demand = hdv_static_edge_demand.copy()
 
         episode_reward = float(np.mean(ep_rewards)) if ep_rewards else 0.0
         self._write_urb_episode_csv(int(episode_id), episode_reward)
@@ -901,10 +1350,48 @@ class OnlineWmDreamerCollector(OnlineNoCfmCollector):
             "t_CAV": float(np.mean(self._last_ep_av_travel_times) / 60.0) if self._last_ep_av_travel_times else float("nan"),
             "t_HDV": float(np.mean(self._last_ep_hdv_travel_times) / 60.0) if self._last_ep_hdv_travel_times else float("nan"),
             "episode_complete": int(total_agents > 0 and len(self._last_ep_travel_times) >= total_agents),
+            "hdv_static_edge_demand_sum": float(np.sum(hdv_static_edge_demand))
+            if hdv_static_edge_demand is not None
+            else 0.0,
+            "hdv_static_edge_demand_edges": int(np.count_nonzero(hdv_static_edge_demand > 0.0))
+            if hdv_static_edge_demand is not None
+            else 0,
         }
         for key, value in sorted(getattr(self, "_av_decision_skip_stats", {}).items()):
             row[f"av_diag_{key}"] = int(value)
         return list(self._episode_samples), row
+
+    def _compute_hdv_static_edge_demand(self) -> Optional[np.ndarray]:
+        edge_to_idx = getattr(self._edge_registry, "_edge_to_idx", {})
+        n_edges = int(getattr(self._edge_registry, "n_edges", 0) or 0)
+        if n_edges <= 0 or not edge_to_idx:
+            return None
+        out = np.zeros((n_edges,), dtype=np.float32)
+        used = 0
+        for veh_id in sorted(getattr(self, "_hdv_vehicles", set())):
+            ridx = getattr(self, "_hdv_route_idx", {}).get(veh_id)
+            candidates = getattr(self, "_veh_candidates", {}).get(veh_id)
+            if ridx is None or not candidates:
+                continue
+            ridx_i = int(ridx)
+            if ridx_i < 0 or ridx_i >= len(candidates):
+                continue
+            route = candidates[ridx_i]
+            added = False
+            for edge_id in route:
+                ei = edge_to_idx.get(str(edge_id))
+                if ei is None:
+                    continue
+                out[int(ei)] += 1.0
+                added = True
+            if added:
+                used += 1
+        if used <= 0:
+            return None
+        denom = float(out.sum())
+        if denom > 1e-8:
+            out /= denom
+        return out.astype(np.float32)
 
     def run_train_episode(
         self,
@@ -1088,7 +1575,11 @@ class OnlineWmToyLiveCollector(OnlineWmDreamerCollector):
                     float(self._cfg.av_policy_sample_temperature),
                     int(self.n_routes),
                 )
-                selected_i = int(rng.choice(int(self.n_routes), p=probs_i))
+                selected_i = _select_real_policy_route_index(
+                    probs_i,
+                    mode=self._cfg.real_policy_route_selection,
+                    rng=rng,
+                )
                 selected_i = int(np.clip(selected_i, 0, len(route_batch[i]) - 1))
                 selected_indices[i] = selected_i
                 policy_probs.append(probs_i.astype(np.float32))
@@ -1118,7 +1609,11 @@ class OnlineWmToyLiveCollector(OnlineWmDreamerCollector):
                     float(self._cfg.av_policy_sample_temperature),
                     int(self.n_routes),
                 )
-                selected_indices[i] = int(rng.choice(int(self.n_routes), p=probs))
+                selected_indices[i] = _select_real_policy_route_index(
+                    probs,
+                    mode=self._cfg.real_policy_route_selection,
+                    rng=rng,
+                )
                 selected_indices[i] = int(np.clip(selected_indices[i], 0, len(route_batch[i]) - 1))
                 probs_np[i] = probs.astype(np.float32)
 
@@ -1180,6 +1675,8 @@ class OnlineWmToyLiveCollector(OnlineWmDreamerCollector):
         unique_mean, unique_min, unique_max = _route_batch_uniqueness_summary(route_batch)
         counts = np.bincount(selected_indices.clip(0, int(self.n_routes) - 1), minlength=int(self.n_routes))
         mean_probs = np.mean(probs_np[:, : int(self.n_routes)], axis=0)
+        argmax_indices = np.argmax(probs_np[:, : int(self.n_routes)], axis=1).astype(np.int64)
+        argmax_matches = selected_indices == argmax_indices
         decision_row: Dict[str, Any] = {
             "episode": int(self._current_episode_id_eval),
             "decision_idx": int(self._current_decision_idx_eval),
@@ -1195,6 +1692,8 @@ class OnlineWmToyLiveCollector(OnlineWmDreamerCollector):
             "cfm_transition_used": 0,
             "wm_rollout_rerank_used": 0,
             "obs_source": "live_edge_registry_extract_flow",
+            "real_policy_route_selection": str(self._cfg.real_policy_route_selection),
+            "selected_argmax_match_rate": float(np.mean(argmax_matches)),
         }
         for k in range(int(self.n_routes)):
             decision_row[f"mean_prob_route{k}"] = float(mean_probs[k])
@@ -1213,6 +1712,9 @@ class OnlineWmToyLiveCollector(OnlineWmDreamerCollector):
                 "current_edge": active_current_edges[i] if i < len(active_current_edges) else "",
                 "dest_edge": str(self._veh_dest.get(veh_id, "")),
                 "selected_route": int(selected_indices[i]),
+                "argmax_route": int(argmax_indices[i]),
+                "selected_matches_argmax": int(bool(argmax_matches[i])),
+                "real_policy_route_selection": str(self._cfg.real_policy_route_selection),
                 "reward": float(rewards[i]),
                 "elapsed_time": float(elapsed[i]),
             }
@@ -1402,6 +1904,7 @@ class OnlineWorldModelUpdater:
                 cfm_active_threshold=float(self.cfg.wm_cfm_active_threshold),
                 cfm_max_weight=float(self.cfg.wm_cfm_max_weight),
                 volume_index=2,
+                init_mode=str(self.cfg.wm_cfm_init_mode),
             )
             initial_state = None
             if str(self.cfg.wm_cfm_init_mode).strip().lower() == "zero":
@@ -1417,6 +1920,7 @@ class OnlineWorldModelUpdater:
                 act_mask=None,
                 n_steps=int(getattr(self.wm, "n_ode_steps", 1)),
                 initial_state=initial_state,
+                init_mode=str(self.cfg.wm_cfm_init_mode),
             )
             transition_loss, transition_aux = transition_decoded_supervision_loss(
                 z_pred_next=z_pred_next,
@@ -1478,6 +1982,67 @@ def capped_step_cost_reward_matrix(
     )
     rewards = -effective / float(max(reward_temperature, 1e-6))
     return torch.where(route_valid, rewards, torch.zeros_like(rewards))
+
+
+def _sample_masked_actions(
+    logits: torch.Tensor,
+    valid_mask: torch.Tensor,
+    *,
+    temperature: float,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Sample one masked route and expose the same one-hot WM action."""
+    safe_valid = valid_mask.to(device=logits.device, dtype=torch.bool).clone()
+    has_valid = safe_valid.any(dim=-1)
+    safe_valid[~has_valid, 0] = True
+    masked_logits = (logits / float(max(temperature, 1e-6))).masked_fill(~safe_valid, -1e9)
+    dist = Categorical(logits=masked_logits)
+    selected = dist.sample()
+    one_hot = torch.nn.functional.one_hot(selected, num_classes=int(logits.shape[-1])).to(dtype=logits.dtype)
+    return selected, one_hot, dist.log_prob(selected), dist.entropy()
+
+
+def _combine_vehicle_global_advantages(
+    vehicle_advantage: torch.Tensor,
+    global_advantage: torch.Tensor,
+    group_index: torch.Tensor,
+    *,
+    global_weight: float,
+) -> torch.Tensor:
+    """Add each imagined step's global advantage to its active CAV samples."""
+    vehicle = vehicle_advantage.reshape(-1)
+    groups = group_index.to(device=vehicle.device, dtype=torch.long).reshape(-1)
+    global_step = global_advantage.to(device=vehicle.device, dtype=vehicle.dtype).reshape(-1)
+    if int(groups.numel()) != int(vehicle.numel()):
+        raise ValueError("group_index must align with vehicle advantages")
+    if int(groups.numel()) == 0:
+        return vehicle
+    if int(global_step.numel()) <= int(groups.max().detach().cpu().item()):
+        raise ValueError("global advantages do not cover all vehicle groups")
+    return vehicle + float(global_weight) * global_step.index_select(0, groups)
+
+
+def _global_network_reward_from_latent(
+    wm,
+    z_next: torch.Tensor,
+    edge_tt: np.ndarray,
+    *,
+    reward_temperature: float,
+) -> torch.Tensor:
+    """Dense all-vehicle reward used by the existing global latent critic."""
+    with torch.no_grad():
+        decoded = wm.flow_projector.decode(z_next.detach())
+        capacities = wm.bpr.capacities.to(device=z_next.device, dtype=z_next.dtype).reshape(-1)
+        edge_time = torch.as_tensor(edge_tt, device=z_next.device, dtype=z_next.dtype).reshape(-1)
+        n_edges = min(int(decoded.shape[0]), int(capacities.numel()), int(edge_time.numel()))
+        if n_edges <= 0:
+            return torch.zeros((), device=z_next.device, dtype=z_next.dtype)
+        vehicle_count = torch.relu(decoded[:n_edges, 2]) * capacities[:n_edges]
+        count_sum = vehicle_count.sum()
+        if float(count_sum.detach().cpu().item()) > 1e-8:
+            network_tt = torch.sum(vehicle_count * edge_time[:n_edges].clamp_min(0.0)) / count_sum
+        else:
+            network_tt = edge_time[:n_edges].clamp_min(0.0).mean()
+        return -network_tt / float(max(reward_temperature, 1e-6))
 
 
 def _safe_corr_torch(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -1691,8 +2256,10 @@ class OnlineImaginedActorCritic:
         wm,
         actor: VehicleRouteActor,
         critic: CentralizedVehicleValueCritic,
+        global_critic: CentralizedLatentValueCritic,
         actor_optimizer: torch.optim.Optimizer,
         critic_optimizer: torch.optim.Optimizer,
+        global_critic_optimizer: torch.optim.Optimizer,
         cfg: OnlineWmDreamerConfig,
         device: torch.device,
         obs_dim: int,
@@ -1700,8 +2267,10 @@ class OnlineImaginedActorCritic:
         self.wm = wm
         self.actor = actor
         self.critic = critic
+        self.global_critic = global_critic
         self.actor_optimizer = actor_optimizer
         self.critic_optimizer = critic_optimizer
+        self.global_critic_optimizer = global_critic_optimizer
         self.cfg = cfg
         self.device = device
         self.obs_dim = int(obs_dim)
@@ -1710,6 +2279,46 @@ class OnlineImaginedActorCritic:
             getattr(registry, "adjacency", None),
             getattr(registry, "passenger_allowed", None),
         )
+
+    def _hdv_context_for_step(self, step: OnlineWorldModelStep, dtype: torch.dtype) -> Tuple[Optional[torch.Tensor], str]:
+        if not bool(getattr(self.wm, "use_hdv_context", False)):
+            return None, "disabled"
+        source = str(getattr(self.cfg, "imagined_hdv_context_source", "oracle_current_occupancy") or "oracle_current_occupancy")
+        mode = source.strip().lower()
+        arr: Optional[np.ndarray]
+        label = mode
+        if mode in {"", "none", "off", "disabled"}:
+            return None, "none"
+        if mode in {"causal_response_predictor", "response_predictor", "predicted", "causal"}:
+            arr = step.hdv_predicted_edge_demand
+            label = str(step.hdv_prediction_source or "causal_response_predictor")
+            if arr is None:
+                fallback = str(getattr(self.cfg, "hdv_response_predictor_fallback", "prev_hdv") or "prev_hdv").strip().lower()
+                if fallback in {"oracle_target", "target"} and step.hdv_target is not None:
+                    arr = step.hdv_target
+                    label = "fallback_oracle_target"
+                elif fallback in {"oracle_current", "current", "current_occupancy"}:
+                    arr = step.hdv_action
+                    label = "fallback_oracle_current"
+                else:
+                    return None, "missing_prediction"
+        elif mode in {"oracle_target", "target", "static_target"}:
+            arr = step.hdv_target if step.hdv_target is not None else step.hdv_action
+        elif mode in {"oracle_static", "static_edge_demand"}:
+            arr = step.hdv_static_edge_demand if step.hdv_static_edge_demand is not None else step.hdv_target
+            if arr is None:
+                arr = step.hdv_action
+        elif mode in {"oracle_current", "oracle_current_occupancy", "current_occupancy", "legacy"}:
+            arr = step.hdv_action
+        else:
+            raise ValueError(f"Unsupported imagined_hdv_context_source={source!r}")
+        if arr is None:
+            return None, "missing"
+        hdv = torch.from_numpy(np.asarray(arr, dtype=np.float32)).to(device=self.device, dtype=dtype)
+        if hdv.dim() != 1:
+            hdv = hdv.reshape(-1)
+        hdv = _normalise_edge_distribution(hdv.unsqueeze(0))[0].to(device=self.device, dtype=dtype)
+        return hdv, label
 
     def diagnose_prediction(self, replay: OnlineWorldModelReplay, rng: np.random.Generator) -> Dict[str, float]:
         candidate_steps = [s for s in replay.all_steps() if s.samples]
@@ -1745,7 +2354,7 @@ class OnlineImaginedActorCritic:
                 )
                 depart_t = torch.from_numpy(np.asarray(step.depart, dtype=np.float32)).to(device=self.device, dtype=z.dtype)
                 context_t = torch.from_numpy(np.asarray(step.context, dtype=np.float32)).to(device=self.device, dtype=z.dtype)
-                hdv_t = torch.from_numpy(np.asarray(step.hdv_action, dtype=np.float32)).to(device=self.device, dtype=z.dtype)
+                hdv_t, _hdv_source = self._hdv_context_for_step(step, z.dtype)
                 try:
                     z_pred, _info = self.wm.predict_next_state_differentiable(
                         z.detach(),
@@ -1753,7 +2362,7 @@ class OnlineImaginedActorCritic:
                         past_packed=z.detach().unsqueeze(0).unsqueeze(0),
                         depart=depart_t,
                         context=context_t,
-                        hdv_context=hdv_t if bool(getattr(self.wm, "use_hdv_context", False)) else None,
+                        hdv_context=hdv_t,
                     )
                     z_true = self.wm.encode_observation(step.next_flow).to(device=self.device, dtype=torch.float32).clone()
                 except Exception:
@@ -1918,6 +2527,7 @@ class OnlineImaginedActorCritic:
                     current_edge=int(current_edge),
                     dest_edge=int(dest_edge),
                     current_edge_remaining=float(current_remaining),
+                    elapsed_time=float(max(float(getattr(sample, "elapsed_time", 0.0)), 0.0)),
                     arrived=bool(current_edge < 0),
                 )
             )
@@ -1934,6 +2544,10 @@ class OnlineImaginedActorCritic:
         next_valid_steps: List[torch.Tensor] = []
         entropies: List[torch.Tensor] = []
         action_edges: List[torch.Tensor] = []
+        global_latent_steps: List[torch.Tensor] = []
+        global_next_latent_steps: List[torch.Tensor] = []
+        global_context_steps: List[torch.Tensor] = []
+        global_reward_steps: List[torch.Tensor] = []
         arrived_events = 0
         horizon = max(int(self.cfg.imag_horizon), 1)
         n_agents = len(samples)
@@ -1979,14 +2593,13 @@ class OnlineImaginedActorCritic:
             if int(obs.shape[0]) <= 0:
                 break
             logits = self.actor.forward_logits(obs)
-            safe_valid = valid.clone()
-            has_valid = safe_valid.any(dim=-1)
-            safe_valid[~has_valid, 0] = True
-            masked_logits = (logits / float(max(self.cfg.av_policy_sample_temperature, 1e-6))).masked_fill(~safe_valid, -1e9)
-            dist = Categorical(logits=masked_logits)
-            selected = dist.sample()
-            old_logp = dist.log_prob(selected).detach()
-            entropy = dist.entropy().mean()
+            selected, executed_one_hot, old_logp, entropy_per_vehicle = _sample_masked_actions(
+                logits,
+                valid,
+                temperature=float(self.cfg.av_policy_sample_temperature),
+            )
+            old_logp = old_logp.detach()
+            entropy = entropy_per_vehicle.mean()
             reward_values: List[float] = []
             for local_i, state_i in enumerate(active_indices):
                 vehicle = vehicle_states[int(state_i)]
@@ -1994,6 +2607,13 @@ class OnlineImaginedActorCritic:
                 action_idx = int(np.clip(action_idx, 0, n_routes - 1))
                 chosen_paths = active_path_batch[local_i]
                 chosen = chosen_paths[action_idx] if action_idx < len(chosen_paths) else []
+                remaining_before = _imagined_route_remaining_time(
+                    path=chosen,
+                    edge_tt=edge_tt,
+                    current_edge=int(vehicle.current_edge),
+                    current_edge_remaining=float(vehicle.current_edge_remaining),
+                )
+                elapsed_before = float(max(vehicle.elapsed_time, 0.0))
                 advance = _advance_imagined_route_progress(
                     path=chosen,
                     edge_tt=edge_tt,
@@ -2003,19 +2623,30 @@ class OnlineImaginedActorCritic:
                 )
                 vehicle.current_edge = int(advance.current_edge)
                 vehicle.current_edge_remaining = float(advance.current_edge_remaining)
+                vehicle.elapsed_time = float(elapsed_before + max(float(advance.elapsed_cost), 0.0))
                 vehicle.arrived = bool(advance.arrived)
-                reward_values.append(
-                    -float(self.cfg.reward_weight)
-                    * float(self.cfg.reward_scale)
-                    * float(advance.elapsed_cost)
-                    / float(max(self.cfg.reward_temperature, 1e-6))
-                )
+                mode_key = str(self.cfg.reward_mode or "capped_step_cost").strip().lower()
+                if mode_key in {"progress_fraction", "step_progress", "trip_progress_fraction"}:
+                    denom = max(
+                        float(remaining_before) + float(elapsed_before),
+                        float(max(self.cfg.remaining_tt_eps, 1e-6)),
+                    )
+                    reward = float(max(float(advance.elapsed_cost), 0.0)) / denom
+                    if float(self.cfg.progress_cap) > 0.0:
+                        reward = min(reward, float(self.cfg.progress_cap))
+                    reward_values.append(float(self.cfg.reward_weight) * float(self.cfg.reward_scale) * reward)
+                else:
+                    reward_values.append(
+                        -float(self.cfg.reward_weight)
+                        * float(self.cfg.reward_scale)
+                        * float(advance.elapsed_cost)
+                        / float(max(self.cfg.reward_temperature, 1e-6))
+                    )
                 if bool(advance.arrived):
                     arrived_events += 1
             rewards = torch.tensor(reward_values, device=self.device, dtype=obs.dtype)
-            probs = torch.softmax(masked_logits, dim=-1)
             action_edge = aggregate_route_probs_to_action_edge(
-                probs,
+                executed_one_hot,
                 active_path_batch,
                 n_edges=n_edges,
                 n_routes=n_routes,
@@ -2025,7 +2656,7 @@ class OnlineImaginedActorCritic:
             )
             depart_t = torch.from_numpy(np.asarray(start.depart, dtype=np.float32)).to(device=self.device, dtype=z.dtype)
             context_t = torch.from_numpy(np.asarray(start.context, dtype=np.float32)).to(device=self.device, dtype=z.dtype)
-            hdv_t = torch.from_numpy(np.asarray(start.hdv_action, dtype=np.float32)).to(device=self.device, dtype=z.dtype)
+            hdv_t, hdv_context_source = self._hdv_context_for_step(start, z.dtype)
             past_packed = torch.stack(latent_history[-1:], dim=0).unsqueeze(0)
             with torch.no_grad():
                 z_next, _info = self.wm.predict_next_state_differentiable(
@@ -2034,11 +2665,17 @@ class OnlineImaginedActorCritic:
                     past_packed=past_packed.detach(),
                     depart=depart_t,
                     context=context_t,
-                    hdv_context=hdv_t if bool(getattr(self.wm, "use_hdv_context", False)) else None,
+                    hdv_context=hdv_t,
                 )
             next_obs = torch.zeros_like(obs)
             next_valid = torch.zeros((int(obs.shape[0]),), device=self.device, dtype=torch.bool)
             next_edge_tt = _edge_tt_numpy_from_z(self.wm, z_next.detach(), self.cfg)
+            global_reward = _global_network_reward_from_latent(
+                self.wm,
+                z_next,
+                next_edge_tt,
+                reward_temperature=float(self.cfg.reward_temperature),
+            )
             next_path_batch: List[List[List[int]]] = []
             next_positions: List[int] = []
             for local_i, state_i in enumerate(active_indices):
@@ -2084,6 +2721,10 @@ class OnlineImaginedActorCritic:
             next_valid_steps.append(next_valid.detach())
             entropies.append(entropy.detach())
             action_edges.append(action_edge.detach())
+            global_latent_steps.append(z.detach())
+            global_next_latent_steps.append(z_next.detach())
+            global_context_steps.append(context_t.detach())
+            global_reward_steps.append(global_reward.detach())
             z = z_next.detach()
             latent_history.append(z)
         if not obs_steps:
@@ -2111,10 +2752,99 @@ class OnlineImaginedActorCritic:
             "next_valid": torch.cat(next_valid_steps, dim=0),
             "entropy_rollout": torch.stack(entropies).mean() if entropies else torch.zeros((), device=self.device),
             "action_edges": action_edges,
+            "global_latent_states": torch.stack(global_latent_steps, dim=0),
+            "global_next_latent_states": torch.stack(global_next_latent_steps, dim=0),
+            "global_contexts": torch.stack(global_context_steps, dim=0),
+            "global_rewards": torch.stack(global_reward_steps, dim=0),
             "reward_mean": float(rewards_flat.mean().detach().cpu().item()),
             "return_mean": float(returns_flat.mean().detach().cpu().item()),
             "arrived_frac": float(min(max(arrived_frac, 0.0), 1.0)),
             "n_samples": int(torch.cat(action_steps).numel()),
+        }
+
+    def _global_critic_terms(
+        self,
+        rollout_parts: Sequence[Dict[str, Any]],
+    ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, float]]:
+        losses: List[torch.Tensor] = []
+        advantages: List[torch.Tensor] = []
+        values_all: List[torch.Tensor] = []
+        targets_all: List[torch.Tensor] = []
+        rewards_all: List[torch.Tensor] = []
+        for part in rollout_parts:
+            z = part.get("global_latent_states")
+            z_next = part.get("global_next_latent_states")
+            contexts = part.get("global_contexts")
+            global_rewards = part.get("global_rewards")
+            action_list = part.get("action_edges")
+            if not (
+                torch.is_tensor(z)
+                and torch.is_tensor(z_next)
+                and torch.is_tensor(contexts)
+                and torch.is_tensor(global_rewards)
+                and isinstance(action_list, list)
+                and action_list
+            ):
+                continue
+            actions = torch.stack(action_list, dim=0).to(device=self.device, dtype=z.dtype)
+            n = min(
+                int(z.shape[0]),
+                int(z_next.shape[0]),
+                int(contexts.shape[0]),
+                int(global_rewards.reshape(-1).shape[0]),
+                int(actions.shape[0]),
+            )
+            if n <= 0:
+                continue
+            z = z[:n]
+            z_next = z_next[:n]
+            contexts = contexts[:n]
+            actions = actions[:n]
+            global_rewards = global_rewards.reshape(-1)[:n].to(device=self.device, dtype=z.dtype)
+            values = self.global_critic(z, action=actions, context=contexts).reshape(-1)
+            with torch.no_grad():
+                next_actions = torch.cat([actions[1:], actions[-1:]], dim=0)
+                next_contexts = torch.cat([contexts[1:], contexts[-1:]], dim=0)
+                next_values = self.global_critic(
+                    z_next,
+                    action=next_actions,
+                    context=next_contexts,
+                ).reshape(-1)
+                targets = lambda_return(
+                    global_rewards,
+                    next_values,
+                    gamma=float(self.cfg.gamma),
+                    lambda_=float(self.cfg.ac_lambda),
+                ).detach()
+            losses.append(0.5 * torch.square(values - targets).mean())
+            advantages.append((targets - values.detach()).detach())
+            values_all.append(values.detach())
+            targets_all.append(targets)
+            rewards_all.append(global_rewards.detach())
+
+        if not losses:
+            zero = next(self.global_critic.parameters()).sum() * 0.0
+            return zero, torch.zeros((0,), device=self.device), {
+                "imag_global_reward_mean": 0.0,
+                "imag_global_adv_mean": 0.0,
+                "imag_global_adv_std": 0.0,
+                "imag_global_value_target_ev": 0.0,
+            }
+        values_cat = torch.cat(values_all, dim=0)
+        targets_cat = torch.cat(targets_all, dim=0)
+        advantages_cat = torch.cat(advantages, dim=0)
+        target_var = torch.var(targets_cat, unbiased=False)
+        value_ev = torch.zeros((), device=self.device, dtype=target_var.dtype)
+        if float(target_var.detach().cpu().item()) > 1e-12:
+            residual_var = torch.var(targets_cat - values_cat, unbiased=False)
+            value_ev = 1.0 - residual_var / target_var.clamp_min(1e-12)
+        return torch.stack(losses).mean(), advantages_cat, {
+            "imag_global_reward_mean": float(torch.cat(rewards_all).mean().cpu().item()),
+            "imag_global_adv_mean": float(advantages_cat.mean().cpu().item()),
+            "imag_global_adv_std": float(advantages_cat.std(unbiased=False).cpu().item())
+            if int(advantages_cat.numel()) > 1
+            else 0.0,
+            "imag_global_value_target_ev": float(value_ev.cpu().item()),
         }
 
     def update(self, replay: OnlineWorldModelReplay, rng: np.random.Generator) -> Dict[str, float]:
@@ -2124,6 +2854,7 @@ class OnlineImaginedActorCritic:
             return {"imag_loss": 0.0, "imag_n_samples": 0.0, "imag_skipped": 1.0}
         self.actor.train()
         self.critic.train()
+        self.global_critic.train()
         rows: List[Dict[str, float]] = []
         for _ in range(max(int(self.cfg.imagined_updates_per_episode), 1)):
             rollout_parts: List[Dict[str, Any]] = []
@@ -2142,6 +2873,7 @@ class OnlineImaginedActorCritic:
             group_parts: List[torch.Tensor] = []
             next_group_parts: List[torch.Tensor] = []
             vehicle_parts: List[torch.Tensor] = []
+            part_group_bases: List[int] = []
             group_offset = 0
             vehicle_offset = 0
             for p in rollout_parts:
@@ -2150,12 +2882,15 @@ class OnlineImaginedActorCritic:
                 vehicle_i = p.get("vehicle_index")
                 if torch.is_tensor(group_i) and int(group_i.numel()) > 0:
                     base = int(group_offset)
+                    part_group_bases.append(base)
                     group_parts.append(group_i.to(device=self.device, dtype=torch.long) + base)
                     max_group = int(group_i.max().detach().cpu().item())
                     if torch.is_tensor(next_group_i) and int(next_group_i.numel()) == int(group_i.numel()):
                         next_group_parts.append(next_group_i.to(device=self.device, dtype=torch.long) + base)
                         max_group = max(max_group, int(next_group_i.max().detach().cpu().item()))
                     group_offset += max_group + 1
+                else:
+                    part_group_bases.append(-1)
                 if torch.is_tensor(vehicle_i) and int(vehicle_i.numel()) > 0:
                     vehicle_parts.append(vehicle_i.to(device=self.device, dtype=torch.long) + int(vehicle_offset))
                     vehicle_offset += int(vehicle_i.max().detach().cpu().item()) + 1
@@ -2202,6 +2937,18 @@ class OnlineImaginedActorCritic:
                     gamma=float(self.cfg.gamma),
                     lambda_=float(self.cfg.ac_lambda),
                 ).detach()
+            global_value_loss, compact_global_advantage, global_stats = self._global_critic_terms(rollout_parts)
+            global_advantage = torch.zeros((max(int(group_offset), 1),), device=self.device, dtype=returns.dtype)
+            global_cursor = 0
+            for part, base in zip(rollout_parts, part_group_bases):
+                rewards_i = part.get("global_rewards")
+                n_global = int(rewards_i.reshape(-1).numel()) if torch.is_tensor(rewards_i) else 0
+                if base < 0 or n_global <= 0:
+                    continue
+                global_advantage[base : base + n_global] = compact_global_advantage[
+                    global_cursor : global_cursor + n_global
+                ]
+                global_cursor += n_global
             logits = self.actor.forward_logits(obs)
             safe_valid = valid.clone()
             has_valid = safe_valid.any(dim=-1)
@@ -2211,7 +2958,13 @@ class OnlineImaginedActorCritic:
             logp = dist.log_prob(actions)
             entropy = dist.entropy()
             values = self.critic(obs, group_index=group).reshape(-1)
-            adv = returns - values.detach()
+            vehicle_adv = returns - values.detach()
+            adv = _combine_vehicle_global_advantages(
+                vehicle_adv,
+                global_advantage,
+                group,
+                global_weight=float(self.cfg.ac_global_advantage_weight),
+            )
             if bool(self.cfg.ac_normalize_advantages) and int(adv.numel()) > 1:
                 adv = (adv - adv.mean()) / adv.std(unbiased=False).clamp_min(1e-6)
             if float(self.cfg.ac_advantage_clip) > 0:
@@ -2230,14 +2983,24 @@ class OnlineImaginedActorCritic:
                 clip_frac = torch.zeros((), device=self.device)
             value_loss = 0.5 * torch.square(values[active] - returns[active]).mean()
             entropy_mean = entropy[active].mean()
-            loss = policy_loss + float(self.cfg.value_coef) * value_loss - float(self.cfg.entropy_coef) * entropy_mean
+            loss = (
+                policy_loss
+                + float(self.cfg.value_coef) * (value_loss + global_value_loss)
+                - float(self.cfg.entropy_coef) * entropy_mean
+            )
             self.actor_optimizer.zero_grad(set_to_none=True)
             self.critic_optimizer.zero_grad(set_to_none=True)
+            self.global_critic_optimizer.zero_grad(set_to_none=True)
             loss.backward()
             actor_grad_norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), float(self.cfg.max_grad_norm))
             critic_grad_norm = torch.nn.utils.clip_grad_norm_(self.critic.parameters(), float(self.cfg.max_grad_norm))
+            global_critic_grad_norm = torch.nn.utils.clip_grad_norm_(
+                self.global_critic.parameters(),
+                float(self.cfg.max_grad_norm),
+            )
             self.actor_optimizer.step()
             self.critic_optimizer.step()
+            self.global_critic_optimizer.step()
             target_var = torch.var(returns[active].detach(), unbiased=False)
             residual_var = torch.var((returns[active] - values[active]).detach(), unbiased=False)
             value_ev = torch.zeros((), device=self.device, dtype=values.dtype)
@@ -2248,14 +3011,17 @@ class OnlineImaginedActorCritic:
                     "imag_loss": float(loss.detach().cpu().item()),
                     "imag_policy_loss": float(policy_loss.detach().cpu().item()),
                     "imag_value_loss": float(value_loss.detach().cpu().item()),
+                    "imag_global_value_loss": float(global_value_loss.detach().cpu().item()),
                     "imag_entropy": float(entropy_mean.detach().cpu().item()),
                     "imag_clip_frac": float(clip_frac.detach().cpu().item()),
                     "imag_actor_grad_norm": float(actor_grad_norm.detach().cpu().item()),
                     "imag_critic_grad_norm": float(critic_grad_norm.detach().cpu().item()),
-                    "imag_adv_std": float((returns - values.detach()).std(unbiased=False).detach().cpu().item())
-                    if int(returns.numel()) > 1
+                    "imag_global_critic_grad_norm": float(global_critic_grad_norm.detach().cpu().item()),
+                    "imag_adv_std": float(adv.std(unbiased=False).detach().cpu().item())
+                    if int(adv.numel()) > 1
                     else 0.0,
-                    "imag_adv_mean": float((returns[active] - values[active].detach()).mean().detach().cpu().item()),
+                    "imag_adv_mean": float(adv[active].mean().detach().cpu().item()),
+                    "imag_vehicle_adv_mean": float(vehicle_adv[active].mean().detach().cpu().item()),
                     "imag_value_mean": float(values[active].detach().mean().cpu().item()),
                     "imag_value_target_ev": float(value_ev.detach().cpu().item()),
                     "imag_next_valid_frac": float(next_valid.to(dtype=torch.float32).mean().detach().cpu().item()),
@@ -2266,6 +3032,7 @@ class OnlineImaginedActorCritic:
                     ),
                     "imag_n_samples": float(int(obs.shape[0])),
                     "imag_skipped": 0.0,
+                    **global_stats,
                 }
             )
         if not rows:
@@ -2276,6 +3043,7 @@ class OnlineImaginedActorCritic:
 def build_gretz_online_wm_dreamer_plan(cfg: Optional[OnlineWmDreamerConfig] = None) -> Dict[str, Any]:
     resolved = (cfg or OnlineWmDreamerConfig()).resolve()
     output_dir = Path(resolved.output_dir)
+    final_hdv_state = output_dir / "hdv_learning_state_after_online_wm_train.json"
     checkpoints = {
         int(ep): str(output_dir / "checkpoints" / f"checkpoint_ep{int(ep):05d}.pt")
         for ep in resolved.checkpoint_episodes
@@ -2295,22 +3063,37 @@ def build_gretz_online_wm_dreamer_plan(cfg: Optional[OnlineWmDreamerConfig] = No
         "hdv_state_in": resolved.hdv_state_in,
     }
     missing = [name for name, value in required_paths.items() if value and not Path(str(value)).exists()]
+    reward_mode = str(resolved.reward_mode)
+    reward_formula = (
+        "min(step_interval, current_route_remaining_tt) / (current_route_remaining_tt + elapsed_time)"
+        if reward_mode == "progress_fraction"
+        else "-min(step_interval, current_imagined_route_remaining_tt) / reward_temperature"
+    )
     return {
         "ablation": "gretz_online_wm_dreamer_actor_critic",
         "network": resolved.network_name,
         "tag": resolved.tag,
         "reward_semantics": {
-            "scope": "imagined_vehicle_critic",
+            "scope": "imagined_vehicle_and_global_critics",
             "mode": resolved.reward_mode,
             "temperature": float(resolved.reward_temperature),
-            "formula": "-min(step_interval, current_imagined_route_remaining_tt) / reward_temperature",
+            "gamma": float(resolved.gamma),
+            "formula": reward_formula,
             "source": "world_model_decoded_edge_travel_time",
             "progress_state": "per_vehicle_route_suffix_until_arrival",
+            "global_formula": "-decoded_all_vehicle_count_weighted_edge_tt / reward_temperature",
         },
         "world_model_usage": {
             "encoder_for_actor_obs": True,
             "policy_obs_mode": str(resolved.policy_obs_mode),
             "cfm_transition_in_training": True,
+            "imagined_action_mode": "stochastic_masked_sample_one_hot",
+            "real_collection_action_mode": (
+                "deterministic_argmax_one_hot"
+                if str(resolved.real_policy_route_selection) == "argmax"
+                else "stochastic_policy_sample_one_hot"
+            ),
+            "real_collection_wm_action_alignment": "same_selected_one_hot",
             "world_model_online_update": True,
             "updated_modules": ["flow_projector", "cfm_dynamics"],
             "direct_real_a2c_update": bool(resolved.direct_real_a2c_update),
@@ -2320,6 +3103,7 @@ def build_gretz_online_wm_dreamer_plan(cfg: Optional[OnlineWmDreamerConfig] = No
         "training": {
             "algorithm": "online_dreamer_world_model_actor_critic",
             "actor_from_scratch": not bool(resolved.resume_checkpoint),
+            "real_policy_route_selection": str(resolved.real_policy_route_selection),
             "episodes": int(resolved.train_episodes),
             "wm_replay_buffer_episodes": int(resolved.wm_replay_buffer_episodes),
             "wm_update_epochs": int(resolved.wm_update_epochs),
@@ -2328,6 +3112,7 @@ def build_gretz_online_wm_dreamer_plan(cfg: Optional[OnlineWmDreamerConfig] = No
             "wm_replay_require_completion": bool(resolved.wm_replay_require_completion),
             "wm_replay_completion_threshold": float(resolved.wm_replay_completion_threshold),
             "wm_batch_size": int(resolved.wm_batch_size),
+            "wm_hdv_target_source": str(resolved.wm_hdv_target_source),
             "wm_hdv_policy_target_mode": str(resolved.wm_hdv_policy_target_mode),
             "wm_hdv_policy_action_mode": str(resolved.wm_hdv_policy_action_mode),
             "wm_transition_hdv_context_mode": str(resolved.wm_transition_hdv_context_mode),
@@ -2336,12 +3121,26 @@ def build_gretz_online_wm_dreamer_plan(cfg: Optional[OnlineWmDreamerConfig] = No
             "wm_transition_hdv_action_mode": str(resolved.wm_transition_hdv_action_mode),
             "wm_transition_hdv_action_weight": float(resolved.wm_transition_hdv_action_weight),
             "wm_transition_hdv_action_scale": float(resolved.wm_transition_hdv_action_scale),
+            "imagined_hdv_context_source": str(resolved.imagined_hdv_context_source),
+            "hdv_response_predictor_enabled": bool(resolved.hdv_response_predictor_enabled),
+            "hdv_response_predictor_lr": float(resolved.hdv_response_predictor_lr),
+            "hdv_response_predictor_weight_decay": float(resolved.hdv_response_predictor_weight_decay),
+            "hdv_response_predictor_hidden_dim": int(resolved.hdv_response_predictor_hidden_dim),
+            "hdv_response_predictor_depth": int(resolved.hdv_response_predictor_depth),
+            "hdv_response_predictor_update_epochs": int(resolved.hdv_response_predictor_update_epochs),
+            "hdv_response_predictor_min_pairs": int(resolved.hdv_response_predictor_min_pairs),
+            "hdv_response_predictor_fallback": str(resolved.hdv_response_predictor_fallback),
+            "hdv_response_predictor_ckpt": str(resolved.hdv_response_predictor_ckpt),
+            "hdv_response_predictor_progress_denominator": int(resolved.hdv_response_predictor_progress_denominator),
             "imag_horizon": int(resolved.imag_horizon),
             "imagined_updates_per_episode": int(resolved.imagined_updates_per_episode),
             "imagined_update_passes_per_collect": int(resolved.imagined_update_passes_per_collect),
             "imagined_rollouts_per_update": int(resolved.imagined_rollouts_per_update),
             "min_replay_episodes_before_actor": int(resolved.min_replay_episodes_before_actor),
             "ac_lambda": float(resolved.ac_lambda),
+            "global_critic_enabled": True,
+            "ac_global_advantage_weight": float(resolved.ac_global_advantage_weight),
+            "actor_advantage": "vehicle_plus_global_lambda_advantage",
             "actor_lr": float(resolved.lr),
             "critic_lr": float(resolved.critic_lr),
             "value_coef": float(resolved.value_coef),
@@ -2354,6 +3153,7 @@ def build_gretz_online_wm_dreamer_plan(cfg: Optional[OnlineWmDreamerConfig] = No
             "max_grad_norm": float(resolved.max_grad_norm),
             "wm_prediction_diagnostic_every_episodes": int(resolved.wm_prediction_diagnostic_every_episodes),
             "wm_prediction_diagnostic_max_steps": int(resolved.wm_prediction_diagnostic_max_steps),
+            "wm_hdv_pressure_trace_enabled": bool(resolved.wm_hdv_pressure_trace_enabled),
             "actor_update_schedule": str(resolved.actor_update_schedule),
             "actor_update_min_passes": int(resolved.actor_update_min_passes),
             "actor_update_max_passes": int(resolved.actor_update_max_passes),
@@ -2371,6 +3171,14 @@ def build_gretz_online_wm_dreamer_plan(cfg: Optional[OnlineWmDreamerConfig] = No
         },
         "evaluation": {
             "episodes_per_checkpoint": int(resolved.eval_episodes),
+            "action_mode": (
+                "deterministic_masked_argmax"
+                if str(resolved.eval_policy_route_selection) == "argmax"
+                else "stochastic_masked_sample"
+            ),
+            "policy_route_selection": str(resolved.eval_policy_route_selection),
+            "hdv_state_mode": "final_online_training_state",
+            "hdv_state_path": str(final_hdv_state),
             "eval_dirs": eval_dirs,
             "uses_updated_world_model_checkpoints": True,
         },
@@ -2429,11 +3237,23 @@ class OnlineWmDreamerTrainer:
             n_attention_heads=int(self.cfg.critic_attention_heads),
             output_dim=1,
             arrival_output_dim=int(self.cfg.n_routes)
-            if bool(getattr(self.cfg, "vehicle_arrival_head_enabled", True))
+            if bool(getattr(self.cfg, "vehicle_arrival_head_enabled", False))
             else 0,
+        ).to(self.device)
+        self.global_critic = CentralizedLatentValueCritic(
+            d_spatial=int(self.wm.d_spatial),
+            action_dim=int(self.wm.n_edges),
+            context_dim=3,
+            hidden_dim=int(self.cfg.hidden_dim),
+            n_hidden_layers=int(self.cfg.n_hidden_layers),
+            aggregation="mean",
         ).to(self.device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=float(self.cfg.lr))
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=float(self.cfg.critic_lr))
+        self.global_critic_optimizer = torch.optim.Adam(
+            self.global_critic.parameters(),
+            lr=float(self.cfg.critic_lr),
+        )
         self.wm_updater = OnlineWorldModelUpdater(self.wm, self.cfg, self.device)
         self.policy_obs_wm = self._load_world_model() if bool(self.cfg.freeze_policy_obs_world_model) else self.wm
         self.policy_obs_wm.eval()
@@ -2444,16 +3264,130 @@ class OnlineWmDreamerTrainer:
             wm=self.wm,
             actor=self.actor,
             critic=self.critic,
+            global_critic=self.global_critic,
             actor_optimizer=self.actor_optimizer,
             critic_optimizer=self.critic_optimizer,
+            global_critic_optimizer=self.global_critic_optimizer,
             cfg=self.cfg,
             device=self.device,
             obs_dim=int(self.obs_dim),
         )
-        self.replay = OnlineWorldModelReplay(int(self.cfg.wm_replay_buffer_episodes))
+        hdv_response_ckpt = self._resolve_hdv_response_predictor_ckpt()
+        self.hdv_response_predictor_ckpt_loaded = ""
+        self.hdv_response_model: Optional[CausalHdvResponseModel] = None
+        if bool(self.cfg.hdv_response_predictor_enabled) or hdv_response_ckpt is not None:
+            self.hdv_response_model = CausalHdvResponseModel(
+                n_edges=int(self.wm.n_edges),
+                cfg=self.cfg,
+                device=self.device,
+            )
+            if hdv_response_ckpt is not None:
+                loaded_state = self.hdv_response_model.load_checkpoint(hdv_response_ckpt)
+                self.hdv_response_predictor_ckpt_loaded = str(hdv_response_ckpt)
+                print(
+                    "[online-wm-dreamer] loaded HDV response predictor: "
+                    f"{hdv_response_ckpt} pairs={int(loaded_state.get('trained_pairs', 0) or 0)} "
+                    f"progress_den={int(loaded_state.get('progress_denominator', 0) or 0)}",
+                    flush=True,
+                )
+        self.replay = OnlineWorldModelReplay(
+            int(self.cfg.wm_replay_buffer_episodes),
+            hdv_target_source=str(self.cfg.wm_hdv_target_source),
+        )
         self.collector: Optional[OnlineWmDreamerCollector] = None
         self._dynamics_checkpoint_state = torch.load(str(self.cfg.dynamics_ckpt), map_location="cpu", weights_only=False)
         self.loaded_resume_episode = self._load_resume_checkpoint()
+
+    def _resolve_hdv_response_predictor_ckpt(self) -> Optional[Path]:
+        raw = str(getattr(self.cfg, "hdv_response_predictor_ckpt", "") or "").strip()
+        explicit = bool(raw)
+        if not raw:
+            post_state_path = str(getattr(self.cfg, "post_mutation_state_in", "") or "").strip()
+            if post_state_path:
+                state_path = _resolve_path(post_state_path)
+                state = _load_json_object(state_path)
+                if isinstance(state, dict):
+                    raw = str(state.get("hdv_response_predictor_ref", "") or "").strip()
+                    if not raw:
+                        refs = state.get("artifact_refs", {})
+                        if isinstance(refs, dict):
+                            raw = str(refs.get("hdv_response_predictor_ckpt", "") or "").strip()
+        if not raw:
+            return None
+        path = _resolve_path(raw)
+        if not path.exists():
+            if explicit:
+                raise FileNotFoundError(f"HDV response predictor checkpoint not found: {path}")
+            return None
+        return path
+
+    def _save_hdv_pressure_trace(self, episode: int, steps: Sequence[OnlineWorldModelStep]) -> Optional[Path]:
+        if not bool(getattr(self.cfg, "wm_hdv_pressure_trace_enabled", True)) or not steps:
+            return None
+        trace_dir = self.output_dir / "hdv_edge_pressure_traces"
+        trace_dir.mkdir(parents=True, exist_ok=True)
+        hdv_stack = _stack_np([s.hdv_action for s in steps]).clip(min=0.0).astype(np.float32)
+        hdv_mean = hdv_stack.mean(axis=0).astype(np.float32) if hdv_stack.size else np.zeros((0,), dtype=np.float32)
+        denom = float(hdv_mean.sum())
+        if denom > 1e-8:
+            hdv_mean = hdv_mean / denom
+        target_replay = OnlineWorldModelReplay(
+            1,
+            hdv_target_source=str(getattr(self.cfg, "wm_hdv_target_source", "episode_mean_current_occupancy")),
+        )
+        if str(target_replay.hdv_target_source) in {
+            "static_edge_demand",
+            "static_episode_edge_demand",
+            "episode_static_edge_demand",
+        }:
+            hdv_target = target_replay._episode_static_edge_demand(steps)
+            if hdv_target is None:
+                hdv_target = target_replay._episode_current_occupancy_mean(steps)
+        else:
+            hdv_target = target_replay._episode_current_occupancy_mean(steps)
+        if hdv_target is None:
+            hdv_target = np.zeros_like(hdv_mean, dtype=np.float32)
+        hdv_static_stack = _stack_np(
+            [
+                s.hdv_static_edge_demand
+                if s.hdv_static_edge_demand is not None
+                else np.zeros_like(s.hdv_action, dtype=np.float32)
+                for s in steps
+            ]
+        ).astype(np.float32)
+        hdv_static_mean = (
+            hdv_static_stack.clip(min=0.0).mean(axis=0).astype(np.float32)
+            if hdv_static_stack.size
+            else np.zeros_like(hdv_target, dtype=np.float32)
+        )
+        static_denom = float(hdv_static_mean.sum())
+        if static_denom > 1e-8:
+            hdv_static_mean = hdv_static_mean / static_denom
+        edge_registry = getattr(getattr(self, "collector", None), "_edge_registry", None)
+        edge_ids = np.asarray(list(getattr(edge_registry, "edge_ids", [])), dtype=str)
+        path = trace_dir / f"episode_{int(episode):05d}.npz"
+        np.savez_compressed(
+            path,
+            episode=np.asarray([int(episode)], dtype=np.int64),
+            decision_idx=np.asarray([int(s.decision_idx) for s in steps], dtype=np.int64),
+            sim_step=np.asarray([int(s.sim_step) for s in steps], dtype=np.int64),
+            hdv_action=hdv_stack,
+            hdv_episode_mean=hdv_mean,
+            hdv_target=np.asarray(hdv_target, dtype=np.float32),
+            hdv_static_edge_demand=hdv_static_stack,
+            hdv_static_edge_demand_mean=hdv_static_mean,
+            hdv_target_source=np.asarray(
+                [str(getattr(self.cfg, "wm_hdv_target_source", "episode_mean_current_occupancy"))],
+                dtype=str,
+            ),
+            av_action=_stack_np([s.av_action for s in steps]).astype(np.float32),
+            flow=_stack_np([s.flow for s in steps]).astype(np.float32),
+            next_flow=_stack_np([s.next_flow for s in steps]).astype(np.float32),
+            depart=_stack_np([s.depart for s in steps]).astype(np.float32),
+            context=_stack_np([s.context for s in steps]).astype(np.float32),
+            edge_ids=edge_ids,
+        )
+        return path
 
     def _episode_allowed_for_wm_replay(self, row: Dict[str, Any]) -> bool:
         if not bool(self.cfg.wm_replay_require_completion):
@@ -2465,6 +3399,80 @@ class OnlineWmDreamerTrainer:
     def _wm_update_due(self, episode: int) -> bool:
         every = max(int(self.cfg.wm_update_every_episodes), 1)
         return int(episode) % every == 0
+
+    @staticmethod
+    def _edge_distribution_tv(pred: Optional[np.ndarray], target: Optional[np.ndarray]) -> float:
+        if pred is None or target is None:
+            return 0.0
+        p = np.asarray(pred, dtype=np.float32).reshape(-1).clip(min=0.0)
+        q = np.asarray(target, dtype=np.float32).reshape(-1).clip(min=0.0)
+        if int(p.size) != int(q.size) or int(p.size) <= 0:
+            return 0.0
+        p_sum = float(p.sum())
+        q_sum = float(q.sum())
+        if p_sum > 1e-8:
+            p = p / p_sum
+        if q_sum > 1e-8:
+            q = q / q_sum
+        return float(0.5 * np.abs(p - q).sum())
+
+    def _episode_static_hdv_target(self, steps: Sequence[OnlineWorldModelStep]) -> Optional[np.ndarray]:
+        static_rows = [
+            np.asarray(step.hdv_static_edge_demand, dtype=np.float32)
+            for step in steps
+            if step.hdv_static_edge_demand is not None
+        ]
+        if static_rows:
+            arr = np.mean(np.stack(static_rows, axis=0), axis=0).astype(np.float32)
+        else:
+            hdv_rows = [np.asarray(step.hdv_action, dtype=np.float32) for step in steps]
+            if not hdv_rows:
+                return None
+            arr = np.mean(np.stack(hdv_rows, axis=0), axis=0).astype(np.float32)
+        arr = arr.clip(min=0.0)
+        denom = float(arr.sum())
+        if denom > 1e-8:
+            arr = arr / denom
+        return arr.astype(np.float32)
+
+    def _predict_hdv_response_for_episode(
+        self,
+        episode: int,
+        steps: Sequence[OnlineWorldModelStep],
+    ) -> Tuple[Optional[np.ndarray], str, Dict[str, float]]:
+        metrics: Dict[str, float] = {
+            "hdv_response_pred_enabled": float(bool(self.cfg.hdv_response_predictor_enabled)),
+            "hdv_response_pred_source_code": 0.0,
+            "hdv_response_pred_tv": 0.0,
+        }
+        if self.hdv_response_model is None:
+            return None, "", metrics
+        pred, pred_metrics = self.hdv_response_model.predict_for_next_episode(
+            self.replay.summaries,
+            episode=int(episode),
+        )
+        metrics.update(pred_metrics)
+        source_code = float(metrics.get("hdv_response_pred_source_code", 0.0))
+        if source_code == 2.0:
+            source = "causal_response_predictor"
+        elif source_code == 1.5:
+            source = "fallback_prev_hdv"
+        elif source_code == 1.25:
+            source = "fallback_zero"
+        else:
+            source = ""
+        target = self._episode_static_hdv_target(steps)
+        metrics["hdv_response_pred_tv"] = self._edge_distribution_tv(pred, target)
+        return pred, source, metrics
+
+    def _update_hdv_response_predictor(self) -> Dict[str, float]:
+        if self.hdv_response_model is None:
+            return {
+                "hdv_response_loss": 0.0,
+                "hdv_response_updates": 0.0,
+                "hdv_response_pairs": 0.0,
+            }
+        return self.hdv_response_model.update(self.replay.summaries)
 
     def _skipped_wm_update(self, *, reason: str) -> Dict[str, float]:
         return {
@@ -2747,6 +3755,9 @@ class OnlineWmDreamerTrainer:
         critic_state = state.get("critic") or state.get("vehicle_critic")
         if critic_state is not None:
             self.critic.load_state_dict(critic_state, strict=False)
+        global_critic_state = state.get("global_critic")
+        if global_critic_state is not None:
+            self.global_critic.load_state_dict(global_critic_state, strict=True)
         if "flow_projector" in state:
             self.wm.flow_projector.load_state_dict(state["flow_projector"], strict=False)
         if "dynamics" in state:
@@ -2755,8 +3766,18 @@ class OnlineWmDreamerTrainer:
             self.actor_optimizer.load_state_dict(state["actor_optimizer"])
         if "critic_optimizer" in state:
             self.critic_optimizer.load_state_dict(state["critic_optimizer"])
+        if "global_critic_optimizer" in state:
+            self.global_critic_optimizer.load_state_dict(state["global_critic_optimizer"])
         if "wm_optimizer" in state:
             self.wm_updater.optimizer.load_state_dict(state["wm_optimizer"])
+        if self.hdv_response_model is not None:
+            hdv_response_state = state.get("hdv_response_predictor")
+            if hdv_response_state is not None:
+                self.hdv_response_model.model.load_state_dict(hdv_response_state, strict=True)
+            hdv_response_optimizer_state = state.get("hdv_response_optimizer")
+            if hdv_response_optimizer_state is not None:
+                self.hdv_response_model.optimizer.load_state_dict(hdv_response_optimizer_state)
+            self.hdv_response_model.trained_pairs = int(state.get("hdv_response_trained_pairs", 0) or 0)
         episode = int(state.get("episode", 0) or 0)
         print(f"[online-wm-dreamer] resumed from {path} at episode {episode}", flush=True)
         return episode
@@ -2882,7 +3903,18 @@ class OnlineWmDreamerTrainer:
                 "wm_dynamics_ckpt": str(dynamics_path),
                 "actor_optimizer": self.actor_optimizer.state_dict(),
                 "critic_optimizer": self.critic_optimizer.state_dict(),
+                "global_critic": self.global_critic.state_dict(),
+                "global_critic_optimizer": self.global_critic_optimizer.state_dict(),
                 "wm_optimizer": self.wm_updater.optimizer.state_dict(),
+                "hdv_response_predictor": None
+                if self.hdv_response_model is None
+                else self.hdv_response_model.model.state_dict(),
+                "hdv_response_optimizer": None
+                if self.hdv_response_model is None
+                else self.hdv_response_model.optimizer.state_dict(),
+                "hdv_response_trained_pairs": 0
+                if self.hdv_response_model is None
+                else int(self.hdv_response_model.trained_pairs),
             }
         )
         cfg_dict = dict(state.get("cfg", {}))
@@ -2899,6 +3931,14 @@ class OnlineWmDreamerTrainer:
                 "dreamer_route_cost_reward_progress_state": "per_vehicle_route_suffix_until_arrival",
                 "dreamer_vehicle_return_target": "lambda_return_with_next_state_bootstrap",
                 "dreamer_vehicle_return_lambda": float(self.cfg.ac_lambda),
+                "dreamer_global_critic_enabled": True,
+                "dreamer_global_advantage_weight": float(self.cfg.ac_global_advantage_weight),
+                "dreamer_actor_advantage": "vehicle_plus_global_lambda_advantage",
+                "imagined_hdv_context_source": str(self.cfg.imagined_hdv_context_source),
+                "hdv_response_predictor_enabled": bool(self.cfg.hdv_response_predictor_enabled),
+                "hdv_response_predictor_fallback": str(self.cfg.hdv_response_predictor_fallback),
+                "hdv_response_predictor_ckpt": str(self.cfg.hdv_response_predictor_ckpt),
+                "hdv_response_predictor_loaded_ckpt": str(self.hdv_response_predictor_ckpt_loaded),
             }
         )
         state["cfg"] = cfg_dict
@@ -2922,6 +3962,9 @@ class OnlineWmDreamerTrainer:
             real_a2c_replay_max_age = max(int(self.cfg.replay_actor_max_age_episodes), 1)
             for ep in range(start_episode + 1, int(self.cfg.train_episodes) + 1):
                 samples, row, wm_steps = collector.run_train_episode(ep, int(self.rollout_max_steps))
+                trace_path = self._save_hdv_pressure_trace(ep, wm_steps)
+                if trace_path is not None:
+                    row["hdv_pressure_trace"] = str(trace_path)
                 real_a2c_replay.append(list(samples))
                 if len(real_a2c_replay) > real_a2c_replay_capacity:
                     real_a2c_replay = real_a2c_replay[-real_a2c_replay_capacity:]
@@ -2940,11 +3983,29 @@ class OnlineWmDreamerTrainer:
                 ]
                 row["wm_replay_accepted"] = int(self._episode_allowed_for_wm_replay(row))
                 if int(row["wm_replay_accepted"]):
-                    self.replay.append_episode(wm_steps)
+                    hdv_pred, hdv_pred_source, hdv_pred_metrics = self._predict_hdv_response_for_episode(ep, wm_steps)
+                    row.update(hdv_pred_metrics)
+                    self.replay.append_episode(
+                        wm_steps,
+                        predicted_hdv_edge_demand=hdv_pred,
+                        prediction_source=hdv_pred_source,
+                    )
                     row["wm_replay_skip_reason"] = ""
                 else:
+                    row.update(
+                        {
+                            "hdv_response_pred_enabled": float(bool(self.cfg.hdv_response_predictor_enabled)),
+                            "hdv_response_pred_source_code": 0.0,
+                            "hdv_response_pred_tv": 0.0,
+                        }
+                    )
                     row["wm_replay_skip_reason"] = "incomplete_episode"
                 per_pass_updates: List[Dict[str, float]] = []
+                if int(row["wm_replay_accepted"]):
+                    hdv_response_update = self._update_hdv_response_predictor()
+                    hdv_response_update["update_phase"] = 0.25
+                    hdv_response_update["update_pass"] = 0.0
+                    per_pass_updates.append(hdv_response_update)
                 real_a2c_update = self._direct_real_a2c_update(
                     real_a2c_samples,
                     replay_episodes=len(real_a2c_batches),
@@ -3029,6 +4090,8 @@ class OnlineWmDreamerTrainer:
                     f"replay_eps={self.replay.episode_count()} "
                     f"wm_skip={str(update.get('wm_skip_reason', ''))} "
                     f"wm_loss={update.get('wm_loss', 0.0):.4f} "
+                    f"hdv_pred_tv={row.get('hdv_response_pred_tv', 0.0):.4f} "
+                    f"hdv_pairs={int(update.get('hdv_response_pairs', 0.0))} "
                     f"real_ac={int(update.get('real_a2c_enabled', 0.0))}:{int(update.get('real_a2c_skipped', 1.0))} "
                     f"real_g={update.get('real_a2c_actor_grad_norm', 0.0):.4f} "
                     f"real_adv={update.get('real_a2c_adv_std', 0.0):.4f} "
@@ -3038,12 +4101,15 @@ class OnlineWmDreamerTrainer:
                     f"imag_loss={update.get('imag_loss', 0.0):.4f} "
                     f"imag_reward={update.get('imag_reward_mean', 0.0):.4f} "
                     f"imag_return={update.get('imag_return_mean', 0.0):.4f} "
+                    f"global_reward={update.get('imag_global_reward_mean', 0.0):.4f} "
+                    f"global_adv={update.get('imag_global_adv_mean', 0.0):.4f} "
                     f"imag_arrived={update.get('imag_arrived_frac', 0.0):.3f} "
                     f"entropy={update.get('imag_entropy', 0.0):.4f} "
                     f"clip={update.get('imag_clip_frac', 0.0):.3f} "
                     f"adv_std={update.get('imag_adv_std', 0.0):.4f} "
                     f"actor_g={update.get('imag_actor_grad_norm', 0.0):.4f} "
-                    f"value_ev={update.get('imag_value_target_ev', 0.0):.4f}",
+                    f"value_ev={update.get('imag_value_target_ev', 0.0):.4f} "
+                    f"global_ev={update.get('imag_global_value_target_ev', 0.0):.4f}",
                     flush=True,
                 )
                 if ep in ckpt_eps:
@@ -3073,7 +4139,8 @@ class OnlineWmDreamerTrainer:
                 getattr(collector, "_hdv_route_costs", None),
             ),
         )
-        _save_hdv_learning_state(self.output_dir / "hdv_learning_state_after_online_wm_train.json", latest_hdv_state)
+        final_hdv_state = self.output_dir / "hdv_learning_state_after_online_wm_train.json"
+        _save_hdv_learning_state(final_hdv_state, latest_hdv_state)
         summary = {
             "ablation": "gretz_online_wm_dreamer_actor_critic",
             "config": _jsonable_config(self.cfg),
@@ -3081,6 +4148,8 @@ class OnlineWmDreamerTrainer:
             "checkpoint_paths": checkpoint_paths,
             "train_episode_csv": str(self.output_dir / "online_wm_train_episodes.csv"),
             "train_update_csv": str(self.output_dir / "online_wm_train_updates.csv"),
+            "final_hdv_state": str(final_hdv_state),
+            "hdv_response_predictor_loaded_ckpt": str(self.hdv_response_predictor_ckpt_loaded),
             "elapsed_seconds": float(time.time() - start),
         }
         with (self.output_dir / "online_wm_train_summary.json").open("w", encoding="utf-8") as f:
@@ -3102,6 +4171,11 @@ def build_eval_command(
         projector_path = str(state.get("wm_projector_ckpt", projector_path))
         dynamics_path = str(state.get("wm_dynamics_ckpt", dynamics_path))
     cmd = build_no_cfm_eval_command(cfg=cfg, checkpoint_path=checkpoint_path, results_dir=results_dir)
+    route_selection_flag = "--av_policy_route_selection"
+    if route_selection_flag in cmd:
+        route_selection_idx = cmd.index(route_selection_flag)
+        if route_selection_idx + 1 < len(cmd):
+            cmd[route_selection_idx + 1] = str(cfg.eval_policy_route_selection)
     for flag, value in (("--projector_ckpt", projector_path), ("--dynamics_ckpt", dynamics_path)):
         if flag in cmd:
             idx = cmd.index(flag)

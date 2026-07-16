@@ -1,0 +1,28 @@
+# UrbanDreamer runtime and test environment.
+# Tested on Linux x86_64 with CPython 3.12 and an NVIDIA CUDA-capable driver.
+# eclipse-sumo supplies the SUMO binaries; no separate system SUMO install is needed.
+
+# Numerical and experiment utilities
+numpy==2.3.5
+pandas==2.3.3
+matplotlib==3.10.7
+tqdm==4.67.1
+wandb==0.23.1
+
+# Learning stack. Keep TorchRL and TensorDict aligned with routerlurb.
+torch==2.10.0
+tensordict==0.7.0
+torchrl==0.7.0
+routerlurb==1.0.0
+
+# Behavior-sensitive route generation dependencies
+janux==1.0.0
+networkx==3.6
+
+# SUMO runtime and Python interfaces
+eclipse-sumo==1.25.0
+sumolib==1.25.0
+traci==1.21.0
+
+# Repository test runner
+pytest==9.0.2

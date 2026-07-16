@@ -107,6 +107,32 @@ def _append_vehicle_context_features(
     return np.concatenate([obs_vehicle_np, ctx_tiled], axis=1)
 
 
+def _uniform_unique_route_probs(
+    routes: Sequence[Sequence[str]],
+    *,
+    n_routes: int,
+) -> np.ndarray:
+    """Assign equal probability to physical paths despite duplicate action slots."""
+    K = max(int(n_routes), 0)
+    probs = np.zeros((K,), dtype=np.float32)
+    active = min(len(routes), K)
+    if active <= 0:
+        return probs
+
+    groups: Dict[Tuple[str, ...], List[int]] = {}
+    for idx in range(active):
+        groups.setdefault(tuple(str(edge) for edge in routes[idx]), []).append(idx)
+    if not groups:
+        probs[:active] = 1.0 / float(active)
+        return probs
+
+    group_mass = 1.0 / float(len(groups))
+    for indices in groups.values():
+        slot_mass = group_mass / float(len(indices))
+        probs[np.asarray(indices, dtype=np.int64)] = slot_mass
+    return probs
+
+
 class PolicyGuidedCollectorEval(DataCollector):
     """SUMO evaluator that reuses the DataCollector rollout loop."""
 
@@ -181,7 +207,7 @@ class PolicyGuidedCollectorEval(DataCollector):
             for k, v in dict(av_od_route_overrides or {}).items()
         }
         self._av_policy_route_selection = str(av_policy_route_selection or "auto").strip().lower()
-        if self._av_policy_route_selection not in {"auto", "argmax", "sample", "quota"}:
+        if self._av_policy_route_selection not in {"auto", "argmax", "sample", "quota", "uniform_unique"}:
             raise ValueError(f"Unsupported av_policy_route_selection={av_policy_route_selection!r}")
         self._av_policy_sample_temperature = max(float(av_policy_sample_temperature), 1e-6)
         self._av_policy_confidence_gate_source = str(
@@ -666,6 +692,10 @@ class PolicyGuidedCollectorEval(DataCollector):
         if not path_batch:
             return {}
 
+        selection_mode = str(self._av_policy_route_selection)
+        if selection_mode == "auto":
+            selection_mode = "argmax" if self._deterministic_eval else "sample"
+
         candidate_unique_mean, candidate_unique_min, candidate_unique_max = _route_batch_uniqueness_summary(
             route_batch
         )
@@ -682,9 +712,6 @@ class PolicyGuidedCollectorEval(DataCollector):
         if self._vehicle_obs_include_fleet_pressure:
             if build_vehicle_fleet_pressure_obs_features is None:
                 return {}
-            eval_selection_mode = str(self._av_policy_route_selection)
-            if eval_selection_mode == "auto":
-                eval_selection_mode = "argmax" if self._deterministic_eval else "sample"
             fleet_counts_np = np.zeros((int(self.n_routes),), dtype=np.float32)
             fleet_pressure_np = np.zeros((len(getattr(self._edge_registry, "edge_ids", [])),), dtype=np.float32)
             av_frac_rows: List[np.ndarray] = []
@@ -712,12 +739,21 @@ class PolicyGuidedCollectorEval(DataCollector):
                         obs_i,
                         deterministic=self._deterministic_eval,
                     ).detach().cpu().numpy().astype(np.float32)[0]
-                probs_i = _temperature_adjust_probs(
-                    frac_i,
-                    self._av_policy_sample_temperature,
-                    self.n_routes,
+                if selection_mode == "uniform_unique":
+                    frac_i = _uniform_unique_route_probs(
+                        route_batch[i],
+                        n_routes=self.n_routes,
+                    )
+                probs_i = (
+                    frac_i
+                    if selection_mode == "uniform_unique"
+                    else _temperature_adjust_probs(
+                        frac_i,
+                        self._av_policy_sample_temperature,
+                        self.n_routes,
+                    )
                 )
-                if eval_selection_mode == "sample":
+                if selection_mode in {"sample", "uniform_unique"}:
                     selected_i = int(rng.choice(self.n_routes, p=probs_i))
                 else:
                     selected_i = int(np.argmax(probs_i))
@@ -748,11 +784,13 @@ class PolicyGuidedCollectorEval(DataCollector):
                     deterministic=self._deterministic_eval,
                 )
             av_fracs_np = av_fracs.detach().cpu().numpy().astype(np.float32)
+            if selection_mode == "uniform_unique":
+                av_fracs_np = np.stack([
+                    _uniform_unique_route_probs(routes, n_routes=self.n_routes)
+                    for routes in route_batch
+                ], axis=0).astype(np.float32)
 
         baseline_route_indices = np.zeros((len(active_ids),), dtype=np.int64)
-        selection_mode = str(self._av_policy_route_selection)
-        if selection_mode == "auto":
-            selection_mode = "argmax" if self._deterministic_eval else "sample"
         if selection_mode == "quota":
             av_fracs_for_selection = np.stack([
                 _temperature_adjust_probs(row, self._av_policy_sample_temperature, self.n_routes)
@@ -771,12 +809,16 @@ class PolicyGuidedCollectorEval(DataCollector):
                 baseline_route_indices[i] = int(np.clip(baseline_route_indices[i], 0, len(route_batch[i]) - 1))
         else:
             for i in range(len(active_ids)):
-                probs = _temperature_adjust_probs(
-                    av_fracs_np[i],
-                    self._av_policy_sample_temperature,
-                    self.n_routes,
+                probs = (
+                    av_fracs_np[i]
+                    if selection_mode == "uniform_unique"
+                    else _temperature_adjust_probs(
+                        av_fracs_np[i],
+                        self._av_policy_sample_temperature,
+                        self.n_routes,
+                    )
                 )
-                if selection_mode == "sample":
+                if selection_mode in {"sample", "uniform_unique"}:
                     ridx = int(rng.choice(self.n_routes, p=probs))
                 else:
                     ridx = int(np.argmax(probs))

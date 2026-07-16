@@ -3,17 +3,19 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from ablation.online_no_cfm_actor_critic import (  # noqa: E402
+from baseline.online_actor_critic import (  # noqa: E402
     OnlineDecisionSample,
     OnlineNoCfmCollector,
     OnlineNoCfmConfig,
+    _select_real_policy_route_index,
     build_eval_command,
-    build_gretz_ablation_plan,
+    build_online_ac_plan,
     compute_a2c_loss,
     discounted_vehicle_returns,
     save_policy_checkpoint,
@@ -28,10 +30,10 @@ from dreamer4.urban_routing.dreamer_actor_critic import (  # noqa: E402
 from scripts.eval_sumo_policy import load_policy  # noqa: E402
 
 
-def test_gretz_ablation_plan_resolves_defaults():
+def test_legacy_gretz_baseline_plan_resolves_defaults():
     cfg = OnlineNoCfmConfig(train_episodes=100, eval_episodes=3).resolve()
 
-    plan = build_gretz_ablation_plan(cfg)
+    plan = build_online_ac_plan(cfg)
 
     assert plan["network"] == "gretz_armainvilliers"
     assert plan["training"]["episodes"] == 100
@@ -46,9 +48,51 @@ def test_gretz_ablation_plan_resolves_defaults():
     assert cfg.incident_start == 500.0
     assert cfg.incident_end == 2500.0
     assert cfg.incident_speed == 0.1
+    assert cfg.real_policy_route_selection == "sample"
+    assert plan["training"]["real_policy_route_selection"] == "sample"
 
 
-def test_gretz_ablation_plan_exposes_resume_settings(tmp_path):
+def test_real_policy_route_selection_uses_argmax_without_rng():
+    class FailingRng:
+        def choice(self, *_args, **_kwargs):
+            raise AssertionError("deterministic route selection must not sample")
+
+    selected = _select_real_policy_route_index(
+        np.asarray([0.1, 0.7, 0.2], dtype=np.float32),
+        mode="argmax",
+        rng=FailingRng(),
+    )
+
+    assert selected == 1
+
+
+def test_real_policy_route_selection_keeps_explicit_sampling_mode():
+    class FixedRng:
+        def __init__(self):
+            self.received = None
+
+        def choice(self, n, *, p):
+            self.received = (n, np.asarray(p))
+            return 0
+
+    rng = FixedRng()
+    selected = _select_real_policy_route_index(
+        np.asarray([0.1, 0.7, 0.2], dtype=np.float32),
+        mode="sample",
+        rng=rng,
+    )
+
+    assert selected == 0
+    assert rng.received[0] == 3
+    np.testing.assert_allclose(rng.received[1], np.asarray([0.1, 0.7, 0.2], dtype=np.float32))
+
+
+def test_real_policy_route_selection_rejects_unknown_mode():
+    with pytest.raises(ValueError, match="real_policy_route_selection"):
+        OnlineNoCfmConfig(real_policy_route_selection="roulette").resolve()
+
+
+def test_online_ac_plan_exposes_resume_settings(tmp_path):
     ckpt = tmp_path / "checkpoint_ep00100.pt"
     ckpt.write_bytes(b"placeholder")
     cfg = OnlineNoCfmConfig(
@@ -58,7 +102,7 @@ def test_gretz_ablation_plan_exposes_resume_settings(tmp_path):
         resume_start_episode=100,
     ).resolve()
 
-    plan = build_gretz_ablation_plan(cfg)
+    plan = build_online_ac_plan(cfg)
 
     assert plan["training"]["episodes"] == 400
     assert plan["training"]["resume_checkpoint"] == str(ckpt)
@@ -66,7 +110,7 @@ def test_gretz_ablation_plan_exposes_resume_settings(tmp_path):
     assert set(plan["training"]["checkpoint_paths"]) == {200, 300, 400}
 
 
-def test_gretz_ablation_plan_exposes_replay_settings(tmp_path):
+def test_online_ac_plan_exposes_replay_settings(tmp_path):
     cfg = OnlineNoCfmConfig(
         output_dir=str(tmp_path),
         replay_buffer_episodes=8,
@@ -75,7 +119,7 @@ def test_gretz_ablation_plan_exposes_replay_settings(tmp_path):
         return_horizon_steps=8,
     ).resolve()
 
-    plan = build_gretz_ablation_plan(cfg)
+    plan = build_online_ac_plan(cfg)
 
     assert plan["training"]["replay_buffer_episodes"] == 8
     assert plan["training"]["replay_update_epochs"] == 2
@@ -85,7 +129,7 @@ def test_gretz_ablation_plan_exposes_replay_settings(tmp_path):
     assert plan["world_model_usage"]["wm_rollout_or_rerank_in_training"] is False
 
 
-def test_gretz_ablation_plan_exposes_capped_step_cost_reward(tmp_path):
+def test_online_ac_plan_exposes_capped_step_cost_reward(tmp_path):
     cfg = OnlineNoCfmConfig(
         output_dir=str(tmp_path),
         reward_mode="capped_step_cost",
@@ -93,7 +137,7 @@ def test_gretz_ablation_plan_exposes_capped_step_cost_reward(tmp_path):
         return_horizon_steps=0,
     ).resolve()
 
-    plan = build_gretz_ablation_plan(cfg)
+    plan = build_online_ac_plan(cfg)
 
     assert plan["reward_semantics"]["mode"] == "capped_step_cost"
     assert plan["reward_semantics"]["temperature"] == 60.0
@@ -374,7 +418,11 @@ def test_checkpoint_writer_is_eval_loader_compatible(tmp_path):
 
 
 def test_eval_command_forces_no_rerank_and_policy_only(tmp_path):
-    cfg = OnlineNoCfmConfig(output_dir=str(tmp_path), eval_python="python").resolve()
+    cfg = OnlineNoCfmConfig(
+        output_dir=str(tmp_path),
+        eval_python="python",
+        max_steps_per_episode=3600,
+    ).resolve()
 
     cmd = build_eval_command(cfg=cfg, checkpoint_path=tmp_path / "ckpt.pt", results_dir=tmp_path / "eval")
 
@@ -383,10 +431,11 @@ def test_eval_command_forces_no_rerank_and_policy_only(tmp_path):
     assert "--av_route_cost_policy" in cmd
     assert cmd[cmd.index("--av_route_cost_policy") + 1] == "none"
     assert "--policy_ckpt" in cmd
+    assert cmd[cmd.index("--max_steps_per_episode") + 1] == "3600"
 
 
 def test_no_cfm_runner_dry_run_accepts_sumo_extra_args(tmp_path):
-    from ablation.run_gretz_online_no_cfm_ablation import build_config, parse_args
+    from baseline.run_online_actor_critic import build_config, parse_args
 
     args = parse_args(
         [
@@ -409,8 +458,130 @@ def test_no_cfm_runner_dry_run_accepts_sumo_extra_args(tmp_path):
     assert cfg.sumo_extra_args == "--collision.action warn"
 
 
+def test_real_network_runner_resolves_non_gretz_scenario_overrides(tmp_path):
+    from baseline.run_online_actor_critic import build_config, parse_args
+
+    scenario_dir = tmp_path / "generated" / "fontenay_test"
+    scenario_dir.mkdir(parents=True)
+    artifacts = tmp_path / "fontenay_artifacts"
+    settings = scenario_dir / "urb_fair_eval.env"
+    settings.write_text(
+        "\n".join(
+            [
+                'NETWORK_NAME="fontenay_en_parisis"',
+                f'NETWORK_DIR="{tmp_path / "network"}"',
+                f'EDGE_REGISTRY="{tmp_path / "network" / "edge_registry.json"}"',
+                f'ROUTE_ARTIFACTS_DIR="{artifacts}"',
+                'N_ROUTES="4"',
+                'EPISODE_STEPS="60"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    post_state = tmp_path / "post_mutation_state.json"
+    hdv_state = tmp_path / "post_mutation_hdv_learning_state.json"
+    args = parse_args(
+        [
+            "--settings",
+            str(settings),
+            "--tag",
+            "fontenay_explicit",
+            "--post-mutation-state-in",
+            str(post_state),
+            "--hdv-state-in",
+            str(hdv_state),
+            "--train-episodes",
+            "500",
+            "--checkpoint-episodes",
+            "100,200,300,400,500",
+            "--max-steps-per-episode",
+            "3600",
+            "--sumo-time-to-teleport",
+            "-1",
+            "--keep-human-learning-after-mutation",
+        ]
+    )
+
+    cfg = build_config(args)
+    plan = build_online_ac_plan(cfg)
+
+    assert cfg.tag == "fontenay_explicit"
+    assert cfg.network_name == "fontenay_en_parisis"
+    assert cfg.post_mutation_state_in == str(post_state)
+    assert cfg.hdv_state_in == str(hdv_state)
+    assert cfg.max_steps_per_episode == 3600
+    assert cfg.sumo_time_to_teleport == "-1"
+    assert cfg.disable_human_learning_after_mutation is False
+    assert plan["baseline"] == "online_actor_critic"
+    assert plan["training"]["episodes"] == 500
+    assert set(plan["training"]["checkpoint_paths"]) == {100, 200, 300, 400, 500}
+    assert "gretz" not in plan["paths"]["post_mutation_state_in"]
+
+
+def test_from_settings_derives_scenario_identity_and_state_paths(tmp_path):
+    scenario_dir = tmp_path / "generated" / "ingolstadt_test"
+    scenario_dir.mkdir(parents=True)
+    artifacts = tmp_path / "ingolstadt_artifacts"
+    settings = scenario_dir / "urb_fair_eval.env"
+    settings.write_text(
+        "\n".join(
+            [
+                'NETWORK_NAME="ingolstadt_custom"',
+                f'ROUTE_ARTIFACTS_DIR="{artifacts}"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = OnlineNoCfmConfig.from_settings(str(settings))
+
+    assert cfg.tag == "ingolstadt_test"
+    assert cfg.output_dir == str(ROOT / "results" / "ingolstadt_test" / "baseline_online_ac")
+    assert cfg.post_mutation_state_in == str(artifacts / "post_mutation_state.json")
+    assert cfg.hdv_state_in == str(artifacts / "post_mutation_hdv_learning_state.json")
+
+
+def test_from_settings_explicit_tag_drives_default_output_dir(tmp_path):
+    scenario_dir = tmp_path / "generated" / "settings_tag"
+    scenario_dir.mkdir(parents=True)
+    settings = scenario_dir / "urb_fair_eval.env"
+    settings.write_text('NETWORK_NAME="fontenay_en_parisis"\n', encoding="utf-8")
+
+    cfg = OnlineNoCfmConfig.from_settings(str(settings), tag="fontenay_explicit")
+
+    assert cfg.tag == "fontenay_explicit"
+    assert cfg.output_dir == str(ROOT / "results" / "fontenay_explicit" / "baseline_online_ac")
+
+
+def test_toy_dynamic_evaluator_forces_argmax_actions(tmp_path):
+    from baseline.eval_toy_online_ac_dynamic import build_eval_config, parse_args
+
+    args = parse_args(
+        [
+            "--network-dir",
+            str(tmp_path / "network"),
+            "--output-dir",
+            str(tmp_path / "eval"),
+            "--resume-checkpoint",
+            str(tmp_path / "checkpoint.pt"),
+            "--hdv-state-in",
+            str(tmp_path / "hdv.json"),
+        ]
+    )
+
+    cfg = build_eval_config(args)
+
+    assert cfg.real_policy_route_selection == "argmax"
+
+
+def test_dynamic_vs_static_evaluator_forces_argmax_actions():
+    text = (ROOT / "ablation" / "eval_toy_dynamic_vs_static.py").read_text(encoding="utf-8")
+
+    assert 'cfg.real_policy_route_selection = "argmax"' in text
+
+
 def test_training_module_static_guard_has_no_forbidden_cfm_calls():
-    text = (ROOT / "ablation" / "online_no_cfm_actor_critic.py").read_text(encoding="utf-8")
+    text = (ROOT / "baseline" / "online_actor_critic.py").read_text(encoding="utf-8")
     forbidden = [
         "predict_next_state",
         "predict_next_state_differentiable",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the Gretz online actor-critic no-CFM ablation."""
+"""Run the real-network online actor-critic baseline."""
 
 from __future__ import annotations
 
@@ -16,22 +16,22 @@ if __package__ is None or __package__ == "":
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
 
-from ablation.online_no_cfm_actor_critic import (
+from baseline.online_actor_critic import (
     DEFAULT_CHECKPOINT_EPISODES,
-    GRETZ_TAG,
     OnlineNoCfmConfig,
     OnlineNoCfmTrainer,
     build_eval_command,
-    build_gretz_ablation_plan,
+    build_online_ac_plan,
     validate_required_paths,
 )
 
 
 def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Gretz online actor-critic ablation without WM CFM transitions.",
+        description="Real-network online actor-critic baseline without WM CFM transitions.",
     )
-    parser.add_argument("--settings", default=None, help="Gretz .env settings file.")
+    parser.add_argument("--settings", default=None, help="Scenario .env settings file.")
+    parser.add_argument("--tag", default=None, help="Optional experiment tag; defaults to the settings directory name.")
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--train-episodes", type=int, default=100)
     parser.add_argument("--eval-episodes", type=int, default=3)
@@ -41,6 +41,16 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         type=int,
         default=0,
         help="Episode number already completed in --resume-checkpoint; defaults to checkpoint metadata.",
+    )
+    parser.add_argument(
+        "--route-artifacts-dir",
+        default=None,
+        help="Optional route artifact directory; defaults to ROUTE_ARTIFACTS_DIR from settings.",
+    )
+    parser.add_argument(
+        "--post-mutation-state-in",
+        default=None,
+        help="Post-mutation state JSON that fixes AV/HDV roles and route artifact provenance.",
     )
     parser.add_argument(
         "--hdv-state-in",
@@ -54,6 +64,23 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--sim-buffer-after-last-depart",
+        type=int,
+        default=None,
+        help="Override the settings-file simulation drain buffer.",
+    )
+    parser.add_argument(
+        "--max-steps-per-episode",
+        type=int,
+        default=None,
+        help="Hard episode step cap; <=0 uses last departure plus the drain buffer.",
+    )
+    parser.add_argument(
+        "--sumo-time-to-teleport",
+        default=None,
+        help="SUMO time-to-teleport override.",
+    )
     parser.add_argument(
         "--reward-mode",
         default="progress_fraction",
@@ -90,6 +117,12 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         default=8,
         help="Future real vehicle decisions included in online returns; <=0 uses the full remaining vehicle trajectory.",
     )
+    parser.add_argument(
+        "--real-policy-route-selection",
+        choices=["argmax", "sample"],
+        default="sample",
+        help="Action selection used by real SUMO collection.",
+    )
     parser.add_argument("--eval-python", default=sys.executable)
     parser.add_argument(
         "--sumo-extra-args",
@@ -114,7 +147,7 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--allow-missing",
         action="store_true",
-        help="Allow dry-run output even when Gretz artifacts are missing.",
+        help="Allow dry-run output even when scenario artifacts are missing.",
     )
     parser.add_argument(
         "eval_passthrough",
@@ -144,6 +177,8 @@ def build_config(args: argparse.Namespace) -> OnlineNoCfmConfig:
         "checkpoint_episodes": _parse_checkpoint_episodes(args.checkpoint_episodes),
         "resume_checkpoint": str(args.resume_checkpoint or ""),
         "resume_start_episode": int(args.resume_start_episode),
+        "route_artifacts_dir": str(args.route_artifacts_dir) if args.route_artifacts_dir else None,
+        "post_mutation_state_in": str(args.post_mutation_state_in) if args.post_mutation_state_in else None,
         "hdv_state_in": str(args.hdv_state_in) if args.hdv_state_in else None,
         "device": str(args.device),
         "seed": int(args.seed),
@@ -153,17 +188,26 @@ def build_config(args: argparse.Namespace) -> OnlineNoCfmConfig:
         "replay_update_epochs": int(args.replay_update_epochs),
         "replay_actor_max_age_episodes": int(args.replay_actor_max_age_episodes),
         "return_horizon_steps": int(args.return_horizon_steps),
+        "real_policy_route_selection": str(args.real_policy_route_selection),
         "disable_human_learning_after_mutation": bool(args.disable_human_learning_after_mutation),
         "eval_python": str(args.eval_python),
         "extra_eval_args": tuple(passthrough),
     }
+    if args.tag:
+        overrides["tag"] = str(args.tag)
+    if args.sim_buffer_after_last_depart is not None:
+        overrides["sim_buffer_after_last_depart"] = int(args.sim_buffer_after_last_depart)
+    if args.max_steps_per_episode is not None:
+        overrides["max_steps_per_episode"] = int(args.max_steps_per_episode)
+    if args.sumo_time_to_teleport is not None:
+        overrides["sumo_time_to_teleport"] = str(args.sumo_time_to_teleport)
     if args.sumo_extra_args is not None:
         overrides["sumo_extra_args"] = str(args.sumo_extra_args)
     if args.output_dir:
         overrides["output_dir"] = str(args.output_dir)
     if args.settings:
         return OnlineNoCfmConfig.from_settings(str(args.settings), **overrides)
-    return OnlineNoCfmConfig(**overrides).resolve()
+    return OnlineNoCfmConfig(**{k: v for k, v in overrides.items() if v is not None}).resolve()
 
 
 def run_evaluations(cfg: OnlineNoCfmConfig, train_summary: Dict[str, object]) -> Dict[str, object]:
@@ -179,7 +223,7 @@ def run_evaluations(cfg: OnlineNoCfmConfig, train_summary: Dict[str, object]) ->
             ckpt = str(Path(cfg.output_dir) / "checkpoints" / f"checkpoint_ep{int(episode):05d}.pt")
         results_dir = eval_root / f"checkpoint_ep{int(episode):05d}"
         cmd = build_eval_command(cfg=cfg, checkpoint_path=ckpt, results_dir=results_dir)
-        print("[online-no-cfm] eval command:", " ".join(cmd), flush=True)
+        print("[online-ac] eval command:", " ".join(cmd), flush=True)
         subprocess.run(cmd, check=True)
         summary_path = results_dir / "collector_eval_summary.json"
         outputs[str(int(episode))] = {
@@ -196,7 +240,7 @@ def run_evaluations(cfg: OnlineNoCfmConfig, train_summary: Dict[str, object]) ->
 def main(argv: List[str] | None = None) -> int:
     args = parse_args(argv)
     cfg = build_config(args)
-    plan = build_gretz_ablation_plan(cfg)
+    plan = build_online_ac_plan(cfg)
     if args.dry_run:
         print(json.dumps(plan, indent=2, ensure_ascii=False))
         if not args.allow_missing:
@@ -205,9 +249,9 @@ def main(argv: List[str] | None = None) -> int:
     validate_required_paths(plan)
     output_dir = Path(cfg.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    with (output_dir / "online_no_cfm_config.json").open("w", encoding="utf-8") as f:
+    with (output_dir / "online_ac_config.json").open("w", encoding="utf-8") as f:
         json.dump(asdict(cfg), f, indent=2)
-    with (output_dir / "online_no_cfm_plan.json").open("w", encoding="utf-8") as f:
+    with (output_dir / "online_ac_plan.json").open("w", encoding="utf-8") as f:
         json.dump(plan, f, indent=2, ensure_ascii=False)
 
     trainer = OnlineNoCfmTrainer(cfg)
@@ -215,7 +259,7 @@ def main(argv: List[str] | None = None) -> int:
     if not args.skip_eval:
         eval_summary = run_evaluations(cfg, train_summary)
         train_summary["eval"] = eval_summary
-    with (output_dir / "online_no_cfm_final_summary.json").open("w", encoding="utf-8") as f:
+    with (output_dir / "online_ac_final_summary.json").open("w", encoding="utf-8") as f:
         json.dump(train_summary, f, indent=2)
     return 0
 

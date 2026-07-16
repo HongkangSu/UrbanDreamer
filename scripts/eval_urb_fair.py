@@ -9,6 +9,7 @@ the URB-fair mainline protocol:
 - use an explicit experiment settings file
 - reuse a shared route/agent artifact directory when configured
 - preserve the configured post-mutation human-learning regime
+- sample learned CAV routes from the policy distribution in mainline evaluation
 
 The wrapper does not redefine the underlying evaluator; it only makes the
 intended fairness-facing settings explicit and reproducible.
@@ -79,6 +80,9 @@ def build_eval_urb_fair_argv(
     for flag, value in defaults.items():
         if value and (not _has_flag(extra, flag)):
             argv.extend([flag, value])
+
+    if not _has_flag(extra, "--av_policy_route_selection"):
+        argv.extend(["--av_policy_route_selection", "sample"])
 
     if not (
         _has_flag(extra, "--disable_human_learning_after_mutation")

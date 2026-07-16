@@ -1195,6 +1195,7 @@ class DataCollector:
             hdv_ids |= unresolved
             self._av_vehicles |= av_ids
             self._hdv_vehicles |= hdv_ids
+            # Legacy warmup semantics: fixed CAVs all use epsilon-greedy routing.
             self._greedy_avs |= av_ids
             return
 

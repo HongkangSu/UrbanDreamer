@@ -70,19 +70,19 @@ def _ensure_sumo_runtime_env() -> None:
 
 _ensure_sumo_runtime_env()
 
-from ablation.create_toy_cross_bottleneck_network import NETWORK_NAME as TOY_NETWORK_NAME
-from ablation.create_toy_cross_bottleneck_network import generate as generate_toy_network
-from ablation.online_no_cfm_actor_critic import (
+from baseline.create_toy_cross_bottleneck_network import NETWORK_NAME as TOY_NETWORK_NAME
+from baseline.create_toy_cross_bottleneck_network import generate as generate_toy_network
+from baseline.online_actor_critic import (
     OnlineDecisionSample,
     OnlineNoCfmConfig,
     _resolve_path,
 )
-from ablation.run_toy_cross_bottleneck_online_ac import (
+from baseline.run_toy_cross_bottleneck_online_ac import (
     ToyOnlineAcTrainer,
     parse_checkpoint_episodes,
     validate_paths,
 )
-from ablation.eval_toy_online_ac_dynamic import _mean_complete
+from baseline.eval_toy_online_ac_dynamic import _mean_complete
 from dreamer4.urban_routing.flow_projector import EdgeRegistry
 from dreamer4.urban_routing.train_marl import vehicle_mode_obs_dim
 from dreamer4.urban_routing.urb_fair_protocol import derive_fixed_roles, load_post_mutation_state
@@ -1007,6 +1007,8 @@ class ToyIppoTorchRLTrainer(ToyOnlineAcTrainer):
         return summary
 
     def evaluate(self, *, eval_episodes: int) -> Dict[str, Any]:
+        self.cfg.real_policy_route_selection = "argmax"
+        self.cfg.disable_human_learning_after_mutation = True
         collector = self._build_collector()
         collector._av_execution_mode = "dynamic"
         self.actor.eval()
@@ -1132,7 +1134,8 @@ def build_config(args: argparse.Namespace) -> ToyIppoTorchRLConfig:
         return_horizon_steps=0,
         min_samples_per_update=1,
         max_grad_norm=float(args.max_grad_norm),
-        disable_human_learning_after_mutation=False,
+        disable_human_learning_after_mutation=bool(args.eval_only),
+        real_policy_route_selection="argmax" if bool(args.eval_only) else "sample",
         sumo_time_to_teleport=str(args.sumo_time_to_teleport),
         sumo_extra_args=str(args.sumo_extra_args or ""),
         agent_frames_per_batch=int(args.agent_frames_per_batch),
@@ -1148,6 +1151,8 @@ def build_config(args: argparse.Namespace) -> ToyIppoTorchRLConfig:
         critic_network_num_cells=int(args.critic_network_num_cells),
         av_execution_mode=str(args.av_execution_mode),
     )
+    if bool(args.eval_only) and int(args.eval_sim_buffer_after_last_depart) > 0:
+        overrides["sim_buffer_after_last_depart"] = int(args.eval_sim_buffer_after_last_depart)
     if has_settings:
         cfg = ToyIppoTorchRLConfig.from_settings(str(args.settings), **overrides)
     else:
@@ -1189,6 +1194,12 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--ratio-machines", type=float, default=0.4)
     parser.add_argument("--episode-steps", type=int, default=60)
     parser.add_argument("--sim-buffer-after-last-depart", type=int, default=3000)
+    parser.add_argument(
+        "--eval-sim-buffer-after-last-depart",
+        type=int,
+        default=0,
+        help="Evaluation-only override for the SUMO drain window after the last departure.",
+    )
     parser.add_argument("--max-steps-per-episode", type=int, default=0)
     parser.add_argument("--reward-mode", default="capped_step_cost", choices=["progress_fraction", "capped_step_cost"])
     parser.add_argument("--reward-temperature", type=float, default=60.0)

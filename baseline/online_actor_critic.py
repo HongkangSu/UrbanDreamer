@@ -1,6 +1,6 @@
-"""Online Gretz actor-critic ablation without world-model CFM transitions.
+"""Online actor-critic baseline without world-model CFM transitions.
 
-The ablation keeps the world-model encoder and policy-observation decoder, but
+The baseline keeps the world-model encoder and policy-observation decoder, but
 the actor-critic update consumes only real SUMO decisions and live route-cost
 rewards.  No world-model transition, rollout, or reranking is used here.
 """
@@ -76,7 +76,7 @@ from scripts.eval_sumo_routing import (
     _route_batch_uniqueness_summary,
     _temperature_adjust_probs,
 )
-from ablation.traci_port_fallback import patch_traci_start_port_fallback
+from baseline.traci_port_fallback import patch_traci_start_port_fallback
 from dreamer4.urban_routing.data_collector import DataCollector, serialize_hdv_route_state
 
 
@@ -128,9 +128,44 @@ def normalize_av_candidate_source(value: str | None) -> str:
     return aliases.get(source, source)
 
 
+def normalize_real_policy_route_selection(value: str | None) -> str:
+    mode = str(value or "sample").strip().lower()
+    aliases = {
+        "deterministic": "argmax",
+        "greedy": "argmax",
+        "stochastic": "sample",
+    }
+    mode = aliases.get(mode, mode)
+    if mode not in {"argmax", "sample"}:
+        raise ValueError(
+            f"Unsupported real_policy_route_selection={value!r}; expected argmax or sample"
+        )
+    return mode
+
+
+def _select_real_policy_route_index(
+    probs: np.ndarray,
+    *,
+    mode: str,
+    rng: np.random.RandomState,
+) -> int:
+    values = np.asarray(probs, dtype=np.float64).reshape(-1)
+    if values.size == 0:
+        raise ValueError("Cannot select a real-policy route from an empty probability vector")
+    selection_mode = normalize_real_policy_route_selection(mode)
+    if selection_mode == "argmax":
+        return int(np.argmax(values))
+    if not np.isfinite(values).all() or np.any(values < 0.0):
+        raise ValueError("Real-policy sampling probabilities must be finite and non-negative")
+    total = float(values.sum())
+    if total <= 0.0:
+        raise ValueError("Real-policy sampling probabilities must have positive mass")
+    return int(rng.choice(int(values.size), p=values / total))
+
+
 @dataclass
 class OnlineNoCfmConfig:
-    """Configuration for the Gretz online no-CFM actor-critic ablation."""
+    """Configuration for the real-network online actor-critic baseline."""
 
     tag: str = GRETZ_TAG
     settings: str = str(
@@ -140,7 +175,7 @@ class OnlineNoCfmConfig:
         / GRETZ_TAG
         / "urb_fair_eval.env"
     )
-    output_dir: str = str(_REPO_ROOT / "results" / GRETZ_TAG / "ablation_online_no_cfm_ac")
+    output_dir: str = str(_REPO_ROOT / "results" / GRETZ_TAG / "baseline_online_ac")
     network_name: str = "gretz_armainvilliers"
     network_dir: str = str(_REPO_ROOT / "networks" / "gretz_armainvilliers")
     edge_registry: str = str(_REPO_ROOT / "networks" / "gretz_armainvilliers" / "edge_registry.json")
@@ -208,6 +243,7 @@ class OnlineNoCfmConfig:
     av_candidate_source: str = "current_shortest_freeflow"
     av_candidate_path_penalty_factor: float = 3.0
     av_policy_sample_temperature: float = 1.0
+    real_policy_route_selection: str = "sample"
     route_cost_length_norm: str = "sum"
     reward_mode: str = "progress_fraction"
     reward_weight: float = 1.0
@@ -258,6 +294,9 @@ class OnlineNoCfmConfig:
 
     def resolve(self) -> "OnlineNoCfmConfig":
         values = asdict(self)
+        values["real_policy_route_selection"] = normalize_real_policy_route_selection(
+            values.get("real_policy_route_selection")
+        )
         for key in (
             "settings",
             "output_dir",
@@ -279,13 +318,29 @@ class OnlineNoCfmConfig:
     def from_settings(cls, settings_path: str, **overrides: Any) -> "OnlineNoCfmConfig":
         cfg = cls(settings=str(settings_path))
         settings = load_settings_file(settings_path)
+        route_artifacts_dir = settings.get("ROUTE_ARTIFACTS_DIR", cfg.route_artifacts_dir)
+        settings_tag = Path(settings_path).expanduser().resolve().parent.name
+        resolved_tag = str(overrides.get("tag") or settings.get("EXPERIMENT_TAG", settings_tag))
         updates: Dict[str, Any] = {
+            "tag": resolved_tag,
+            "output_dir": settings.get(
+                "ONLINE_AC_OUTPUT_DIR",
+                settings.get("OUTPUT_DIR", str(_REPO_ROOT / "results" / resolved_tag / "baseline_online_ac")),
+            ),
             "network_name": settings.get("NETWORK_NAME", cfg.network_name),
             "network_dir": settings.get("NETWORK_DIR", cfg.network_dir),
             "edge_registry": settings.get("EDGE_REGISTRY", cfg.edge_registry),
             "projector_ckpt": settings.get("PROJECTOR_CKPT", cfg.projector_ckpt),
             "dynamics_ckpt": settings.get("DYNAMICS_CKPT", cfg.dynamics_ckpt),
-            "route_artifacts_dir": settings.get("ROUTE_ARTIFACTS_DIR", cfg.route_artifacts_dir),
+            "route_artifacts_dir": route_artifacts_dir,
+            "post_mutation_state_in": settings.get(
+                "POST_MUTATION_STATE_IN",
+                str(Path(route_artifacts_dir) / "post_mutation_state.json"),
+            ),
+            "hdv_state_in": settings.get(
+                "HDV_STATE_IN",
+                str(Path(route_artifacts_dir) / "post_mutation_hdv_learning_state.json"),
+            ),
             "ratio_machines": _as_float(settings.get("RATIO_MACHINES"), cfg.ratio_machines),
             "n_routes": _as_int(settings.get("N_ROUTES"), cfg.n_routes),
             "episode_steps": _as_int(settings.get("EPISODE_STEPS"), cfg.episode_steps),
@@ -381,7 +436,7 @@ def _jsonable_config(cfg: OnlineNoCfmConfig) -> Dict[str, Any]:
     return values
 
 
-def build_gretz_ablation_plan(cfg: Optional[OnlineNoCfmConfig] = None) -> Dict[str, Any]:
+def build_online_ac_plan(cfg: Optional[OnlineNoCfmConfig] = None) -> Dict[str, Any]:
     resolved = (cfg or OnlineNoCfmConfig()).resolve()
     output_dir = Path(resolved.output_dir)
     checkpoints = {
@@ -408,7 +463,7 @@ def build_gretz_ablation_plan(cfg: Optional[OnlineNoCfmConfig] = None) -> Dict[s
         if value and not Path(str(value)).exists()
     ]
     return {
-        "ablation": "gretz_online_no_cfm_actor_critic",
+        "baseline": "online_actor_critic",
         "network": resolved.network_name,
         "tag": resolved.tag,
         "reward_semantics": {
@@ -421,7 +476,7 @@ def build_gretz_ablation_plan(cfg: Optional[OnlineNoCfmConfig] = None) -> Dict[s
             "source": "live_sumo_current_edge_travel_time",
         },
         "scenario": {
-            "source_note": "matches experiment_result/gretz_stronglivebad_completion100_full_cycle_20260602.md",
+            "source_note": "resolved from the selected scenario settings and post-mutation state",
             "incident_edge": resolved.incident_edge,
             "incident_start": float(resolved.incident_start),
             "incident_end": float(resolved.incident_end),
@@ -431,6 +486,10 @@ def build_gretz_ablation_plan(cfg: Optional[OnlineNoCfmConfig] = None) -> Dict[s
             ),
             "post_mutation_state_in": resolved.post_mutation_state_in,
             "hdv_state_in": resolved.hdv_state_in,
+            "sim_buffer_after_last_depart": int(resolved.sim_buffer_after_last_depart),
+            "max_steps_per_episode": int(resolved.max_steps_per_episode),
+            "sumo_time_to_teleport": str(resolved.sumo_time_to_teleport),
+            "sumo_extra_args": str(resolved.sumo_extra_args),
         },
         "world_model_usage": {
             "encoder_for_actor_obs": True,
@@ -441,6 +500,7 @@ def build_gretz_ablation_plan(cfg: Optional[OnlineNoCfmConfig] = None) -> Dict[s
         "training": {
             "algorithm": "online_actor_critic",
             "from_scratch": True,
+            "real_policy_route_selection": str(resolved.real_policy_route_selection),
             "episodes": resolved.train_episodes,
             "resume_checkpoint": resolved.resume_checkpoint,
             "resume_start_episode": int(resolved.resume_start_episode),
@@ -450,6 +510,13 @@ def build_gretz_ablation_plan(cfg: Optional[OnlineNoCfmConfig] = None) -> Dict[s
             "replay_update_epochs": int(resolved.replay_update_epochs),
             "replay_actor_max_age_episodes": int(resolved.replay_actor_max_age_episodes),
             "return_horizon_steps": int(resolved.return_horizon_steps),
+            "gamma": float(resolved.gamma),
+            "actor_lr": float(resolved.lr),
+            "critic_lr": float(resolved.critic_lr),
+            "value_coef": float(resolved.value_coef),
+            "entropy_coef": float(resolved.entropy_coef),
+            "advantage_clip": float(resolved.ac_advantage_clip),
+            "ppo_clip_ratio": float(resolved.ac_ppo_clip_ratio),
         },
         "evaluation": {
             "episodes_per_checkpoint": resolved.eval_episodes,
@@ -487,11 +554,11 @@ def selected_vehicle_route_rewards(
     remaining_tt_eps: float = 1.0,
     reward_temperature: float = 60.0,
 ) -> torch.Tensor:
-    """Vehicle reward from live route costs for the no-CFM online ablation.
+    """Vehicle reward from live route costs for the no-CFM online baseline.
 
     ``progress_fraction`` matches offline current-state route progress:
     ``min(step_interval, remaining_route_tt) / (elapsed_time + remaining_route_tt)``.
-    ``capped_step_cost`` is a cost-minimizing ablation:
+    ``capped_step_cost`` is the cost-minimizing baseline reward:
     ``-min(step_interval, remaining_route_tt) / reward_temperature``.
     Invalid selected routes receive zero reward.
     """
@@ -776,7 +843,7 @@ def save_policy_checkpoint(
         "wm_edge_cost_source": str(cfg.wm_edge_cost_source),
         "wm_candidate_edge_cost_source": str(cfg.wm_candidate_edge_cost_source),
         "step_interval": float(cfg.step_interval),
-        "ablation": "online_no_cfm_actor_critic",
+        "baseline": "online_actor_critic",
         "obs_dim": int(obs_dim),
     }
     state = {
@@ -794,7 +861,7 @@ def save_policy_checkpoint(
 
 
 class OnlineNoCfmCollector(DataCollector):
-    """Real-SUMO online sampler for the no-CFM actor-critic ablation."""
+    """Real-SUMO online sampler for the no-CFM actor-critic baseline."""
 
     def __init__(
         self,
@@ -1137,7 +1204,11 @@ class OnlineNoCfmCollector(DataCollector):
                     float(self._cfg.av_policy_sample_temperature),
                     int(self.n_routes),
                 )
-                selected_i = int(rng.choice(int(self.n_routes), p=probs_i))
+                selected_i = _select_real_policy_route_index(
+                    probs_i,
+                    mode=self._cfg.real_policy_route_selection,
+                    rng=rng,
+                )
                 selected_i = int(np.clip(selected_i, 0, len(route_batch[i]) - 1))
                 selected_indices[i] = selected_i
                 policy_probs.append(probs_i.astype(np.float32))
@@ -1167,7 +1238,11 @@ class OnlineNoCfmCollector(DataCollector):
                     float(self._cfg.av_policy_sample_temperature),
                     int(self.n_routes),
                 )
-                selected_indices[i] = int(rng.choice(int(self.n_routes), p=probs))
+                selected_indices[i] = _select_real_policy_route_index(
+                    probs,
+                    mode=self._cfg.real_policy_route_selection,
+                    rng=rng,
+                )
                 selected_indices[i] = int(np.clip(selected_indices[i], 0, len(route_batch[i]) - 1))
                 probs_np[i] = probs.astype(np.float32)
 
@@ -1229,6 +1304,8 @@ class OnlineNoCfmCollector(DataCollector):
         unique_mean, unique_min, unique_max = _route_batch_uniqueness_summary(route_batch)
         counts = np.bincount(selected_indices.clip(0, int(self.n_routes) - 1), minlength=int(self.n_routes))
         mean_probs = np.mean(probs_np[:, : int(self.n_routes)], axis=0)
+        argmax_indices = np.argmax(probs_np[:, : int(self.n_routes)], axis=1).astype(np.int64)
+        argmax_matches = selected_indices == argmax_indices
         decision_row: Dict[str, Any] = {
             "episode": int(self._current_episode_id_eval),
             "decision_idx": int(self._current_decision_idx_eval),
@@ -1243,6 +1320,8 @@ class OnlineNoCfmCollector(DataCollector):
             "reward_sum": float(np.sum(rewards)) if len(rewards) else 0.0,
             "cfm_transition_used": 0,
             "wm_rollout_rerank_used": 0,
+            "real_policy_route_selection": str(self._cfg.real_policy_route_selection),
+            "selected_argmax_match_rate": float(np.mean(argmax_matches)),
         }
         for k in range(int(self.n_routes)):
             decision_row[f"mean_prob_route{k}"] = float(mean_probs[k])
@@ -1261,6 +1340,9 @@ class OnlineNoCfmCollector(DataCollector):
                 "current_edge": active_current_edges[i] if i < len(active_current_edges) else "",
                 "dest_edge": str(self._veh_dest.get(veh_id, "")),
                 "selected_route": int(selected_indices[i]),
+                "argmax_route": int(argmax_indices[i]),
+                "selected_matches_argmax": int(bool(argmax_matches[i])),
+                "real_policy_route_selection": str(self._cfg.real_policy_route_selection),
                 "reward": float(rewards[i]),
                 "elapsed_time": float(elapsed[i]),
             }
@@ -1881,7 +1963,8 @@ class OnlineNoCfmTrainer:
         )
         _save_hdv_learning_state(self.output_dir / "hdv_learning_state_after_online_train.json", latest_hdv_state)
         summary = {
-            "ablation": "gretz_online_no_cfm_actor_critic",
+            "baseline": "online_actor_critic",
+            "network": str(self.cfg.network_name),
             "config": _jsonable_config(self.cfg),
             "obs_dim": int(self.obs_dim),
             "checkpoint_paths": checkpoint_paths,
@@ -1943,6 +2026,8 @@ def build_eval_command(
         str(int(cfg.episode_steps)),
         "--sim_buffer_after_last_depart",
         str(int(cfg.sim_buffer_after_last_depart)),
+        "--max_steps_per_episode",
+        str(int(cfg.max_steps_per_episode)),
         "--reuse_artifacts_dir",
         str(cfg.route_artifacts_dir),
         "--post_mutation_state_in",
@@ -1993,4 +2078,4 @@ def validate_required_paths(plan: Dict[str, Any]) -> None:
     missing = list(plan.get("missing", []))
     if missing:
         details = {name: plan["paths"].get(name) for name in missing}
-        raise FileNotFoundError("Missing required Gretz ablation artifacts: " + json.dumps(details, indent=2))
+        raise FileNotFoundError("Missing required online AC baseline artifacts: " + json.dumps(details, indent=2))

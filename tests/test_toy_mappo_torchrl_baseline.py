@@ -9,8 +9,8 @@ from tensordict import TensorDict
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from ablation.online_no_cfm_actor_critic import OnlineDecisionSample  # noqa: E402
-from ablation.online_no_cfm_actor_critic import _append_vehicle_context_features  # noqa: E402
+from baseline.online_actor_critic import OnlineDecisionSample  # noqa: E402
+from baseline.online_actor_critic import _append_vehicle_context_features  # noqa: E402
 from dreamer4.urban_routing.vehicle_imagination import build_vehicle_obs_vectorized  # noqa: E402
 from baseline.run_toy_cross_bottleneck_mappo_torchrl import (  # noqa: E402
     TorchRLMappoActorCritic,

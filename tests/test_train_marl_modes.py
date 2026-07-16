@@ -14,11 +14,15 @@ from train_marl import (  # noqa: E402
     CentralizedLatentValueCritic,
     _dreamer_action_route_probs,
     _dreamer_step_reward,
+    _dreamer_vehicle_return_discount,
     _combined_grpo_policy_loss,
     _expected_cost_policy_loss,
     _expected_route_regret_from_paths,
     _ensure_active_vehicle_current_edges,
+    _freeflow_shortest_progress_reward_matrix,
+    _global_critic_reward_enabled,
     _grpo_route_cost_policy_loss,
+    _infer_decision_step_interval_from_agents_csv,
     _marginal_av_pressure_cost_matrix,
     _marginal_pressure_reference_probs,
     _od_suffix_path_batch,
@@ -78,6 +82,39 @@ def test_offline_init_dataset_can_sample_step_aligned_frames(tmp_path):
     assert clamped == {2.0, 5.0}
 
 
+def test_freeflow_shortest_progress_rewards_default_to_discounted_vehicle_returns():
+    cfg = TrainConfig(
+        dreamer_all_reward_weight=0.0,
+        dreamer_route_cost_reward_weight=1.0,
+        dreamer_route_cost_reward_scope="both",
+        dreamer_route_cost_reward_mode="freeflow_shortest_progress",
+    )
+
+    assert _global_critic_reward_enabled(cfg) is False
+    assert _dreamer_vehicle_return_discount(cfg) == 0.97
+
+
+def test_freeflow_shortest_progress_reward_compares_previous_route_to_action_route():
+    adj = [[1, 2], [], [3], [1]]
+    route_valid = torch.ones((1, 2), dtype=torch.bool)
+    rewards = _freeflow_shortest_progress_reward_matrix(
+        path_batch=[[[0, 1], [0, 2, 3, 1]]],
+        current_route_batch=[[0, 1]],
+        route_valid=route_valid,
+        current_edges=np.array([0], dtype=np.int64),
+        dest_edges=np.array([1], dtype=np.int64),
+        origin_edges=np.array([0], dtype=np.int64),
+        current_edge_remaining=np.array([1.0], dtype=np.float64),
+        edge_travel_times=np.ones(4, dtype=np.float32),
+        freeflow_edge_times=np.ones(4, dtype=np.float32),
+        adj_list=adj,
+        step_interval=1.0,
+    )
+
+    torch.testing.assert_close(rewards[0, 0], torch.tensor(0.5))
+    torch.testing.assert_close(rewards[0, 1], torch.tensor(-0.5))
+
+
 def test_vehicle_mode_action_supported_accepts_raw_edge_action():
     assert vehicle_mode_action_supported(
         n_edges=853,
@@ -96,6 +133,21 @@ def test_compute_avg_route_steps_accepts_route_masks_tensor_like_input():
     steps = compute_avg_route_steps(route_masks, avg_edge_time=8.0, step_interval=30.0)
     assert isinstance(steps, int)
     assert steps >= 1
+
+
+def test_infer_decision_step_interval_from_agents_csv_uses_departure_horizon(tmp_path):
+    agents = tmp_path / "agents.csv"
+    agents.write_text(
+        "id,origin,destination,start_time,kind\n"
+        "0,0,0,0,Human\n"
+        "1,0,0,210,Human\n"
+        "2,0,0,420,Human\n",
+        encoding="utf-8",
+    )
+
+    interval = _infer_decision_step_interval_from_agents_csv(str(agents), episode_steps=60)
+
+    assert interval == 7.0
 
 
 def test_vehicle_mode_obs_dim_includes_three_context_features():

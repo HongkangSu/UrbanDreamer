@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a small cross-coupled SUMO routing network for online AC ablations."""
+"""Generate the small cross-coupled SUMO routing network used by baselines."""
 
 from __future__ import annotations
 

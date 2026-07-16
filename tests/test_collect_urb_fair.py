@@ -160,6 +160,48 @@ def test_copy_agents_csv_to_records_uses_explicit_agents(tmp_path):
     assert (records / "agents.csv").read_text(encoding="utf-8") == src.read_text(encoding="utf-8")
 
 
+def _make_role_only_collector(seed=42, random_av_fraction=0.6):
+    collector = DataCollector.__new__(DataCollector)
+    collector.seed = seed
+    collector.av_fraction = 0.4
+    collector.random_av_fraction = random_av_fraction
+    collector._fixed_machine_ids = set()
+    collector._fixed_human_ids = set()
+    collector._av_vehicles = set()
+    collector._hdv_vehicles = set()
+    collector._random_avs = set()
+    collector._greedy_avs = set()
+    return collector
+
+
+def test_fixed_roles_preserve_legacy_all_epsilon_greedy_policy_across_episodes():
+    machine_ids = [f"cav_{idx:03d}" for idx in range(128)]
+    human_ids = [f"hdv_{idx:03d}" for idx in range(192)]
+    all_ids = machine_ids + human_ids
+
+    collector = _make_role_only_collector()
+    collector.set_fixed_roles(machine_ids, human_ids)
+    collector._assign_roles(all_ids, np.random.RandomState(11))
+
+    assert collector._random_avs == set()
+    assert collector._greedy_avs == set(machine_ids)
+
+    collector._av_vehicles.clear()
+    collector._hdv_vehicles.clear()
+    collector._random_avs.clear()
+    collector._greedy_avs.clear()
+    collector._assign_roles(list(reversed(all_ids)), np.random.RandomState(999))
+
+    assert collector._random_avs == set()
+    assert collector._greedy_avs == set(machine_ids)
+
+    reordered = _make_role_only_collector()
+    reordered.set_fixed_roles(list(reversed(machine_ids)), human_ids)
+    reordered._assign_roles(all_ids, np.random.RandomState(23))
+    assert reordered._random_avs == set()
+    assert reordered._greedy_avs == set(machine_ids)
+
+
 def test_data_collector_candidate_suffixes_filter_invalid_sumo_routes():
     net = _FakeNet()
     net.connect("a", "b")
@@ -351,6 +393,35 @@ def test_collect_urb_fair_manifest_records_protocol_defaults(tmp_path):
     assert saved["partial"] is False
     assert saved["warmup_episodes"] == 200
     assert saved["artifact_hashes"]["agents_csv"]
+
+
+def test_collect_urb_fair_manifest_records_post_mutation_hdv_learning(tmp_path):
+    records_dir = tmp_path / "records"
+    records_dir.mkdir()
+    for name, content in (
+        ("agents.csv", "id,start_time,origin,destination,kind\n0,1,0,0,Human\n"),
+        ("routes.csv", "origins,destinations,path,free_flow_time\n0,0,a b,1.0\n"),
+        ("route.rou.xml", "<routes></routes>\n"),
+    ):
+        (records_dir / name).write_text(content, encoding="utf-8")
+
+    settings_path = _write_settings(tmp_path, records_dir)
+    out_path = _write_collection_manifest(
+        records_dir=records_dir,
+        settings_path=settings_path,
+        output_dir=tmp_path / "output",
+        task_name="ing_test",
+        num_episodes=7,
+        warmup_episodes=200,
+        post_mutation_state_path=records_dir / "post_mutation_state.json",
+        hdv_state_in_path=None,
+        hdv_state_out_path=records_dir / "hdv_final.json",
+        post_mutation_hdv_learning=True,
+    )
+    saved = json.loads(out_path.read_text(encoding="utf-8"))
+
+    assert saved["should_humans_adapt"] is True
+    assert saved["post_mutation_hdv_learning"] is True
 
 
 def test_save_intermediate_writes_demo_and_flow_shards(tmp_path):

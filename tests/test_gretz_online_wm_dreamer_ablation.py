@@ -1,18 +1,28 @@
 import sys
 from pathlib import Path
 
+import numpy as np
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from ablation.online_wm_dreamer_actor_critic import (  # noqa: E402
+    CausalHdvResponseModel,
+    OnlineHdvEpisodeSummary,
+    OnlineImaginedActorCritic,
     OnlineWmDreamerConfig,
+    OnlineWmDreamerCollector,
+    OnlineWorldModelReplay,
+    OnlineWorldModelStep,
     OnlineWorldModelUpdater,
     _causal_pair,
     _advance_imagined_route_progress,
+    _combine_vehicle_global_advantages,
     _current_to_dest_candidate_paths,
+    _sample_masked_actions,
     _discounted_returns_by_vehicle_ids,
+    _global_network_reward_from_latent,
     build_eval_command,
     build_gretz_online_wm_dreamer_plan,
     capped_step_cost_reward_matrix,
@@ -44,10 +54,25 @@ def test_online_wm_plan_marks_cfm_and_online_wm_training(tmp_path):
     assert plan["training"]["wm_replay_require_completion"] is True
     assert plan["training"]["wm_replay_completion_threshold"] == 1.0
     assert plan["training"]["wm_batch_size"] == 16
+    assert plan["training"]["wm_hdv_target_source"] == "episode_mean_current_occupancy"
     assert plan["training"]["wm_hdv_policy_target_mode"] == "episode_mean"
     assert plan["training"]["wm_hdv_policy_action_mode"] == "window_mean"
     assert plan["training"]["wm_transition_hdv_context_mode"] == "episode_response"
+    assert plan["training"]["imagined_hdv_context_source"] == "oracle_current_occupancy"
+    assert plan["training"]["hdv_response_predictor_enabled"] is False
+    assert plan["training"]["wm_hdv_pressure_trace_enabled"] is True
     assert plan["training"]["imag_horizon"] == 8
+    assert plan["training"]["global_critic_enabled"] is True
+    assert plan["training"]["ac_global_advantage_weight"] == 1.0
+    assert plan["world_model_usage"]["imagined_action_mode"] == "stochastic_masked_sample_one_hot"
+    assert plan["world_model_usage"]["real_collection_action_mode"] == "stochastic_policy_sample_one_hot"
+    assert plan["training"]["real_policy_route_selection"] == "sample"
+    assert plan["evaluation"]["action_mode"] == "stochastic_masked_sample"
+    assert plan["evaluation"]["policy_route_selection"] == "sample"
+    assert plan["evaluation"]["hdv_state_mode"] == "final_online_training_state"
+    assert plan["evaluation"]["hdv_state_path"].endswith(
+        "hdv_learning_state_after_online_wm_train.json"
+    )
     assert plan["evaluation"]["uses_updated_world_model_checkpoints"] is True
 
 
@@ -75,6 +100,165 @@ def test_online_wm_causal_pair_aligns_current_action_to_next_target():
 
     torch.testing.assert_close(pair[:, 0], torch.zeros_like(current))
     torch.testing.assert_close(pair[:, 1], current)
+
+
+def _wm_step(
+    *,
+    decision_idx: int,
+    hdv_action: torch.Tensor,
+    hdv_static_edge_demand: torch.Tensor | None = None,
+) -> OnlineWorldModelStep:
+    zeros_flow = torch.zeros((2, 1), dtype=torch.float32).numpy()
+    zeros_edge = torch.zeros_like(hdv_action).numpy()
+    return OnlineWorldModelStep(
+        episode=1,
+        decision_idx=int(decision_idx),
+        sim_step=int(decision_idx),
+        flow=zeros_flow,
+        next_flow=zeros_flow,
+        av_action=zeros_edge,
+        hdv_action=hdv_action.numpy(),
+        depart=zeros_edge,
+        context=torch.zeros((3,), dtype=torch.float32).numpy(),
+        hdv_static_edge_demand=None
+        if hdv_static_edge_demand is None
+        else hdv_static_edge_demand.numpy(),
+    )
+
+
+def test_online_wm_replay_uses_static_hdv_edge_demand_when_configured():
+    replay = OnlineWorldModelReplay(1, hdv_target_source="static_edge_demand")
+    steps = [
+        _wm_step(
+            decision_idx=0,
+            hdv_action=torch.tensor([1.0, 0.0, 0.0]),
+            hdv_static_edge_demand=torch.tensor([0.0, 4.0, 0.0]),
+        ),
+        _wm_step(
+            decision_idx=1,
+            hdv_action=torch.tensor([0.0, 1.0, 0.0]),
+            hdv_static_edge_demand=torch.tensor([0.0, 2.0, 0.0]),
+        ),
+    ]
+
+    replay.append_episode(steps)
+
+    for step in replay.all_steps():
+        torch.testing.assert_close(torch.from_numpy(step.hdv_target), torch.tensor([0.0, 1.0, 0.0]))
+
+
+def test_online_wm_replay_falls_back_to_current_occupancy_mean_without_static_demand():
+    replay = OnlineWorldModelReplay(1, hdv_target_source="static_edge_demand")
+    steps = [
+        _wm_step(decision_idx=0, hdv_action=torch.tensor([1.0, 0.0])),
+        _wm_step(decision_idx=1, hdv_action=torch.tensor([0.0, 3.0])),
+    ]
+
+    replay.append_episode(steps)
+
+    for step in replay.all_steps():
+        torch.testing.assert_close(torch.from_numpy(step.hdv_target), torch.tensor([0.25, 0.75]))
+
+
+def test_online_wm_replay_stores_pre_episode_hdv_response_prediction():
+    replay = OnlineWorldModelReplay(1, hdv_target_source="static_edge_demand")
+    steps = [
+        _wm_step(
+            decision_idx=0,
+            hdv_action=torch.tensor([1.0, 0.0, 0.0]),
+            hdv_static_edge_demand=torch.tensor([0.0, 4.0, 0.0]),
+        )
+    ]
+
+    replay.append_episode(
+        steps,
+        predicted_hdv_edge_demand=np.asarray([2.0, 0.0, 2.0], dtype=np.float32),
+        prediction_source="fallback_prev_hdv",
+    )
+
+    expected = torch.tensor([0.5, 0.0, 0.5])
+    for step in replay.all_steps():
+        torch.testing.assert_close(torch.from_numpy(step.hdv_predicted_edge_demand), expected)
+        assert step.hdv_prediction_source == "fallback_prev_hdv"
+    assert len(replay.summaries) == 1
+    torch.testing.assert_close(torch.from_numpy(replay.summaries[0].predicted_hdv_edge_demand), expected)
+
+
+def test_causal_hdv_response_pairs_previous_episode_to_current_static_demand():
+    cfg = OnlineWmDreamerConfig(
+        train_episodes=10,
+        hdv_response_predictor_enabled=True,
+    )
+    model = CausalHdvResponseModel(n_edges=2, cfg=cfg, device=torch.device("cpu"))
+    summaries = [
+        OnlineHdvEpisodeSummary(
+            episode=1,
+            av_edge_pressure=np.asarray([3.0, 1.0], dtype=np.float32),
+            hdv_static_edge_demand=np.asarray([2.0, 0.0], dtype=np.float32),
+            hdv_target=np.asarray([2.0, 0.0], dtype=np.float32),
+        ),
+        OnlineHdvEpisodeSummary(
+            episode=2,
+            av_edge_pressure=np.asarray([0.0, 1.0], dtype=np.float32),
+            hdv_static_edge_demand=np.asarray([0.0, 5.0], dtype=np.float32),
+            hdv_target=np.asarray([0.0, 5.0], dtype=np.float32),
+        ),
+    ]
+
+    x, y = model._pairs_from_summaries(summaries)
+
+    assert x is not None
+    assert y is not None
+    torch.testing.assert_close(x[0], torch.tensor([0.75, 0.25, 1.0, 0.0, 0.2]))
+    torch.testing.assert_close(y[0], torch.tensor([0.0, 1.0]))
+
+
+def test_causal_hdv_response_checkpoint_roundtrip_preserves_progress_denominator(tmp_path):
+    cfg = OnlineWmDreamerConfig(
+        train_episodes=10,
+        hdv_response_predictor_enabled=True,
+        hdv_response_predictor_progress_denominator=7,
+    )
+    model = CausalHdvResponseModel(n_edges=2, cfg=cfg, device=torch.device("cpu"))
+    model.trained_pairs = 3
+    ckpt = model.save_checkpoint(tmp_path / "hdv_response.pt", metrics={"edge_tv": 0.1})
+
+    loaded = CausalHdvResponseModel(
+        n_edges=2,
+        cfg=OnlineWmDreamerConfig(
+            train_episodes=99,
+            hdv_response_predictor_enabled=True,
+            hdv_response_predictor_progress_denominator=99,
+        ),
+        device=torch.device("cpu"),
+    )
+    state = loaded.load_checkpoint(ckpt)
+
+    assert state["metrics"]["edge_tv"] == 0.1
+    assert loaded.trained_pairs == 3
+    assert loaded.progress_denominator == 7
+
+
+def test_online_wm_collector_projects_vehicle_local_hdv_routes_to_static_edge_demand():
+    class DummyRegistry:
+        n_edges = 4
+        _edge_to_idx = {"a": 0, "b": 1, "c": 2, "d": 3}
+
+    collector = object.__new__(OnlineWmDreamerCollector)
+    collector._edge_registry = DummyRegistry()
+    collector._hdv_vehicles = {"h1", "h2"}
+    collector._hdv_route_idx = {"h1": 1, "h2": 0}
+    collector._veh_candidates = {
+        "h1": [["a"], ["b", "c"]],
+        "h2": [["c", "d"], ["a"]],
+    }
+
+    demand = collector._compute_hdv_static_edge_demand()
+
+    torch.testing.assert_close(
+        torch.from_numpy(demand),
+        torch.tensor([0.0, 0.25, 0.5, 0.25]),
+    )
 
 
 def test_online_wm_trainer_filters_incomplete_wm_replay_without_init():
@@ -125,6 +309,88 @@ def test_online_wm_reward_is_capped_negative_step_cost():
         ]
     )
     torch.testing.assert_close(rewards, expected)
+
+
+def test_imagined_action_samples_masked_policy_and_reuses_one_hot_for_wm():
+    torch.manual_seed(0)
+    logits = torch.tensor([[0.1, 3.0, 2.0]]).repeat(128, 1)
+    valid = torch.tensor([[True, False, True]]).repeat(128, 1)
+
+    selected, one_hot, log_prob, _entropy = _sample_masked_actions(
+        logits,
+        valid,
+        temperature=1.0,
+    )
+
+    assert bool(valid.gather(1, selected.unsqueeze(1)).all())
+    torch.testing.assert_close(one_hot.argmax(dim=-1), selected)
+    torch.testing.assert_close(one_hot.sum(dim=-1), torch.ones(128))
+    assert bool((selected == 0).any())
+    assert bool((selected == 2).any())
+    assert torch.isfinite(log_prob).all()
+
+
+def test_global_step_advantage_is_broadcast_into_vehicle_actor_advantage():
+    vehicle_advantage = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    global_advantage = torch.tensor([10.0, -2.0])
+    group_index = torch.tensor([0, 0, 1, 1])
+
+    combined = _combine_vehicle_global_advantages(
+        vehicle_advantage,
+        global_advantage,
+        group_index,
+        global_weight=0.5,
+    )
+
+    torch.testing.assert_close(combined, torch.tensor([6.0, 7.0, 2.0, 3.0]))
+
+
+def test_global_network_reward_weights_edge_tt_by_all_vehicle_count():
+    class DummyProjector:
+        @staticmethod
+        def decode(_z):
+            return torch.tensor([[0.0, 0.0, 1.0], [0.0, 0.0, 3.0]])
+
+    class DummyWm:
+        flow_projector = DummyProjector()
+        bpr = type("Bpr", (), {"capacities": torch.tensor([10.0, 10.0])})()
+
+    reward = _global_network_reward_from_latent(
+        DummyWm(),
+        torch.zeros((2, 4)),
+        np.asarray([2.0, 6.0], dtype=np.float32),
+        reward_temperature=10.0,
+    )
+
+    torch.testing.assert_close(reward, torch.tensor(-0.5))
+
+
+def test_existing_global_critic_produces_lambda_advantage_for_actor_groups():
+    class ConstantGlobalCritic(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.value = torch.nn.Parameter(torch.tensor(0.0))
+
+        def forward(self, z, action=None, context=None):
+            return self.value.expand(int(z.shape[0]), 1)
+
+    imagined = object.__new__(OnlineImaginedActorCritic)
+    imagined.global_critic = ConstantGlobalCritic()
+    imagined.device = torch.device("cpu")
+    imagined.cfg = OnlineWmDreamerConfig(gamma=0.0, ac_lambda=0.95)
+    part = {
+        "global_latent_states": torch.zeros((2, 3, 4)),
+        "global_next_latent_states": torch.zeros((2, 3, 4)),
+        "global_contexts": torch.zeros((2, 3)),
+        "global_rewards": torch.tensor([-1.0, -2.0]),
+        "action_edges": [torch.zeros(3), torch.zeros(3)],
+    }
+
+    loss, advantage, stats = imagined._global_critic_terms([part])
+
+    torch.testing.assert_close(loss, torch.tensor(1.25))
+    torch.testing.assert_close(advantage, torch.tensor([-1.0, -2.0]))
+    assert stats["imag_global_adv_mean"] == -1.5
 
 
 def test_imagined_route_progress_reward_stops_after_arrival():
@@ -221,10 +487,65 @@ def test_online_wm_eval_command_uses_checkpoint_world_model_paths(tmp_path):
     assert cmd[cmd.index("--projector_ckpt") + 1] == str(updated_projector)
     assert "--dynamics_ckpt" in cmd
     assert cmd[cmd.index("--dynamics_ckpt") + 1] == str(updated_dynamics)
+    assert cmd[cmd.index("--av_policy_route_selection") + 1] == "sample"
+    assert "--deterministic" in cmd
     assert str(cfg.projector_ckpt) not in {
         cmd[cmd.index("--projector_ckpt") + 1],
         cmd[cmd.index("--dynamics_ckpt") + 1],
     }
+
+
+def test_online_wm_eval_command_keeps_argmax_as_explicit_ablation(tmp_path):
+    cfg = OnlineWmDreamerConfig(
+        output_dir=str(tmp_path),
+        eval_python="python",
+        eval_policy_route_selection="argmax",
+    ).resolve()
+
+    cmd = build_eval_command(
+        cfg=cfg,
+        checkpoint_path=tmp_path / "missing_checkpoint.pt",
+        results_dir=tmp_path / "eval",
+    )
+
+    assert cmd[cmd.index("--av_policy_route_selection") + 1] == "argmax"
+
+
+def test_online_wm_runner_evaluations_use_final_hdv_state(tmp_path, monkeypatch):
+    from ablation import run_gretz_online_wm_dreamer_ablation as runner
+
+    output_dir = tmp_path / "run"
+    output_dir.mkdir()
+    initial_hdv_state = tmp_path / "initial_hdv_state.json"
+    initial_hdv_state.write_text("{}", encoding="utf-8")
+    final_hdv_state = output_dir / "hdv_learning_state_after_online_wm_train.json"
+    final_hdv_state.write_text("{}", encoding="utf-8")
+    checkpoint = output_dir / "checkpoints" / "checkpoint_ep00100.pt"
+    cfg = OnlineWmDreamerConfig(
+        output_dir=str(output_dir),
+        eval_python="python",
+        hdv_state_in=str(initial_hdv_state),
+        checkpoint_episodes=(100,),
+        eval_episodes=1,
+    ).resolve()
+    calls = []
+    monkeypatch.setattr(runner.subprocess, "run", lambda cmd, check: calls.append((cmd, check)))
+
+    outputs = runner.run_evaluations(
+        cfg,
+        {
+            "checkpoint_paths": {100: str(checkpoint)},
+            "final_hdv_state": str(final_hdv_state),
+        },
+    )
+
+    assert len(calls) == 1
+    cmd, check = calls[0]
+    assert check is True
+    assert cmd[cmd.index("--hdv_state_in") + 1] == str(final_hdv_state)
+    assert cmd[cmd.index("--av_policy_route_selection") + 1] == "sample"
+    assert str(initial_hdv_state) not in cmd
+    assert outputs["100"]["hdv_state_in"] == str(final_hdv_state)
 
 
 def test_online_wm_runner_dry_run_allows_missing(tmp_path):
@@ -248,6 +569,19 @@ def test_online_wm_runner_dry_run_allows_missing(tmp_path):
             "--collision.action warn",
             "--imag-horizon",
             "8",
+            "--global-advantage-weight",
+            "0.75",
+            "--real-policy-route-selection",
+            "sample",
+            "--eval-policy-route-selection",
+            "sample",
+            "--enable-hdv-response-predictor",
+            "--imagined-hdv-context-source",
+            "causal_response_predictor",
+            "--hdv-response-predictor-ckpt",
+            str(tmp_path / "hdv_response.pt"),
+            "--hdv-response-predictor-progress-denominator",
+            "50",
             "--dry-run",
             "--allow-missing",
         ]
@@ -263,4 +597,24 @@ def test_online_wm_runner_dry_run_allows_missing(tmp_path):
     assert cfg.sim_buffer_after_last_depart == 7200
     assert cfg.sumo_extra_args == "--collision.action warn"
     assert cfg.imag_horizon == 8
+    assert cfg.ac_global_advantage_weight == 0.75
+    assert cfg.real_policy_route_selection == "sample"
+    assert cfg.eval_policy_route_selection == "sample"
     assert cfg.reward_mode == "capped_step_cost"
+    assert cfg.vehicle_arrival_head_enabled is False
+    assert cfg.hdv_response_predictor_enabled is True
+    assert cfg.imagined_hdv_context_source == "causal_response_predictor"
+    assert cfg.hdv_response_predictor_ckpt == str(tmp_path / "hdv_response.pt")
+    assert cfg.hdv_response_predictor_progress_denominator == 50
+
+    enabled_args = parse_args(
+        [
+            "--output-dir",
+            str(tmp_path),
+            "--dry-run",
+            "--allow-missing",
+            "--enable-vehicle-arrival-head",
+        ]
+    )
+    enabled_cfg = build_config(enabled_args)
+    assert enabled_cfg.vehicle_arrival_head_enabled is True

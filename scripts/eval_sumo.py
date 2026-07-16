@@ -467,11 +467,12 @@ def parse_args():
                        "current-edge-to-destination routes from live SUMO, explicit WM, or free-flow edge travel times."
                    ))
     p.add_argument("--av_policy_route_selection", type=str, default="auto",
-                   choices=["auto", "argmax", "sample", "quota"],
+                   choices=["auto", "argmax", "sample", "quota", "uniform_unique"],
                    help=(
                        "How policy route probabilities become discrete AV routes. auto preserves "
                        "--deterministic/--stochastic behavior; quota deterministically realizes "
-                       "fleet-level probability mass within each decision tick."
+                       "fleet-level probability mass within each decision tick; uniform_unique "
+                       "samples physical paths uniformly without overweighting duplicate slots."
                    ))
     p.add_argument("--av_policy_sample_temperature", type=float, default=1.0,
                    help=(
@@ -552,7 +553,7 @@ def parse_args():
                    help="Weight on predicted AV travel-time proxy in WM-assisted reranking.")
     p.add_argument("--wm_rerank_cav_tolerance", type=float, default=0.0,
                    help="Hard-gate tolerance: candidates with predicted t_CAV worse than baseline+tolerance cannot override baseline.")
-    p.add_argument("--wm_cfm_init_mode", choices=["randn", "zero"], default="zero",
+    p.add_argument("--wm_cfm_init_mode", choices=["randn", "zero", "current"], default="zero",
                    help="CFM rollout source for the world model during SUMO evaluation.")
     p.add_argument("--wm_policy_obs_source", choices=["auto", "decoder_volume_tt", "decoder_volume_tt_route_head", "decoder_volume", "decoder", "obs_proj"], default="auto",
                    help="Policy observation source. auto uses policy checkpoint cfg when available.")
