@@ -582,6 +582,8 @@ def build_wm_command(
         str(args.wm_grad_accum),
         "--num_workers",
         "0",
+        "--flow_cache_mb",
+        str(args.wm_flow_cache_mb),
         "--d_model_dyn",
         "256",
         "--dyn_depth",
@@ -1619,6 +1621,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--wm-batch-size", type=int, default=1)
     parser.add_argument("--wm-seq-len", type=int, default=16)
     parser.add_argument("--wm-grad-accum", type=int, default=32)
+    parser.add_argument("--wm-flow-cache-mb", type=int, default=512)
     parser.add_argument("--wm-space-attention-batch-chunk-size", type=int, default=1)
     parser.add_argument("--wm-mlp-token-chunk-size", type=int, default=4096)
     parser.add_argument("--wm-time-attention-batch-chunk-size", type=int, default=256)

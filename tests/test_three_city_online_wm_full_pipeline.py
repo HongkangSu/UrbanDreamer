@@ -176,6 +176,7 @@ def test_pipeline_defaults_to_150_episode_sample_efficiency_run(tmp_path):
     assert args.reuse_world_models_from_run_id == ''
     assert args.wm_batch_size == 1
     assert args.wm_grad_accum == 32
+    assert args.wm_flow_cache_mb == 512
     assert args.online_wm_batch_size == 4
     assert args.online_wm_space_attention_batch_chunk_size == 16
     assert args.online_imagined_rollout_batch_size == 4
@@ -185,6 +186,19 @@ def test_pipeline_defaults_to_150_episode_sample_efficiency_run(tmp_path):
     assert args.wm_time_attention_batch_chunk_size == 256
     assert args.online_wm_time_attention_batch_chunk_size == 32768
     assert args.eval_hdv_variants == ('final', 'original')
+
+
+def test_fontenay_launcher_uses_dedicated_gpu_wm_profile():
+    launcher = (
+        ROOT / 'scripts' / 'run_fontenay_online_wm_full_pipeline.sh'
+    ).read_text(encoding='utf-8')
+
+    assert '--wm-batch-size 1' in launcher
+    assert '--wm-grad-accum 32' in launcher
+    assert '--wm-flow-cache-mb 1024' in launcher
+    assert '--wm-space-attention-batch-chunk-size 4' in launcher
+    assert '--wm-mlp-token-chunk-size 16384' in launcher
+    assert '--wm-time-attention-batch-chunk-size 8192' in launcher
 
 
 def test_eval_hdv_variant_parser_can_select_only_initial_state(tmp_path):
@@ -306,6 +320,23 @@ def test_world_model_reuse_is_per_city_and_falls_back_to_current_run(tmp_path):
     assert reused.wm_dir == complete_source.wm_dir
     assert reused.online_dir == complete_output.online_dir
     assert fallback.wm_dir == incomplete_output.wm_dir
+
+
+def test_incomplete_world_model_run_resumes_latest_checkpoint(tmp_path):
+    spec = CITY_SPECS['fontenay_en_parisis']
+    paths = city_paths(tmp_path, 'resume_run', spec)
+    paths.wm_dir.mkdir(parents=True)
+    latest = paths.wm_dir / 'latest.pt'
+    latest.write_bytes(b'checkpoint')
+
+    command = build_wm_command(
+        python_bin='python',
+        root=tmp_path,
+        paths=paths,
+        args=_default_args(tmp_path),
+    )
+
+    assert _value_after(command, '--resume') == str(latest)
 
 
 def test_run_cities_starts_all_three_city_pipelines_concurrently(tmp_path, monkeypatch):
@@ -517,7 +548,16 @@ def test_pipeline_commands_lock_current_online_wm_protocol(tmp_path):
     city = 'ingolstadt_custom'
     spec = CITY_SPECS[city]
     paths = city_paths(tmp_path, 'test_run', spec)
-    args = _default_args(tmp_path)
+    args = build_arg_parser().parse_args(
+        [
+            '--repo-root',
+            str(tmp_path),
+            '--run-id',
+            'test_run',
+            '--wm-flow-cache-mb',
+            '1024',
+        ]
+    )
     checkpoints = (25, 50, 75, 100, 125, 150)
 
     collect = build_collect_command(
@@ -534,6 +574,7 @@ def test_pipeline_commands_lock_current_online_wm_protocol(tmp_path):
     )
     assert _value_after(wm, '--transition_cfm_init_mode') == 'current'
     assert _value_after(wm, '--adm_cfm_init_mode') == 'current'
+    assert _value_after(wm, '--flow_cache_mb') == '1024'
     assert '--gradient_checkpointing' in wm
     assert '--edge_action_injection' in wm
     assert '--graph_cond_edge_conditioning' in wm

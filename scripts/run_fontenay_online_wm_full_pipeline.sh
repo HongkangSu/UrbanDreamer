@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Reuse the validated 50-episode warmup, train the current 8k-step WM, run
-# 150 online episodes, then evaluate with the pre-online-training HDV state.
+# Reuse the validated 50-episode warmup, train the current 8k-step WM on a
+# dedicated GPU, run 150 online episodes, then evaluate with the initial HDV state.
 # Override PYTHON_BIN, CUDA_VISIBLE_DEVICES, or RUN_ID through the environment.
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
@@ -57,9 +57,10 @@ cd "$REPO_ROOT"
   --wm-batch-size 1 \
   --wm-seq-len 16 \
   --wm-grad-accum 32 \
-  --wm-space-attention-batch-chunk-size 1 \
-  --wm-mlp-token-chunk-size 4096 \
-  --wm-time-attention-batch-chunk-size 256 \
+  --wm-flow-cache-mb 1024 \
+  --wm-space-attention-batch-chunk-size 4 \
+  --wm-mlp-token-chunk-size 16384 \
+  --wm-time-attention-batch-chunk-size 8192 \
   --online-wm-batch-size 4 \
   --online-wm-space-attention-batch-chunk-size 16 \
   --online-wm-mlp-token-chunk-size 16384 \

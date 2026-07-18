@@ -26,7 +26,7 @@ SEED="${SEED:-42}"
 STAMP="${STAMP:-$(date '+%Y%m%d_%H%M%S')}"
 GPU_LIST="${GPU_LIST:-}"
 ALLOW_GPU_OVERSUBSCRIBE="${ALLOW_GPU_OVERSUBSCRIBE:-0}"
-CITIES="${CITIES:-gretz,ingolstadt,fontenay}"
+CITIES="${CITIES-gretz,ingolstadt,fontenay}"
 TRAIN_DEVICE="${TRAIN_DEVICE:-cuda}"
 CPU_THREADS_PER_JOB="${CPU_THREADS_PER_JOB:-}"
 DRY_RUN="${DRY_RUN:-0}"
@@ -35,6 +35,41 @@ if [[ "${TRAIN_DEVICE}" != "cuda" && "${TRAIN_DEVICE}" != "cpu" ]]; then
   echo "TRAIN_DEVICE must be either cuda or cpu, got: ${TRAIN_DEVICE}" >&2
   exit 2
 fi
+if [[ "${ALLOW_GPU_OVERSUBSCRIBE}" != "0" && "${ALLOW_GPU_OVERSUBSCRIBE}" != "1" ]]; then
+  echo "ALLOW_GPU_OVERSUBSCRIBE must be 0 or 1, got: ${ALLOW_GPU_OVERSUBSCRIBE}" >&2
+  exit 2
+fi
+if [[ "${DRY_RUN}" != "0" && "${DRY_RUN}" != "1" ]]; then
+  echo "DRY_RUN must be 0 or 1, got: ${DRY_RUN}" >&2
+  exit 2
+fi
+if [[ -z "${CITIES}" || "${CITIES}" == ,* || "${CITIES}" == *, || "${CITIES}" == *,,* ]]; then
+  echo "CITIES must be a non-empty comma-separated list without empty entries." >&2
+  echo "Valid city names: gretz,ingolstadt,fontenay" >&2
+  exit 2
+fi
+
+declare -A SEEN_CITIES=()
+SELECTED_CITIES=()
+IFS=',' read -r -a REQUESTED_CITIES <<< "${CITIES}"
+for city in "${REQUESTED_CITIES[@]}"; do
+  case "${city}" in
+    gretz|ingolstadt|fontenay)
+      ;;
+    *)
+      echo "Unknown city in CITIES: ${city}" >&2
+      echo "Valid city names: gretz,ingolstadt,fontenay" >&2
+      exit 2
+      ;;
+  esac
+  if [[ -n "${SEEN_CITIES[${city}]+x}" ]]; then
+    echo "Duplicate city in CITIES: ${city}" >&2
+    exit 2
+  fi
+  SEEN_CITIES["${city}"]=1
+  SELECTED_CITIES+=("${city}")
+done
+CITIES="$(IFS=,; printf '%s' "${SELECTED_CITIES[*]}")"
 
 DEFAULT_PY="/home/wangwenrui/opt/miniconda3/envs/URB/bin/python"
 if [[ -n "${PYTHON_BIN:-}" ]]; then
@@ -65,7 +100,10 @@ STATUS_FILE="${LOG_DIR}/status.tsv"
 MASTER_LOG="${LOG_DIR}/master.log"
 MANIFEST="${LOG_DIR}/manifest.txt"
 MPLCONFIG_ROOT="${LOG_DIR}/matplotlib"
-mkdir -p "${LOG_DIR}" "${MPLCONFIG_ROOT}"
+if ! mkdir -p "${LOG_DIR}" "${MPLCONFIG_ROOT}"; then
+  echo "Failed to create run log directory: ${LOG_DIR}" >&2
+  exit 2
+fi
 
 GRETZ_TAG="gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1"
 GRETZ_POST_TAG="gretz_armainvilliers_current_to_dest_incident_20260530_odcompact"
@@ -116,56 +154,92 @@ rebase_settings() {
   printf "%s\n" "${rebased_settings}"
 }
 
-if ! GRETZ_SETTINGS="$(rebase_settings gretz "${GRETZ_SETTINGS_SOURCE}")"; then
-  exit 2
-fi
-if ! ING_SETTINGS="$(rebase_settings ingolstadt "${ING_SETTINGS_SOURCE}")"; then
-  exit 2
-fi
-if ! FONT_SETTINGS="$(rebase_settings fontenay "${FONT_SETTINGS_SOURCE}")"; then
-  exit 2
-fi
-
 # city|algorithm|entrypoint|tag|settings|post_state|hdv_state|max_steps|sumo_extra_args
-TASKS=(
-  "gretz|ippo|baseline/run_toy_cross_bottleneck_ippo_torchrl.py|${GRETZ_TAG}|${GRETZ_SETTINGS}|${GRETZ_POST}|${GRETZ_HDV}|0|--collision.action warn"
-  "gretz|mappo|baseline/run_toy_cross_bottleneck_mappo_torchrl.py|${GRETZ_TAG}|${GRETZ_SETTINGS}|${GRETZ_POST}|${GRETZ_HDV}|0|--collision.action warn"
-  "gretz|iql|baseline/run_toy_cross_bottleneck_iql_torchrl.py|${GRETZ_TAG}|${GRETZ_SETTINGS}|${GRETZ_POST}|${GRETZ_HDV}|0|--collision.action warn"
-  "ingolstadt|ippo|baseline/run_toy_cross_bottleneck_ippo_torchrl.py|${ING_TAG}|${ING_SETTINGS}|${ING_POST}|${ING_HDV}|0|"
-  "ingolstadt|mappo|baseline/run_toy_cross_bottleneck_mappo_torchrl.py|${ING_TAG}|${ING_SETTINGS}|${ING_POST}|${ING_HDV}|0|"
-  "ingolstadt|iql|baseline/run_toy_cross_bottleneck_iql_torchrl.py|${ING_TAG}|${ING_SETTINGS}|${ING_POST}|${ING_HDV}|0|"
-  "fontenay|ippo|baseline/run_toy_cross_bottleneck_ippo_torchrl.py|${FONT_TAG}|${FONT_SETTINGS}|${FONT_POST}|${FONT_HDV}|3600|${FONT_BLOCKER60_SUMO_EXTRA}"
-  "fontenay|mappo|baseline/run_toy_cross_bottleneck_mappo_torchrl.py|${FONT_TAG}|${FONT_SETTINGS}|${FONT_POST}|${FONT_HDV}|3600|${FONT_BLOCKER60_SUMO_EXTRA}"
-  "fontenay|iql|baseline/run_toy_cross_bottleneck_iql_torchrl.py|${FONT_TAG}|${FONT_SETTINGS}|${FONT_POST}|${FONT_HDV}|3600|${FONT_BLOCKER60_SUMO_EXTRA}"
-)
-
-IFS=',' read -r -a SELECTED_CITIES <<< "${CITIES}"
-FILTERED_TASKS=()
-for task in "${TASKS[@]}"; do
-  IFS='|' read -r city _ <<< "${task}"
-  for selected_city in "${SELECTED_CITIES[@]}"; do
-    if [[ "${city}" == "${selected_city}" ]]; then
-      FILTERED_TASKS+=("${task}")
-      break
-    fi
-  done
+TASKS=()
+for city in "${SELECTED_CITIES[@]}"; do
+  case "${city}" in
+    gretz)
+      if ! settings="$(rebase_settings gretz "${GRETZ_SETTINGS_SOURCE}")"; then
+        exit 2
+      fi
+      tag="${GRETZ_TAG}"
+      post_state="${GRETZ_POST}"
+      hdv_state="${GRETZ_HDV}"
+      max_steps=0
+      sumo_extra="--collision.action warn"
+      ;;
+    ingolstadt)
+      if ! settings="$(rebase_settings ingolstadt "${ING_SETTINGS_SOURCE}")"; then
+        exit 2
+      fi
+      tag="${ING_TAG}"
+      post_state="${ING_POST}"
+      hdv_state="${ING_HDV}"
+      max_steps=0
+      sumo_extra=""
+      ;;
+    fontenay)
+      if ! settings="$(rebase_settings fontenay "${FONT_SETTINGS_SOURCE}")"; then
+        exit 2
+      fi
+      tag="${FONT_TAG}"
+      post_state="${FONT_POST}"
+      hdv_state="${FONT_HDV}"
+      max_steps=3600
+      sumo_extra="${FONT_BLOCKER60_SUMO_EXTRA}"
+      ;;
+  esac
+  TASKS+=(
+    "${city}|ippo|baseline/run_toy_cross_bottleneck_ippo_torchrl.py|${tag}|${settings}|${post_state}|${hdv_state}|${max_steps}|${sumo_extra}"
+    "${city}|mappo|baseline/run_toy_cross_bottleneck_mappo_torchrl.py|${tag}|${settings}|${post_state}|${hdv_state}|${max_steps}|${sumo_extra}"
+    "${city}|iql|baseline/run_toy_cross_bottleneck_iql_torchrl.py|${tag}|${settings}|${post_state}|${hdv_state}|${max_steps}|${sumo_extra}"
+  )
 done
-TASKS=("${FILTERED_TASKS[@]}")
-if [[ "${#TASKS[@]}" -eq 0 ]]; then
-  echo "CITIES selected no tasks: ${CITIES}" >&2
-  echo "Valid city names: gretz,ingolstadt,fontenay" >&2
-  exit 2
-fi
 
 if [[ "${TRAIN_DEVICE}" == "cuda" ]]; then
-  if [[ -z "${GPU_LIST}" ]] && command -v nvidia-smi >/dev/null 2>&1; then
-    GPU_LIST="$(nvidia-smi --query-gpu=index --format=csv,noheader | paste -sd, -)"
+  if ! command -v nvidia-smi >/dev/null 2>&1; then
+    echo "nvidia-smi is required to validate CUDA GPU ids." >&2
+    exit 2
+  fi
+  if ! available_gpu_output="$(nvidia-smi --query-gpu=index --format=csv,noheader,nounits 2>/dev/null)"; then
+    echo "nvidia-smi failed while enumerating CUDA GPUs." >&2
+    exit 2
+  fi
+  mapfile -t AVAILABLE_GPUS <<< "${available_gpu_output}"
+  declare -A AVAILABLE_GPU_IDS=()
+  NORMALIZED_AVAILABLE_GPUS=()
+  for gpu in "${AVAILABLE_GPUS[@]}"; do
+    gpu="${gpu//[[:space:]]/}"
+    if [[ -n "${gpu}" ]]; then
+      AVAILABLE_GPU_IDS["${gpu}"]=1
+      NORMALIZED_AVAILABLE_GPUS+=("${gpu}")
+    fi
+  done
+  if [[ "${#AVAILABLE_GPU_IDS[@]}" -eq 0 ]]; then
+    echo "No CUDA GPUs detected by nvidia-smi." >&2
+    exit 2
   fi
   if [[ -z "${GPU_LIST}" ]]; then
-    echo "No GPUs detected. Set GPU_LIST to one GPU id per selected task." >&2
+    GPU_LIST="$(IFS=,; printf '%s' "${NORMALIZED_AVAILABLE_GPUS[*]}")"
+  fi
+  if [[ "${GPU_LIST}" == ,* || "${GPU_LIST}" == *, || "${GPU_LIST}" == *,,* ]]; then
+    echo "GPU_LIST must be a comma-separated list without empty entries: ${GPU_LIST}" >&2
     exit 2
   fi
   IFS=',' read -r -a GPUS <<< "${GPU_LIST}"
+  declare -A SEEN_GPUS=()
+  for gpu in "${GPUS[@]}"; do
+    if [[ ! "${gpu}" =~ ^[0-9]+$ || -z "${AVAILABLE_GPU_IDS[${gpu}]+x}" ]]; then
+      echo "GPU_LIST contains unavailable CUDA GPU id: ${gpu}" >&2
+      echo "Available GPU ids: $(IFS=,; printf '%s' "${NORMALIZED_AVAILABLE_GPUS[*]}")" >&2
+      exit 2
+    fi
+    if [[ "${ALLOW_GPU_OVERSUBSCRIBE}" == "0" && -n "${SEEN_GPUS[${gpu}]+x}" ]]; then
+      echo "GPU_LIST contains duplicate id ${gpu} without ALLOW_GPU_OVERSUBSCRIBE=1." >&2
+      exit 2
+    fi
+    SEEN_GPUS["${gpu}"]=1
+  done
   if [[ "${#GPUS[@]}" -lt "${#TASKS[@]}" && "${ALLOW_GPU_OVERSUBSCRIBE}" != "1" ]]; then
     echo "Found ${#GPUS[@]} GPU slots for ${#TASKS[@]} simultaneous jobs." >&2
     echo "Provide one id per task, or set ALLOW_GPU_OVERSUBSCRIBE=1 to assign jobs round-robin." >&2
@@ -174,14 +248,24 @@ if [[ "${TRAIN_DEVICE}" == "cuda" ]]; then
 else
   GPU_LIST="cpu"
   GPUS=("cpu")
+  available_threads="$(nproc)"
+  if [[ ! "${available_threads}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "nproc returned an invalid CPU thread count: ${available_threads}" >&2
+    exit 2
+  fi
   if [[ -z "${CPU_THREADS_PER_JOB}" ]]; then
-    available_threads="$(nproc)"
     CPU_THREADS_PER_JOB=$((available_threads / (${#TASKS[@]} + 2)))
     if [[ "${CPU_THREADS_PER_JOB}" -lt 1 ]]; then
       CPU_THREADS_PER_JOB=1
     elif [[ "${CPU_THREADS_PER_JOB}" -gt 8 ]]; then
       CPU_THREADS_PER_JOB=8
     fi
+  elif [[ ! "${CPU_THREADS_PER_JOB}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "CPU_THREADS_PER_JOB must be a positive integer, got: ${CPU_THREADS_PER_JOB}" >&2
+    exit 2
+  elif (( CPU_THREADS_PER_JOB > available_threads )); then
+    echo "CPU_THREADS_PER_JOB=${CPU_THREADS_PER_JOB} exceeds available CPU threads (${available_threads})." >&2
+    exit 2
   fi
 fi
 
@@ -252,6 +336,116 @@ write_status() {
     "${gpu}" "${pid}" "${rc}" "${out_dir}" >> "${STATUS_FILE}"
 }
 
+worker_group_alive() {
+  [[ -n "${WORKER_CHILD_PGID:-}" ]] && kill -0 -- "-${WORKER_CHILD_PGID}" 2>/dev/null
+}
+
+worker_cleanup() {
+  local attempt
+  if [[ "${WORKER_CLEANUP_DONE:-0}" == "1" ]]; then
+    return "${WORKER_CLEANUP_RC:-0}"
+  fi
+  WORKER_CLEANUP_DONE=1
+  WORKER_CLEANUP_RC=0
+  trap '' HUP INT TERM
+
+  # The signal can arrive in the tiny interval before setsid establishes the
+  # new process group. Terminating the leader directly closes that race; the
+  # group signal below handles the post-setsid Python/SUMO descendants.
+  if [[ -n "${WORKER_CHILD_PID:-}" && "${WORKER_CHILD_REAPED:-0}" != "1" ]]; then
+    kill -TERM "${WORKER_CHILD_PID}" 2>/dev/null || true
+  fi
+  if worker_group_alive; then
+    kill -TERM -- "-${WORKER_CHILD_PGID}" 2>/dev/null || true
+    for attempt in {1..10}; do
+      if ! worker_group_alive; then
+        break
+      fi
+      sleep 0.5
+    done
+  fi
+  if worker_group_alive; then
+    kill -KILL -- "-${WORKER_CHILD_PGID}" 2>/dev/null || true
+  fi
+  if [[ -n "${WORKER_CHILD_PID:-}" && "${WORKER_CHILD_REAPED:-0}" != "1" ]]; then
+    wait "${WORKER_CHILD_PID}" 2>/dev/null || true
+    WORKER_CHILD_REAPED=1
+  fi
+  for attempt in {1..10}; do
+    if ! worker_group_alive; then
+      break
+    fi
+    kill -KILL -- "-${WORKER_CHILD_PGID}" 2>/dev/null || true
+    sleep 0.2
+  done
+  if worker_group_alive; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] ERROR process group ${WORKER_CHILD_PGID} survived cleanup"
+    WORKER_CLEANUP_RC=125
+  fi
+  return "${WORKER_CLEANUP_RC}"
+}
+
+worker_signal() {
+  local signal_name="$1"
+  local signal_rc="$2"
+  if [[ "${WORKER_LAUNCHING:-0}" == "1" ]]; then
+    if [[ -z "${WORKER_PENDING_SIGNAL_NAME:-}" ]]; then
+      WORKER_PENDING_SIGNAL_NAME="${signal_name}"
+      WORKER_PENDING_SIGNAL_RC="${signal_rc}"
+    fi
+    return
+  fi
+  if [[ "${WORKER_SIGNALLED:-0}" == "1" ]]; then
+    return
+  fi
+  WORKER_SIGNALLED=1
+  WORKER_SIGNAL_NAME="${signal_name}"
+  WORKER_REQUESTED_RC="${signal_rc}"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] CANCEL city=${WORKER_CITY} algorithm=${WORKER_ALGORITHM} signal=${signal_name}"
+  exit "${signal_rc}"
+}
+
+worker_exit() {
+  # Preserve the triggering status via the trap argument, then make EXIT
+  # teardown non-interruptible before doing any other shell work.
+  trap '' HUP INT TERM
+  trap - EXIT
+  if [[ "${WORKER_EXIT_ACTIVE:-0}" == "1" ]]; then
+    return
+  fi
+  WORKER_EXIT_ACTIVE=1
+  local original_rc="$1"
+  local final_rc state
+  final_rc="${WORKER_REQUESTED_RC:-${original_rc}}"
+
+  if ! worker_cleanup; then
+    final_rc=125
+  fi
+
+  # Bash <5.1 has no `wait -n -p`; notify the fallback supervisor before
+  # publishing the terminal status so a broken notification cannot leave DONE.
+  if [[ "${WAIT_HAS_P:-1}" == "0" ]]; then
+    if ! printf '%s\n' "${BASHPID}" >&"${COMPLETION_FD}"; then
+      echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] ERROR failed to notify parent supervisor"
+      final_rc=125
+    fi
+  fi
+
+  if [[ "${WORKER_SIGNALLED:-0}" == "1" ]]; then
+    state="CANCELLED"
+  elif [[ "${final_rc}" == "0" ]]; then
+    state="DONE"
+  else
+    state="FAIL"
+  fi
+  if ! write_status "${state}" "${WORKER_CITY}" "${WORKER_ALGORITHM}" \
+      "${WORKER_GPU}" "${BASHPID}" "${final_rc}" "${WORKER_OUT_DIR}"; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] ERROR failed to write terminal status=${state}"
+    final_rc=125
+  fi
+  exit "${final_rc}"
+}
+
 run_one() {
   local city="$1"
   local algorithm="$2"
@@ -267,11 +461,44 @@ run_one() {
   local log_file="${out_dir}/train.log"
   local mpl_dir="${MPLCONFIG_ROOT}/${city}_${algorithm}"
   local rc=0
-  local child_pid=""
+  local child_pgid=""
   local -a cmd
 
-  mkdir -p "${out_dir}" "${mpl_dir}"
-  write_status "START" "${city}" "${algorithm}" "${gpu}" "${BASHPID}" "-" "${out_dir}"
+  # These globals are process-local because run_one is launched as a background
+  # shell job. Keeping them alive until EXIT makes early infrastructure failures
+  # use the same cleanup/status path as training failures.
+  WORKER_CITY="${city}"
+  WORKER_ALGORITHM="${algorithm}"
+  WORKER_GPU="${gpu}"
+  WORKER_OUT_DIR="${out_dir}"
+  WORKER_CHILD_PID=""
+  WORKER_CHILD_PGID=""
+  WORKER_CHILD_REAPED=0
+  WORKER_CLEANUP_DONE=0
+  WORKER_CLEANUP_RC=0
+  WORKER_SIGNALLED=0
+  WORKER_REQUESTED_RC=""
+  WORKER_LAUNCHING=0
+  WORKER_PENDING_SIGNAL_NAME=""
+  WORKER_PENDING_SIGNAL_RC=""
+  WORKER_EXIT_ACTIVE=0
+  trap 'worker_signal HUP 129' HUP
+  trap 'worker_signal INT 130' INT
+  trap 'worker_signal TERM 143' TERM
+  trap 'worker_exit "$?"' EXIT
+
+  if ! mkdir -p "${out_dir}" "${mpl_dir}"; then
+    echo "Failed to create output directory: ${out_dir}" >&2
+    exit 125
+  fi
+  if ! exec > "${log_file}" 2>&1; then
+    echo "Failed to open training log: ${log_file}" >&2
+    exit 125
+  fi
+  if ! write_status "START" "${city}" "${algorithm}" "${gpu}" "${BASHPID}" "-" "${out_dir}"; then
+    echo "Failed to write START status for ${city}/${algorithm}" >&2
+    exit 125
+  fi
 
   cmd=(
     "${PY}" -u "${entrypoint}"
@@ -298,59 +525,57 @@ run_one() {
     cmd+=(--sumo-extra-args "${sumo_extra}")
   fi
 
-  {
-    terminate_job_group() {
-      echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] CANCEL city=${city} algorithm=${algorithm}"
-      if [[ -n "${child_pid}" ]]; then
-        kill -TERM -- "-${child_pid}" 2>/dev/null || true
-        for _attempt in {1..10}; do
-          if ! kill -0 -- "-${child_pid}" 2>/dev/null; then
-            break
-          fi
-          sleep 1
-        done
-        kill -KILL -- "-${child_pid}" 2>/dev/null || true
-        wait "${child_pid}" 2>/dev/null || true
-      fi
-      write_status "CANCELLED" "${city}" "${algorithm}" "${gpu}" "${BASHPID}" "143" "${out_dir}"
-      exit 143
-    }
-    trap terminate_job_group INT TERM
-
-    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] START city=${city} algorithm=${algorithm} device=${TRAIN_DEVICE} slot=${gpu}"
-    echo "output_dir=${out_dir}"
-    if [[ "${TRAIN_DEVICE}" == "cuda" ]]; then
-      echo "CUDA_VISIBLE_DEVICES=${gpu} MPLCONFIGDIR=${mpl_dir} ${cmd[*]}"
-      CUDA_VISIBLE_DEVICES="${gpu}" MPLCONFIGDIR="${mpl_dir}" setsid "${cmd[@]}" &
-    else
-      echo "CUDA_VISIBLE_DEVICES= OMP_NUM_THREADS=${CPU_THREADS_PER_JOB} MPLCONFIGDIR=${mpl_dir} ${cmd[*]}"
-      CUDA_VISIBLE_DEVICES="" \
-        OMP_NUM_THREADS="${CPU_THREADS_PER_JOB}" \
-        MKL_NUM_THREADS="${CPU_THREADS_PER_JOB}" \
-        OPENBLAS_NUM_THREADS="${CPU_THREADS_PER_JOB}" \
-        MPLCONFIGDIR="${mpl_dir}" \
-        setsid "${cmd[@]}" &
-    fi
-    child_pid=$!
-    if wait "${child_pid}"; then
-      rc=0
-    else
-      rc=$?
-    fi
-    trap - INT TERM
-    kill -TERM -- "-${child_pid}" 2>/dev/null || true
-    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] FINISH city=${city} algorithm=${algorithm} rc=${rc}"
-  } > "${log_file}" 2>&1
-
-  if [[ "${rc}" == "0" ]]; then
-    write_status "DONE" "${city}" "${algorithm}" "${gpu}" "${BASHPID}" "${rc}" "${out_dir}"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] START city=${city} algorithm=${algorithm} device=${TRAIN_DEVICE} slot=${gpu}"
+  echo "output_dir=${out_dir}"
+  # Defer catchable signals until the just-forked child PID/PGID has been
+  # registered. Otherwise a signal in the `command &` -> `$!` window could
+  # make EXIT cleanup miss an already-running Python process.
+  WORKER_LAUNCHING=1
+  if [[ "${TRAIN_DEVICE}" == "cuda" ]]; then
+    echo "CUDA_VISIBLE_DEVICES=${gpu} MPLCONFIGDIR=${mpl_dir} ${cmd[*]}"
+    CUDA_VISIBLE_DEVICES="${gpu}" MPLCONFIGDIR="${mpl_dir}" setsid "${cmd[@]}" &
   else
-    write_status "FAIL" "${city}" "${algorithm}" "${gpu}" "${BASHPID}" "${rc}" "${out_dir}"
+    echo "CUDA_VISIBLE_DEVICES= OMP_NUM_THREADS=${CPU_THREADS_PER_JOB} MPLCONFIGDIR=${mpl_dir} ${cmd[*]}"
+    CUDA_VISIBLE_DEVICES="" \
+      OMP_NUM_THREADS="${CPU_THREADS_PER_JOB}" \
+      MKL_NUM_THREADS="${CPU_THREADS_PER_JOB}" \
+      OPENBLAS_NUM_THREADS="${CPU_THREADS_PER_JOB}" \
+      MPLCONFIGDIR="${mpl_dir}" \
+      setsid "${cmd[@]}" &
   fi
-  return "${rc}"
+  WORKER_CHILD_PID=$!
+  WORKER_CHILD_PGID="${WORKER_CHILD_PID}"
+  for _attempt in {1..100}; do
+    child_pgid="$(ps -o pgid= -p "${WORKER_CHILD_PID}" 2>/dev/null | tr -d '[:space:]')"
+    if [[ -z "${child_pgid}" || "${child_pgid}" == "${WORKER_CHILD_PGID}" ]]; then
+      break
+    fi
+    sleep 0.01
+  done
+  if [[ -n "${child_pgid}" && "${child_pgid}" != "${WORKER_CHILD_PGID}" ]]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] ERROR setsid child pid=${WORKER_CHILD_PID} has unexpected pgid=${child_pgid}"
+    kill "${WORKER_CHILD_PID}" 2>/dev/null || true
+    wait "${WORKER_CHILD_PID}" 2>/dev/null || true
+    WORKER_CHILD_REAPED=1
+    WORKER_CHILD_PGID=""
+    WORKER_LAUNCHING=0
+    exit 125
+  fi
+  WORKER_LAUNCHING=0
+  if [[ -n "${WORKER_PENDING_SIGNAL_NAME}" ]]; then
+    worker_signal "${WORKER_PENDING_SIGNAL_NAME}" "${WORKER_PENDING_SIGNAL_RC}"
+  fi
+  if wait "${WORKER_CHILD_PID}"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  WORKER_CHILD_REAPED=1
+  echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] FINISH city=${city} algorithm=${algorithm} rc=${rc}"
+  exit "${rc}"
 }
 
-{
+if ! {
   echo "repo_root=${ROOT}"
   echo "git_commit=$(git rev-parse HEAD 2>/dev/null || echo unknown)"
   echo "python=${PY}"
@@ -371,10 +596,19 @@ run_one() {
   echo "fontenay_sumo_extra_args=${FONT_BLOCKER60_SUMO_EXTRA}"
   echo "ppo_gradient_coverage=all_actual_samples_once_per_epoch"
   echo "iql_update_semantics=persistent_transition_replay_without_replacement"
-} > "${MANIFEST}"
+} > "${MANIFEST}"; then
+  echo "Failed to initialize manifest: ${MANIFEST}" >&2
+  exit 2
+fi
 
-printf "time\tstate\tcity\talgorithm\tgpu\tpid\trc\tout_dir\n" > "${STATUS_FILE}"
-echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] launching ${#TASKS[@]} jobs in parallel" > "${MASTER_LOG}"
+if ! printf "time\tstate\tcity\talgorithm\tgpu\tpid\trc\tout_dir\n" > "${STATUS_FILE}"; then
+  echo "Failed to initialize status file: ${STATUS_FILE}" >&2
+  exit 2
+fi
+if ! echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] launching ${#TASKS[@]} jobs in parallel" > "${MASTER_LOG}"; then
+  echo "Failed to initialize master log: ${MASTER_LOG}" >&2
+  exit 2
+fi
 echo "stamp=${STAMP}"
 echo "log_dir=${LOG_DIR}"
 echo "status_file=${STATUS_FILE}"
@@ -394,35 +628,158 @@ if [[ "${DRY_RUN}" == "1" ]]; then
   exit 0
 fi
 
-PIDS=()
-NAMES=()
-terminate_children() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] received termination signal" >> "${MASTER_LOG}"
-  for pid in "${PIDS[@]}"; do
-    kill "${pid}" 2>/dev/null || true
+WAIT_HAS_P=0
+COMPLETION_FIFO=""
+COMPLETION_FD=""
+if (( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1) )); then
+  WAIT_HAS_P=1
+else
+  COMPLETION_FIFO="${LOG_DIR}/completed.fifo"
+  if ! mkfifo "${COMPLETION_FIFO}"; then
+    echo "Failed to create Bash 5.0 completion FIFO: ${COMPLETION_FIFO}" >&2
+    exit 2
+  fi
+  if ! exec {COMPLETION_FD}<>"${COMPLETION_FIFO}"; then
+    echo "Failed to open Bash 5.0 completion FIFO: ${COMPLETION_FIFO}" >&2
+    rm -f "${COMPLETION_FIFO}"
+    exit 2
+  fi
+fi
+
+declare -A ACTIVE_NAMES=()
+ACTIVE_COUNT=0
+PARENT_CLEANUP_DONE=0
+PARENT_SIGNALLED=0
+PARENT_EXIT_ACTIVE=0
+PARENT_REGISTERING=0
+PARENT_PENDING_SIGNAL_NAME=""
+PARENT_PENDING_SIGNAL_RC=""
+
+parent_cleanup() {
+  local pid
+  if [[ "${PARENT_CLEANUP_DONE}" == "1" ]]; then
+    return
+  fi
+  PARENT_CLEANUP_DONE=1
+  trap '' HUP INT TERM
+  for pid in "${!ACTIVE_NAMES[@]}"; do
+    kill -TERM "${pid}" 2>/dev/null || true
   done
-  wait || true
-  exit 130
+  for pid in "${!ACTIVE_NAMES[@]}"; do
+    wait "${pid}" 2>/dev/null || true
+    unset 'ACTIVE_NAMES[$pid]'
+  done
+  ACTIVE_COUNT=0
+  if [[ -n "${COMPLETION_FD}" ]]; then
+    exec {COMPLETION_FD}>&-
+    COMPLETION_FD=""
+  fi
+  if [[ -n "${COMPLETION_FIFO}" ]]; then
+    rm -f "${COMPLETION_FIFO}"
+  fi
 }
-trap terminate_children INT TERM
+
+parent_signal() {
+  local signal_name="$1"
+  local signal_rc="$2"
+  if [[ "${PARENT_REGISTERING}" == "1" ]]; then
+    if [[ -z "${PARENT_PENDING_SIGNAL_NAME}" ]]; then
+      PARENT_PENDING_SIGNAL_NAME="${signal_name}"
+      PARENT_PENDING_SIGNAL_RC="${signal_rc}"
+    fi
+    return
+  fi
+  if [[ "${PARENT_SIGNALLED}" == "1" ]]; then
+    return
+  fi
+  PARENT_SIGNALLED=1
+  echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] received ${signal_name}; terminating ${ACTIVE_COUNT} active jobs" >> "${MASTER_LOG}"
+  exit "${signal_rc}"
+}
+
+parent_exit() {
+  trap '' HUP INT TERM
+  trap - EXIT
+  if [[ "${PARENT_EXIT_ACTIVE}" == "1" ]]; then
+    return
+  fi
+  PARENT_EXIT_ACTIVE=1
+  local rc="$1"
+  parent_cleanup
+  exit "${rc}"
+}
+
+trap 'parent_signal HUP 129' HUP
+trap 'parent_signal INT 130' INT
+trap 'parent_signal TERM 143' TERM
+trap 'parent_exit "$?"' EXIT
 
 for idx in "${!TASKS[@]}"; do
   IFS='|' read -r city algorithm entrypoint tag settings post_state hdv_state max_steps sumo_extra <<< "${TASKS[$idx]}"
   gpu="${GPUS[$((idx % ${#GPUS[@]}))]}"
+  # As in the worker, defer signals across `run_one &` -> `$!` registration so
+  # parent EXIT cleanup cannot miss a wrapper that has already been forked.
+  PARENT_REGISTERING=1
   run_one "${city}" "${algorithm}" "${entrypoint}" "${tag}" "${settings}" \
     "${post_state}" "${hdv_state}" "${max_steps}" "${sumo_extra}" "${gpu}" &
-  PIDS+=("$!")
-  NAMES+=("${city}/${algorithm}")
+  pid=$!
+  ACTIVE_NAMES["${pid}"]="${city}/${algorithm}"
+  ACTIVE_COUNT=$((ACTIVE_COUNT + 1))
+  PARENT_REGISTERING=0
+  if [[ -n "${PARENT_PENDING_SIGNAL_NAME}" ]]; then
+    parent_signal "${PARENT_PENDING_SIGNAL_NAME}" "${PARENT_PENDING_SIGNAL_RC}"
+  fi
 done
 
 failures=0
-for idx in "${!PIDS[@]}"; do
-  if wait "${PIDS[$idx]}"; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] DONE ${NAMES[$idx]}" >> "${MASTER_LOG}"
+while (( ACTIVE_COUNT > 0 )); do
+  finished_pid=""
+  rc=0
+  if [[ "${WAIT_HAS_P}" == "1" ]]; then
+    active_pids=("${!ACTIVE_NAMES[@]}")
+    if wait -n -p finished_pid "${active_pids[@]}"; then
+      rc=0
+    else
+      rc=$?
+    fi
   else
-    rc=$?
+    while [[ -z "${finished_pid}" ]]; do
+      candidate=""
+      if IFS= read -r -t 5 candidate <&"${COMPLETION_FD}"; then
+        if [[ "${candidate}" =~ ^[1-9][0-9]*$ && -n "${ACTIVE_NAMES[${candidate}]+x}" ]]; then
+          finished_pid="${candidate}"
+        fi
+      else
+        # A wrapper killed with SIGKILL cannot notify the FIFO. Bash retains
+        # its wait status, so find the vanished active pid and reap it directly.
+        for candidate in "${!ACTIVE_NAMES[@]}"; do
+          if ! kill -0 "${candidate}" 2>/dev/null; then
+            finished_pid="${candidate}"
+            break
+          fi
+        done
+      fi
+    done
+    if wait "${finished_pid}"; then
+      rc=0
+    else
+      rc=$?
+    fi
+  fi
+
+  if [[ -z "${finished_pid}" || -z "${ACTIVE_NAMES[${finished_pid}]+x}" ]]; then
     failures=$((failures + 1))
-    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] FAIL ${NAMES[$idx]} rc=${rc}" >> "${MASTER_LOG}"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] FAIL supervisor could not identify reaped pid rc=${rc}" >> "${MASTER_LOG}"
+    exit 125
+  fi
+  name="${ACTIVE_NAMES[${finished_pid}]}"
+  unset 'ACTIVE_NAMES[$finished_pid]'
+  ACTIVE_COUNT=$((ACTIVE_COUNT - 1))
+  if [[ "${rc}" == "0" ]]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] DONE ${name}" >> "${MASTER_LOG}"
+  else
+    failures=$((failures + 1))
+    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] FAIL ${name} rc=${rc}" >> "${MASTER_LOG}"
   fi
 done
 

@@ -1239,6 +1239,7 @@ def train(args):
         task_name=_task_name,
         task_names=_task_names,
         seq_len=args.seq_len,
+        cache_mb=args.flow_cache_mb,
         action_key=getattr(args, "action_key", "av_planned_edge_flow"),
         aux_action_key=(getattr(args, "aux_action_key", "") or None),
         aux_target_mode=str(getattr(args, "hdv_policy_target_mode", "step")),
@@ -3254,6 +3255,12 @@ if __name__ == "__main__":
     p.add_argument("--seq_len", type=int, default=32)
     p.add_argument("--num_workers", type=int, default=8)
     p.add_argument("--batch_size", type=int, default=24)
+    p.add_argument(
+        "--flow_cache_mb",
+        type=int,
+        default=512,
+        help="Host-memory LRU budget for loaded flow shards (default: 512 MiB).",
+    )
 
     # dynamics arch
     p.add_argument("--d_model_dyn", type=int, default=512)
