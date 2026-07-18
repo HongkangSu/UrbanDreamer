@@ -907,6 +907,7 @@ def cfm_predict_one_timestep(
     n_steps: int = 1,                   # 1=Euler, 2=Midpoint-like fixed-step
     initial_state: Optional[torch.Tensor] = None,
     init_mode: str = "randn",
+    use_autocast: Optional[bool] = None,
 ) -> torch.Tensor:
     """Differentiable CFM ODE prediction for one-timestep transition supervision."""
     device = past_packed.device
@@ -952,7 +953,10 @@ def cfm_predict_one_timestep(
             actions_in = _slice_model_actions_time(actions, t + 1)
             actmask_in = None if act_mask is None else act_mask[:, : t + 1]
 
-        with torch.autocast(device_type=device.type, enabled=(device.type == "cuda")):
+        autocast_enabled = device.type == "cuda" and (
+            True if use_autocast is None else bool(use_autocast)
+        )
+        with torch.autocast(device_type=device.type, enabled=autocast_enabled):
             v_pred, _ = dyn(
                 actions_in, None, None, packed_seq,
                 act_mask=actmask_in,
@@ -1616,6 +1620,39 @@ def train(args):
         graph_cond_edge_conditioning_scale=float(getattr(args, "graph_cond_edge_conditioning_scale", 1.0)),
         action_reconstruction=(float(getattr(args, "action_reconstruction_weight", 0.0)) > 0.0),
     ).to(device)
+    dyn.transformer.gradient_checkpointing = bool(
+        getattr(args, "gradient_checkpointing", False)
+    )
+    if is_rank0() and dyn.transformer.gradient_checkpointing:
+        print("Activation checkpointing enabled for dynamics transformer layers.")
+    space_attention_batch_chunk_size = int(
+        getattr(args, "space_attention_batch_chunk_size", 0)
+    )
+    if space_attention_batch_chunk_size > 0:
+        for layer in dyn.transformer.layers:
+            layer.space.attention_batch_chunk_size = space_attention_batch_chunk_size
+        if is_rank0():
+            print(
+                "Space-attention batch chunking enabled: "
+                f"chunk_size={space_attention_batch_chunk_size}."
+            )
+    time_attention_batch_chunk_size = int(
+        getattr(args, "time_attention_batch_chunk_size", 0)
+    )
+    if time_attention_batch_chunk_size > 0:
+        for layer in dyn.transformer.layers:
+            layer.time.attention_batch_chunk_size = time_attention_batch_chunk_size
+        if is_rank0():
+            print(
+                "Time-attention batch chunking enabled: "
+                f"chunk_size={time_attention_batch_chunk_size}."
+            )
+    mlp_token_chunk_size = int(getattr(args, "mlp_token_chunk_size", 0))
+    if mlp_token_chunk_size > 0:
+        for layer in dyn.transformer.layers:
+            layer.mlp.token_chunk_size = mlp_token_chunk_size
+        if is_rank0():
+            print(f"MLP token chunking enabled: chunk_size={mlp_token_chunk_size}.")
 
     train_route_cost_head_only = bool(getattr(args, "train_route_cost_head_only", False))
     if train_route_cost_head_only:
@@ -3221,6 +3258,32 @@ if __name__ == "__main__":
     # dynamics arch
     p.add_argument("--d_model_dyn", type=int, default=512)
     p.add_argument("--dyn_depth", type=int, default=8)
+    p.add_argument(
+        "--gradient_checkpointing",
+        action="store_true",
+        help="Recompute dynamics transformer layers during backward to reduce GPU memory.",
+    )
+    p.add_argument(
+        "--space_attention_batch_chunk_size",
+        type=int,
+        default=0,
+        help=(
+            "Maximum flattened batch/time items per spatial-attention call; "
+            "0 disables chunking."
+        ),
+    )
+    p.add_argument(
+        "--mlp_token_chunk_size",
+        type=int,
+        default=0,
+        help="Maximum flattened tokens per dynamics MLP call; 0 disables chunking.",
+    )
+    p.add_argument(
+        "--time_attention_batch_chunk_size",
+        type=int,
+        default=0,
+        help="Maximum sequences per temporal-attention call; 0 uses the model default.",
+    )
     p.add_argument("--n_heads", type=int, default=4)
     p.add_argument("--dropout", type=float, default=0.0)
     p.add_argument("--mlp_ratio", type=float, default=4.0)

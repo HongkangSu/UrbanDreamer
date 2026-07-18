@@ -21,6 +21,7 @@ from baseline.run_toy_cross_bottleneck_ippo_torchrl import (  # noqa: E402
     TorchRLIppoActorCritic,
     ToyIppoTorchRLConfig,
     ToyIppoTorchRLTrainer,
+    _random_minibatch_indices,
     build_config,
     build_plan,
     build_torchrl_ippo_batch,
@@ -176,6 +177,23 @@ def test_ippo_eval_can_override_settings_drain_window():
     assert cfg.disable_human_learning_after_mutation is True
 
 
+def test_ippo_eval_can_reuse_training_categorical_sampling():
+    args = parse_args(
+        [
+            "--eval-only",
+            "--eval-policy-route-selection",
+            "training",
+            "--device",
+            "cpu",
+        ]
+    )
+
+    cfg = build_config(args)
+
+    assert cfg.real_policy_route_selection == "sample"
+    assert cfg.disable_human_learning_after_mutation is True
+
+
 def test_build_torchrl_ippo_batch_preserves_active_slots_and_advantages():
     torch.manual_seed(0)
     actor_critic = _actor_critic(obs_dim=6)
@@ -237,10 +255,23 @@ def test_torchrl_clip_ppo_update_runs_on_masked_active_samples():
 
     assert metrics["n_samples"] == 3.0
     assert metrics["update_epochs"] == 1.0
+    assert metrics["updates_per_epoch"] == 2.0
+    assert metrics["frames_per_batch"] == 3.0
     assert metrics["skipped"] == 0.0
     assert math.isfinite(metrics["loss"])
     assert math.isfinite(metrics["loss_objective"])
     assert math.isfinite(metrics["loss_critic"])
+
+
+def test_ippo_minibatches_cover_every_actual_sample_once_including_remainder():
+    np.random.seed(17)
+
+    batches = _random_minibatch_indices(n_samples=10, minibatch_size=4)
+    visited = np.concatenate(batches)
+
+    assert [len(batch) for batch in batches] == [4, 4, 2]
+    assert sorted(visited.tolist()) == list(range(10))
+    assert len(np.unique(visited)) == 10
 
 
 def test_ippo_torchrl_dry_run_plan_matches_no_cfm_toy_interface():

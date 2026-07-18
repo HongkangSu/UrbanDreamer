@@ -345,6 +345,14 @@ class LazyVehiclePathCache:
         self.penalty_factor = float(penalty_factor)
         self.max_entries = int(max_entries)
         self._cache: Dict[Tuple[int, int], List[List[int]]] = {}
+        self._hits = 0
+        self._misses = 0
+        self._interval_existing_keys: Optional[set[Tuple[int, int]]] = None
+        self._interval_lookups = 0
+        self._interval_hits = 0
+        self._interval_misses = 0
+        self._interval_warm_hits = 0
+        self._interval_entries_before = 0
 
     def _compute(self, src: int, dst: int, edge_tt: np.ndarray) -> List[List[int]]:
         return build_diverse_paths_current_to_dest(
@@ -359,12 +367,57 @@ class LazyVehiclePathCache:
     def lookup(self, src: int, dst: int, edge_tt: np.ndarray) -> List[List[int]]:
         key = (int(src), int(dst))
         cached = self._cache.get(key)
+        if self._interval_existing_keys is not None:
+            self._interval_lookups += 1
         if cached is not None:
+            self._hits += 1
+            if self._interval_existing_keys is not None:
+                self._interval_hits += 1
+                if key in self._interval_existing_keys:
+                    self._interval_warm_hits += 1
             return cached
+        self._misses += 1
+        if self._interval_existing_keys is not None:
+            self._interval_misses += 1
         paths = self._compute(int(src), int(dst), edge_tt)
         if len(self._cache) < self.max_entries:
             self._cache[key] = paths
         return paths
+
+    def stats(self) -> Dict[str, float]:
+        lookups = int(self._hits + self._misses)
+        return {
+            "lookups": float(lookups),
+            "hits": float(self._hits),
+            "misses": float(self._misses),
+            "entries": float(len(self._cache)),
+            "hit_rate": float(self._hits) / float(lookups) if lookups > 0 else 0.0,
+        }
+
+    def begin_interval(self) -> None:
+        self._interval_existing_keys = set(self._cache)
+        self._interval_lookups = 0
+        self._interval_hits = 0
+        self._interval_misses = 0
+        self._interval_warm_hits = 0
+        self._interval_entries_before = len(self._cache)
+
+    def interval_stats(self) -> Dict[str, float]:
+        lookups = int(self._interval_lookups)
+        return {
+            "lookups": float(lookups),
+            "hits": float(self._interval_hits),
+            "misses": float(self._interval_misses),
+            "warm_hits": float(self._interval_warm_hits),
+            "entries_before": float(self._interval_entries_before),
+            "entries_after": float(len(self._cache)),
+            "hit_rate": (
+                float(self._interval_hits) / float(lookups) if lookups > 0 else 0.0
+            ),
+            "warm_hit_rate": (
+                float(self._interval_warm_hits) / float(lookups) if lookups > 0 else 0.0
+            ),
+        }
 
     def lookup_batch(
         self,

@@ -26,7 +26,8 @@ import shutil
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -34,6 +35,16 @@ from typing import Any, Iterable, Mapping, Sequence
 REPO_ROOT = Path(__file__).resolve().parents[1]
 STAGES = ("collect", "wm", "online", "eval")
 EVAL_HDV_VARIANTS = ("final", "original")
+EVAL_HDV_PROTOCOLS: Mapping[str, Mapping[str, Any]] = {
+    "final": {
+        "state": "final_online_training_state",
+        "human_learning_after_mutation": True,
+    },
+    "original": {
+        "state": "source_post_mutation_state",
+        "human_learning_after_mutation": False,
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -43,6 +54,15 @@ class CitySpec:
     settings_rel: str
     post_bundle_rel: str
     sumo_extra_args: str = "--collision.action warn"
+    train_sim_buffer_after_last_depart: int | None = None
+
+
+@dataclass(frozen=True)
+class ExistingWarmupSpec:
+    run_tag: str
+    task_name: str
+    random_av_fraction: float
+    epsilon: float
 
 
 CITY_SPECS: Mapping[str, CitySpec] = {
@@ -55,10 +75,7 @@ CITY_SPECS: Mapping[str, CitySpec] = {
             "stronglivebad_collisionwarn_drain7200_20260601_"
             "neg_986733117_1_S0b_s500_e2500_v0p1/urb_fair_eval.env"
         ),
-        post_bundle_rel=(
-            "results/gretz_armainvilliers_current_to_dest_incident_20260530_odcompact/"
-            "collect_urb_fair_eval_postmutation_records"
-        ),
+        post_bundle_rel="networks/gretz_armainvilliers/post_mutation",
     ),
     "ingolstadt_custom": CitySpec(
         key="ingolstadt_custom",
@@ -67,10 +84,7 @@ CITY_SPECS: Mapping[str, CitySpec] = {
             ".urbandreamer/generated/ingolstadt_custom_current_to_dest_incident_20260528/"
             "urb_fair_eval.env"
         ),
-        post_bundle_rel=(
-            "results/ingolstadt_custom_current_to_dest_incident_20260528/"
-            "collect_urb_fair_eval_postmutation_records"
-        ),
+        post_bundle_rel="networks/ingolstadt_custom/post_mutation",
     ),
     "fontenay_en_parisis": CitySpec(
         key="fontenay_en_parisis",
@@ -80,14 +94,41 @@ CITY_SPECS: Mapping[str, CitySpec] = {
             "fontenay_en_parisis_current_to_dest_both494_incident_warmup50_"
             "fastcap_20260609/urb_fair_eval.env"
         ),
-        post_bundle_rel=(
-            "results/fontenay_en_parisis_current_to_dest_both494_incident_warmup50_"
-            "fastcap_20260609/collect_urb_fair_eval_postmutation_records"
-        ),
+        post_bundle_rel="networks/fontenay_en_parisis",
         sumo_extra_args=(
             "--collision.action warn --ignore-junction-blocker 60 "
             "--tripinfo-output.write-unfinished"
         ),
+        train_sim_buffer_after_last_depart=1500,
+    ),
+}
+
+
+EXISTING_WARMUP_SPECS: Mapping[str, ExistingWarmupSpec] = {
+    "gretz_armainvilliers": ExistingWarmupSpec(
+        run_tag=(
+            "gretz_armainvilliers_current_to_dest_incident_completion100_"
+            "stronglivebad_collisionwarn_drain7200_20260601_"
+            "neg_986733117_1_S0b_s500_e2500_v0p1"
+        ),
+        task_name="gretz_armainvilliers_urb_fair_eval_postmutation",
+        random_av_fraction=0.6,
+        epsilon=0.4,
+    ),
+    "ingolstadt_custom": ExistingWarmupSpec(
+        run_tag="ingolstadt_custom_current_to_dest_incident_20260528",
+        task_name="ingolstadt_custom_urb_fair_eval_postmutation",
+        random_av_fraction=0.6,
+        epsilon=0.4,
+    ),
+    "fontenay_en_parisis": ExistingWarmupSpec(
+        run_tag=(
+            "fontenay_en_parisis_current_to_dest_both494_incident_"
+            "warmup50_fastcap_20260609"
+        ),
+        task_name="fontenay_en_parisis_urb_fair_eval_postmutation",
+        random_av_fraction=0.6,
+        epsilon=0.4,
     ),
 }
 
@@ -141,6 +182,26 @@ def _checkpoint_episodes(raw: str | Iterable[int]) -> tuple[int, ...]:
     return result
 
 
+def _eval_hdv_variants(raw: str | Iterable[str]) -> tuple[str, ...]:
+    if isinstance(raw, str):
+        values = [
+            part.strip()
+            for part in raw.replace(";", ",").replace(" ", ",").split(",")
+            if part.strip()
+        ]
+    else:
+        values = [str(value).strip() for value in raw if str(value).strip()]
+    result = tuple(dict.fromkeys(values))
+    unknown = [value for value in result if value not in EVAL_HDV_VARIANTS]
+    if not result or unknown:
+        expected = ",".join(EVAL_HDV_VARIANTS)
+        details = f"; unknown values: {','.join(unknown)}" if unknown else ""
+        raise argparse.ArgumentTypeError(
+            f"eval HDV variants must be selected from {expected}{details}"
+        )
+    return result
+
+
 def _selected_cities(raw: str) -> tuple[CitySpec, ...]:
     names = [part.strip() for part in str(raw).replace(";", ",").split(",") if part.strip()]
     if not names or names == ["all"]:
@@ -149,6 +210,15 @@ def _selected_cities(raw: str) -> tuple[CitySpec, ...]:
     if unknown:
         raise ValueError(f"unknown cities: {unknown}; expected one of {list(CITY_SPECS)}")
     return tuple(CITY_SPECS[name] for name in names)
+
+
+def _city_gpu_ids(raw: str) -> tuple[str, ...]:
+    gpu_ids = tuple(part.strip() for part in str(raw).split(",") if part.strip())
+    if len(set(gpu_ids)) != len(gpu_ids):
+        raise ValueError("--city-gpus must not contain duplicate GPU IDs")
+    if any(not re.fullmatch(r"[0-9]+", gpu_id) for gpu_id in gpu_ids):
+        raise ValueError("--city-gpus accepts comma-separated numeric CUDA device IDs")
+    return gpu_ids
 
 
 def city_paths(root: Path, run_id: str, spec: CitySpec) -> CityPaths:
@@ -260,7 +330,14 @@ def _write_portable_settings(
     paths.portable_settings.write_text("\n".join(output_lines) + "\n", encoding="utf-8")
 
 
-def prepare_city_inputs(root: Path, spec: CitySpec, paths: CityPaths) -> None:
+def prepare_city_inputs(
+    root: Path,
+    spec: CitySpec,
+    paths: CityPaths,
+    *,
+    eval_hdv_variants: str | Iterable[str] = EVAL_HDV_VARIANTS,
+) -> None:
+    selected_eval_hdv_variants = _eval_hdv_variants(eval_hdv_variants)
     missing = [path for path in required_inputs(root, spec) if not path.exists()]
     if missing:
         formatted = "\n".join(f"  - {path}" for path in missing)
@@ -306,14 +383,8 @@ def prepare_city_inputs(root: Path, spec: CitySpec, paths: CityPaths) -> None:
             "imagined_action": "masked_policy_sample_one_hot",
             "eval_action": "masked_policy_sample",
             "eval_hdv_variants": {
-                "final": {
-                    "state": "final_online_training_state",
-                    "human_learning_after_mutation": True,
-                },
-                "original": {
-                    "state": "source_post_mutation_state",
-                    "human_learning_after_mutation": False,
-                },
+                variant: EVAL_HDV_PROTOCOLS[variant]
+                for variant in selected_eval_hdv_variants
             },
             "train_sumo_extra_args": spec.sumo_extra_args,
             "eval_sumo_extra_args": spec.sumo_extra_args,
@@ -323,6 +394,106 @@ def prepare_city_inputs(root: Path, spec: CitySpec, paths: CityPaths) -> None:
         json.dumps(provenance, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+
+
+def resolve_warmup_paths(
+    *,
+    root: Path,
+    spec: CitySpec,
+    output_paths: CityPaths,
+    expected_episodes: int,
+    reuse_existing: bool,
+) -> CityPaths:
+    if not reuse_existing:
+        return output_paths
+
+    source = EXISTING_WARMUP_SPECS[spec.key]
+    data_dir = root / "data" / source.run_tag / "collect_urb_fair_eval_postmutation"
+    records_dir = (
+        root / "results" / source.run_tag / "collect_urb_fair_eval_postmutation_records"
+    )
+    manifest_path = records_dir / "urb_fair_collection_manifest.json"
+    dataset_path = data_dir / f"{source.task_name}.pt"
+    missing = [path for path in (manifest_path, dataset_path) if not path.exists()]
+    if missing:
+        formatted = "\n".join(f"  - {path}" for path in missing)
+        raise FileNotFoundError(
+            f"existing warmup input is incomplete for {spec.key}:\n{formatted}"
+        )
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    errors: list[str] = []
+    if str(manifest.get("network", "")) != spec.network_name:
+        errors.append(f"network={manifest.get('network')!r}")
+    if str(manifest.get("task_name", "")) != source.task_name:
+        errors.append(f"task_name={manifest.get('task_name')!r}")
+    if bool(manifest.get("partial", True)):
+        errors.append("manifest is partial")
+    episodes_saved = int(manifest.get("episodes_saved", 0))
+    if episodes_saved < int(expected_episodes):
+        errors.append(
+            f"episodes_saved={episodes_saved} < expected={int(expected_episodes)}"
+        )
+    if bool(manifest.get("should_humans_adapt", True)):
+        errors.append("warmup HDV learning was enabled")
+    if str(manifest.get("action_schema", "")) != "av_planned_edge_flow_pre_advance_v1":
+        errors.append(f"action_schema={manifest.get('action_schema')!r}")
+
+    artifact_hashes = manifest.get("artifact_hashes", {})
+    for key, filename in (
+        ("agents_csv", "agents.csv"),
+        ("routes_csv", "routes.csv"),
+        ("route_rou_xml", "route.rou.xml"),
+    ):
+        expected_hash = str(artifact_hashes.get(key, ""))
+        current_hash = _sha256(output_paths.source_bundle / filename)
+        if expected_hash != current_hash:
+            errors.append(
+                f"{filename} hash mismatch: warmup={expected_hash!r}, "
+                f"post-mutation={current_hash!r}"
+            )
+    if errors:
+        details = "\n".join(f"  - {error}" for error in errors)
+        raise RuntimeError(
+            f"existing warmup input failed validation for {spec.key}:\n{details}"
+        )
+
+    warmup_paths = replace(
+        output_paths,
+        data_dir=data_dir,
+        records_dir=records_dir,
+        task_name=source.task_name,
+    )
+    _write_portable_settings(root=root, spec=spec, paths=warmup_paths)
+    provenance = json.loads(output_paths.provenance_json.read_text(encoding="utf-8"))
+    provenance["protocol"].update(
+        {
+            "warmup": "legacy_fixed_cav_random_epsilon_split",
+            "warmup_epsilon": source.epsilon,
+            "warmup_random_av_fraction": source.random_av_fraction,
+            "warmup_hdv_learning": False,
+            "warmup_reused": True,
+        }
+    )
+    provenance["warmup_input"] = {
+        "run_tag": source.run_tag,
+        "data_dir": str(data_dir.resolve()),
+        "records_dir": str(records_dir.resolve()),
+        "task_name": source.task_name,
+        "manifest": str(manifest_path.resolve()),
+        "dataset": str(dataset_path.resolve()),
+        "episodes_saved": episodes_saved,
+        "action_schema": manifest["action_schema"],
+        "random_av_fraction": source.random_av_fraction,
+        "epsilon": source.epsilon,
+        "hdv_learning": False,
+        "artifact_hashes_verified": True,
+    }
+    output_paths.provenance_json.write_text(
+        json.dumps(provenance, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return warmup_paths
 
 
 def build_collect_command(
@@ -415,6 +586,13 @@ def build_wm_command(
         "256",
         "--dyn_depth",
         "6",
+        "--gradient_checkpointing",
+        "--space_attention_batch_chunk_size",
+        str(args.wm_space_attention_batch_chunk_size),
+        "--mlp_token_chunk_size",
+        str(args.wm_mlp_token_chunk_size),
+        "--time_attention_batch_chunk_size",
+        str(args.wm_time_attention_batch_chunk_size),
         "--n_heads",
         "4",
         "--use_actions",
@@ -515,7 +693,7 @@ def build_online_command(
         "--edge-registry",
         str(paths.edge_registry),
         "--route-artifacts-dir",
-        str(paths.records_dir),
+        str(paths.source_bundle),
         "--post-mutation-state-in",
         str(paths.portable_post_state),
         "--hdv-state-in",
@@ -552,7 +730,11 @@ def build_online_command(
         "--episode-steps",
         "60",
         "--sim-buffer-after-last-depart",
-        str(args.train_sim_buffer_after_last_depart),
+        str(
+            spec.train_sim_buffer_after_last_depart
+            if spec.train_sim_buffer_after_last_depart is not None
+            else args.train_sim_buffer_after_last_depart
+        ),
         "--reward-mode",
         "capped_step_cost",
         "--gamma",
@@ -571,6 +753,8 @@ def build_online_command(
         "16",
         "--imagined-rollouts-per-update",
         "8",
+        "--imagined-rollout-batch-size",
+        str(args.online_imagined_rollout_batch_size),
         "--wm-replay-buffer-episodes",
         "8",
         "--wm-updates-per-collect",
@@ -578,7 +762,14 @@ def build_online_command(
         "--wm-update-epochs",
         "1",
         "--wm-batch-size",
-        "16",
+        str(args.online_wm_batch_size),
+        "--wm-gradient-checkpointing",
+        "--wm-space-attention-batch-chunk-size",
+        str(args.online_wm_space_attention_batch_chunk_size),
+        "--wm-mlp-token-chunk-size",
+        str(args.online_wm_mlp_token_chunk_size),
+        "--wm-time-attention-batch-chunk-size",
+        str(args.online_wm_time_attention_batch_chunk_size),
         "--disable-vehicle-arrival-head",
         "--device",
         str(args.device),
@@ -660,7 +851,7 @@ def build_eval_command(
         "--max_steps_per_episode",
         str(args.eval_max_steps_per_episode),
         "--reuse_artifacts_dir",
-        str(paths.records_dir),
+        str(paths.source_bundle),
         "--post_mutation_state_in",
         str(paths.portable_post_state),
         "--hdv_state_in",
@@ -702,9 +893,10 @@ def run_command(
     env: Mapping[str, str],
     log_path: Path,
     dry_run: bool,
+    output_prefix: str = "",
 ) -> None:
     rendered = _command_text(command)
-    print(f"[{_now()}] $ {rendered}", flush=True)
+    print(f"{output_prefix}[{_now()}] $ {rendered}", flush=True)
     if dry_run:
         return
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -722,7 +914,7 @@ def run_command(
         )
         assert process.stdout is not None
         for line in process.stdout:
-            print(line, end="", flush=True)
+            print(f"{output_prefix}{line}", end="", flush=True)
             log.write(line)
             log.flush()
         return_code = process.wait()
@@ -766,6 +958,32 @@ def _wm_complete(paths: CityPaths, expected_steps: int) -> bool:
             paths.wm_dir / "flow_projector_latest.pt",
         )
     )
+
+
+def resolve_world_model_paths(
+    *,
+    root: Path,
+    spec: CitySpec,
+    output_paths: CityPaths,
+    expected_steps: int,
+    reuse_run_id: str,
+) -> CityPaths:
+    source_run_id = str(reuse_run_id or "").strip()
+    if not source_run_id:
+        return output_paths
+    source_paths = city_paths(root, source_run_id, spec)
+    if not _wm_complete(source_paths, expected_steps):
+        print(
+            f"[{spec.key}] no complete {int(expected_steps)}-step WM in "
+            f"run {source_run_id}; training it in the current run",
+            flush=True,
+        )
+        return output_paths
+    print(
+        f"[{spec.key}] reusing complete WM from {source_paths.wm_dir}",
+        flush=True,
+    )
+    return replace(output_paths, wm_dir=source_paths.wm_dir)
 
 
 def _online_complete(paths: CityPaths, final_episode: int) -> bool:
@@ -863,6 +1081,13 @@ def _base_environment(args: argparse.Namespace, root: Path, python_bin: str) -> 
     env.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-urb")
     env.setdefault("PYTHONHASHSEED", str(args.seed))
     env.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
+    for variable in ("OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+        try:
+            valid_thread_count = int(str(env.get(variable, "")).strip()) > 0
+        except ValueError:
+            valid_thread_count = False
+        if not valid_thread_count:
+            env[variable] = "1"
     return env
 
 
@@ -898,20 +1123,68 @@ def runtime_preflight(
         raise FileNotFoundError(
             f"SUMO binary not found at {sumo_binary}; pass --sumo-home or set SUMO_HOME"
         )
-    probe = (
-        "import json, torch; "
-        "print(json.dumps({'torch': torch.__version__, "
-        "'cuda_available': torch.cuda.is_available(), "
-        "'cuda_devices': torch.cuda.device_count()}))"
-    )
+    probe = """
+import importlib
+import importlib.metadata
+import inspect
+import json
+
+modules = {}
+errors = {}
+for name in ("torch", "routerl", "traci"):
+    try:
+        modules[name] = importlib.import_module(name)
+        if name == "routerl":
+            traffic_environment = getattr(modules[name], "TrafficEnvironment")
+            routerlurb_version = importlib.metadata.version("routerlurb")
+            if routerlurb_version != "1.0.0":
+                raise RuntimeError(
+                    f"routerlurb==1.0.0 is required, found {routerlurb_version}"
+                )
+            signature = inspect.signature(traffic_environment)
+            if "save_detectors_info" not in signature.parameters:
+                raise RuntimeError(
+                    "incompatible TrafficEnvironment API: constructor does not expose "
+                    "save_detectors_info; remove conflicting 'routerl' packages and "
+                    "reinstall routerlurb==1.0.0"
+                )
+    except Exception as exc:
+        errors[name] = f"{type(exc).__name__}: {exc}"
+if errors:
+    print(json.dumps({"errors": errors}))
+    raise SystemExit(3)
+
+torch = modules["torch"]
+print(json.dumps({
+    "torch": torch.__version__,
+    "routerl": routerlurb_version,
+    "traci": getattr(modules["traci"], "__version__", "available"),
+    "cuda_available": torch.cuda.is_available(),
+    "cuda_devices": torch.cuda.device_count(),
+}))
+"""
     completed = subprocess.run(
         [python_bin, "-c", probe],
         cwd=str(root),
         env=dict(env),
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
+    if completed.returncode != 0:
+        details = "\n".join(
+            part.strip() for part in (completed.stdout, completed.stderr) if part.strip()
+        )
+        raise RuntimeError(
+            "Runtime dependency preflight failed for the selected Python interpreter.\n"
+            f"Interpreter: {python_bin}\n"
+            f"Install command: {python_bin} -m pip install -r {root / 'requirements.txt'}\n"
+            "No Conda environment name is required; every stage uses this selected "
+            "interpreter.\n"
+            "The RouteRL distribution is named 'routerlurb', while its Python import is "
+            f"'routerl' and must expose TrafficEnvironment.\n"
+            f"Probe output:\n{details or '(no output)'}"
+        )
     print(f"Runtime: {completed.stdout.strip()}", flush=True)
     if str(device).lower().startswith("cuda"):
         runtime = json.loads(completed.stdout.strip().splitlines()[-1])
@@ -932,8 +1205,28 @@ def run_city(
     args: argparse.Namespace,
     env: Mapping[str, str],
 ) -> dict[str, Any]:
-    paths = city_paths(root, args.run_id, spec)
-    prepare_city_inputs(root, spec, paths)
+    eval_hdv_variants = _eval_hdv_variants(args.eval_hdv_variants)
+    output_paths = city_paths(root, args.run_id, spec)
+    prepare_city_inputs(
+        root,
+        spec,
+        output_paths,
+        eval_hdv_variants=eval_hdv_variants,
+    )
+    paths = resolve_warmup_paths(
+        root=root,
+        spec=spec,
+        output_paths=output_paths,
+        expected_episodes=args.collect_episodes,
+        reuse_existing=args.reuse_existing_warmup,
+    )
+    paths = resolve_world_model_paths(
+        root=root,
+        spec=spec,
+        output_paths=paths,
+        expected_steps=args.wm_steps,
+        reuse_run_id=args.reuse_world_models_from_run_id,
+    )
 
     def write_status(*, stage: str, state: str, **extra: Any) -> None:
         if not args.dry_run:
@@ -964,6 +1257,7 @@ def run_city(
                 env=env,
                 log_path=paths.pipeline_log,
                 dry_run=args.dry_run,
+                output_prefix=f"[{spec.key}] ",
             )
             if not args.dry_run and not _collection_complete(paths, args.collect_episodes):
                 raise RuntimeError(f"collection did not produce a complete manifest: {paths.run_tag}")
@@ -987,6 +1281,7 @@ def run_city(
                 env=env,
                 log_path=paths.pipeline_log,
                 dry_run=args.dry_run,
+                output_prefix=f"[{spec.key}] ",
             )
             if not args.dry_run and not _wm_complete(paths, args.wm_steps):
                 raise RuntimeError(f"world-model stage is incomplete: {paths.run_tag}")
@@ -1017,20 +1312,24 @@ def run_city(
                 env=env,
                 log_path=paths.pipeline_log,
                 dry_run=args.dry_run,
+                output_prefix=f"[{spec.key}] ",
             )
             if not args.dry_run and not _online_complete(paths, args.online_episodes):
                 raise RuntimeError(f"online-WM training is incomplete: {paths.run_tag}")
             write_status(stage="online", state="complete")
 
-    best_selections = {
+    all_best_selections = {
         "final": paths.online_dir / "best_checkpoint_selection.json",
         "original": paths.online_dir / "best_checkpoint_selection_original_hdv.json",
+    }
+    best_selections = {
+        variant: all_best_selections[variant] for variant in eval_hdv_variants
     }
     if _stage_enabled(args.start_stage, "eval"):
         if not args.dry_run and not _online_complete(paths, args.online_episodes):
             raise RuntimeError(f"eval stage requires complete online training: {paths.run_tag}")
         write_status(stage="eval", state="running")
-        for hdv_variant in EVAL_HDV_VARIANTS:
+        for hdv_variant in eval_hdv_variants:
             print(f"[{spec.key}] eval HDV variant: {hdv_variant}", flush=True)
             for episode in checkpoints:
                 if _eval_complete(
@@ -1059,6 +1358,7 @@ def run_city(
                     env=env,
                     log_path=paths.pipeline_log,
                     dry_run=args.dry_run,
+                    output_prefix=f"[{spec.key}] ",
                 )
                 if not args.dry_run and not _eval_complete(
                     paths,
@@ -1077,6 +1377,8 @@ def run_city(
                 str(root / "scripts" / "select_best_eval_summary.py"),
                 "--output",
                 str(best_selections[hdv_variant]),
+                "--metric",
+                "t_all_mean",
                 *[
                     str(
                         _eval_root(paths, hdv_variant)
@@ -1091,6 +1393,7 @@ def run_city(
                 env=env,
                 log_path=paths.pipeline_log,
                 dry_run=args.dry_run,
+                output_prefix=f"[{spec.key}] ",
             )
         write_status(
             stage="eval",
@@ -1110,20 +1413,145 @@ def run_city(
         "world_model": str(paths.wm_dir / "latest.pt"),
         "online_summary": str(paths.online_dir / "online_wm_train_summary.json"),
         "final_hdv_state": str(paths.online_dir / "hdv_learning_state_after_online_wm_train.json"),
-        "eval_summary": str(paths.online_dir / "online_wm_eval_summary.json"),
-        "eval_original_hdv_summary": str(
-            paths.online_dir / "online_wm_eval_original_hdv_summary.json"
-        ),
-        "best_checkpoint_selection": str(best_selections["final"]),
-        "best_checkpoint_selection_original_hdv": str(best_selections["original"]),
+        "eval_hdv_variants": list(eval_hdv_variants),
     }
-    if best_selections["final"].exists():
-        selection = json.loads(best_selections["final"].read_text(encoding="utf-8"))
-        result["best"] = selection.get("best", {})
-    if best_selections["original"].exists():
-        selection = json.loads(best_selections["original"].read_text(encoding="utf-8"))
-        result["best_original_hdv"] = selection.get("best", {})
+    if "final" in best_selections:
+        result["eval_summary"] = str(paths.online_dir / "online_wm_eval_summary.json")
+        result["best_checkpoint_selection"] = str(best_selections["final"])
+        if best_selections["final"].exists():
+            selection = json.loads(best_selections["final"].read_text(encoding="utf-8"))
+            result["best"] = selection.get("best", {})
+    if "original" in best_selections:
+        result["eval_original_hdv_summary"] = str(
+            paths.online_dir / "online_wm_eval_original_hdv_summary.json"
+        )
+        result["best_checkpoint_selection_original_hdv"] = str(
+            best_selections["original"]
+        )
+        if best_selections["original"].exists():
+            selection = json.loads(
+                best_selections["original"].read_text(encoding="utf-8")
+            )
+            result["best_original_hdv"] = selection.get("best", {})
     return result
+
+
+def run_cities(
+    *,
+    root: Path,
+    python_bin: str,
+    cities: Sequence[CitySpec],
+    checkpoints: Sequence[int],
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+    city_workers: int,
+) -> list[dict[str, Any]]:
+    if city_workers <= 0:
+        raise ValueError("--city-workers must be positive")
+    if not cities:
+        return []
+
+    gpu_ids = _city_gpu_ids(getattr(args, "city_gpus", ""))
+    if gpu_ids and not str(args.device).lower().startswith("cuda"):
+        raise ValueError("--city-gpus requires a CUDA --device")
+    worker_count = min(
+        int(city_workers),
+        len(cities),
+        len(gpu_ids) if gpu_ids else len(cities),
+    )
+    slots: tuple[str | None, ...] = (
+        tuple(gpu_ids[:worker_count]) if gpu_ids else (None,) * worker_count
+    )
+    gpu_text = f" on physical GPU slots {','.join(gpu_ids[:worker_count])}" if gpu_ids else ""
+    print(
+        f"Launching {len(cities)} city pipeline(s) with {worker_count} parallel "
+        f"worker(s){gpu_text}.",
+        flush=True,
+    )
+    results_by_city: dict[str, dict[str, Any]] = {}
+    failures: list[tuple[CitySpec, Exception]] = []
+
+    def submit_city(
+        executor: ThreadPoolExecutor,
+        spec: CitySpec,
+        gpu_id: str | None,
+    ) -> Future[dict[str, Any]]:
+        city_args = argparse.Namespace(**vars(args))
+        city_env = dict(env)
+        if gpu_id is not None:
+            city_env["CUDA_VISIBLE_DEVICES"] = gpu_id
+            city_args.device = "cuda"
+            print(f"[{spec.key}] assigned physical GPU {gpu_id}", flush=True)
+        return executor.submit(
+            run_city,
+            root=root,
+            python_bin=python_bin,
+            spec=spec,
+            checkpoints=checkpoints,
+            args=city_args,
+            env=city_env,
+        )
+
+    with ThreadPoolExecutor(
+        max_workers=worker_count,
+        thread_name_prefix="city-pipeline",
+    ) as executor:
+        queued_cities = list(cities)
+        reuse_run_id = str(args.reuse_world_models_from_run_id or "").strip()
+        if reuse_run_id and _stage_enabled(args.start_stage, "wm"):
+            queued_cities.sort(
+                key=lambda spec: _wm_complete(
+                    city_paths(root, reuse_run_id, spec), args.wm_steps
+                )
+            )
+            print(
+                "City launch order prioritizes missing reused WM checkpoints: "
+                + ", ".join(spec.key for spec in queued_cities),
+                flush=True,
+            )
+        pending_cities = iter(queued_cities)
+        active: dict[Future[dict[str, Any]], tuple[CitySpec, str | None]] = {}
+        for slot in slots:
+            spec = next(pending_cities)
+            active[submit_city(executor, spec, slot)] = (spec, slot)
+
+        while active:
+            completed, _ = wait(tuple(active), return_when=FIRST_COMPLETED)
+            for future in completed:
+                spec, slot = active.pop(future)
+                try:
+                    results_by_city[spec.key] = future.result()
+                except Exception as exc:
+                    paths = city_paths(root, args.run_id, spec)
+                    if not args.dry_run:
+                        _write_status(
+                            paths,
+                            stage="pipeline",
+                            state="failed",
+                            error=repr(exc),
+                        )
+                    failures.append((spec, exc))
+                    print(
+                        f"[{spec.key}] pipeline failed: {type(exc).__name__}: {exc}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                else:
+                    print(f"[{spec.key}] pipeline complete", flush=True)
+
+                next_spec = next(pending_cities, None)
+                if next_spec is not None:
+                    active[submit_city(executor, next_spec, slot)] = (next_spec, slot)
+
+    if failures:
+        failed_cities = ", ".join(spec.key for spec, _ in failures)
+        first_error = failures[0][1]
+        raise RuntimeError(
+            f"{len(failures)} city pipeline(s) failed: {failed_cities}; "
+            "inspect each city's full_pipeline.log and pipeline_status.json"
+        ) from first_error
+
+    return [results_by_city[spec.key] for spec in cities]
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -1135,29 +1563,101 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="all",
         help="Comma-separated city names or 'all'.",
     )
-    parser.add_argument("--run-id", default="online_wm_mainline_20260716")
+    parser.add_argument(
+        "--city-workers",
+        type=int,
+        default=3,
+        help=(
+            "Number of city pipelines to run concurrently (default: 3). "
+            "Use 1 for serial execution or when one GPU cannot hold concurrent jobs."
+        ),
+    )
+    parser.add_argument(
+        "--city-gpus",
+        default="",
+        help=(
+            "Optional comma-separated physical CUDA device IDs. Each ID is an exclusive "
+            "city worker slot; queued cities reuse the first available slot."
+        ),
+    )
+    parser.add_argument("--run-id", default="online_wm_mainline_150ep_20260717")
     parser.add_argument("--repo-root", default=str(REPO_ROOT))
-    parser.add_argument("--python-bin", default=os.environ.get("PYTHON_BIN", sys.executable))
+    parser.add_argument(
+        "--python-bin",
+        default=os.environ.get("PYTHON_BIN", sys.executable),
+        help=(
+            "Python executable used by every pipeline stage. Defaults to PYTHON_BIN "
+            "or the interpreter running this script; no named Conda environment is required."
+        ),
+    )
     parser.add_argument("--sumo-home", default=os.environ.get("SUMO_HOME", ""))
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--collect-episodes", type=int, default=50)
+    parser.add_argument(
+        "--reuse-existing-warmup",
+        action="store_true",
+        help=(
+            "Reuse each city's validated 50-episode legacy warmup dataset instead of "
+            "collecting again. The legacy policy used random_av_fraction=0.6 and "
+            "epsilon=0.4 with frozen HDVs."
+        ),
+    )
+    parser.add_argument(
+        "--reuse-world-models-from-run-id",
+        default="",
+        help=(
+            "Reuse a city's complete WM checkpoint from this prior run ID. Cities "
+            "without a complete checkpoint automatically train WM in the current run."
+        ),
+    )
     parser.add_argument("--collect-max-steps", type=int, default=3600)
     parser.add_argument("--collect-completion-drain-steps", type=int, default=7200)
     parser.add_argument("--collect-completion-drain-patience-steps", type=int, default=600)
     parser.add_argument("--episode-wall-timeout-seconds", type=float, default=3600.0)
     parser.add_argument("--wm-steps", type=int, default=8000)
-    parser.add_argument("--wm-batch-size", type=int, default=2)
+    parser.add_argument("--wm-batch-size", type=int, default=1)
     parser.add_argument("--wm-seq-len", type=int, default=16)
-    parser.add_argument("--wm-grad-accum", type=int, default=16)
-    parser.add_argument("--online-episodes", type=int, default=400)
-    parser.add_argument("--checkpoint-episodes", default="50,100,200,400")
-    parser.add_argument("--train-sim-buffer-after-last-depart", type=int, default=3000)
+    parser.add_argument("--wm-grad-accum", type=int, default=32)
+    parser.add_argument("--wm-space-attention-batch-chunk-size", type=int, default=1)
+    parser.add_argument("--wm-mlp-token-chunk-size", type=int, default=4096)
+    parser.add_argument("--wm-time-attention-batch-chunk-size", type=int, default=256)
+    parser.add_argument("--online-wm-batch-size", type=int, default=4)
+    parser.add_argument(
+        "--online-wm-space-attention-batch-chunk-size",
+        type=int,
+        default=16,
+    )
+    parser.add_argument("--online-wm-mlp-token-chunk-size", type=int, default=16384)
+    parser.add_argument(
+        "--online-wm-time-attention-batch-chunk-size",
+        type=int,
+        default=32768,
+    )
+    parser.add_argument(
+        "--online-imagined-rollout-batch-size",
+        type=int,
+        default=4,
+        help="Independent rollout batch size; horizon steps remain causal and sequential.",
+    )
+    parser.add_argument("--online-episodes", type=int, default=150)
+    parser.add_argument("--checkpoint-episodes", default="25,50,75,100,125,150")
+    parser.add_argument("--train-sim-buffer-after-last-depart", type=int, default=2000)
     parser.add_argument(
         "--eval-episodes",
         type=int,
         default=5,
         help="Stochastic SUMO episodes per checkpoint and HDV-state variant.",
+    )
+    parser.add_argument(
+        "--eval-hdv-variants",
+        type=_eval_hdv_variants,
+        default=EVAL_HDV_VARIANTS,
+        help=(
+            "Comma-separated evaluation HDV states: final, original, or both "
+            "(default: final,original). 'original' loads the pre-online-training "
+            "post-mutation HDV state and freezes HDV learning."
+        ),
     )
     parser.add_argument("--eval-sim-buffer-after-last-depart", type=int, default=7200)
     parser.add_argument("--eval-max-steps-per-episode", type=int, default=9000)
@@ -1173,12 +1673,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     root = Path(args.repo_root).expanduser().resolve()
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", str(args.run_id)):
         raise ValueError("--run-id may contain only letters, digits, '.', '_' and '-'")
+    if args.reuse_world_models_from_run_id and not re.fullmatch(
+        r"[A-Za-z0-9_.-]+", str(args.reuse_world_models_from_run_id)
+    ):
+        raise ValueError(
+            "--reuse-world-models-from-run-id may contain only letters, digits, '.', '_' and '-'"
+        )
     cities = _selected_cities(args.cities)
     checkpoints = _checkpoint_episodes(args.checkpoint_episodes)
     if max(checkpoints) > int(args.online_episodes):
         raise ValueError("checkpoint episodes cannot exceed --online-episodes")
     if int(args.online_episodes) not in checkpoints:
         raise ValueError("--checkpoint-episodes must include the final online episode")
+    if int(args.city_workers) <= 0:
+        raise ValueError("--city-workers must be positive")
+    city_gpu_ids = _city_gpu_ids(args.city_gpus)
+    if city_gpu_ids and not str(args.device).lower().startswith("cuda"):
+        raise ValueError("--city-gpus requires a CUDA --device")
 
     if args.print_required_inputs:
         for spec in cities:
@@ -1197,42 +1708,60 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     for spec in cities:
         paths = city_paths(root, args.run_id, spec)
-        prepare_city_inputs(root, spec, paths)
+        prepare_city_inputs(
+            root,
+            spec,
+            paths,
+            eval_hdv_variants=args.eval_hdv_variants,
+        )
+        warmup_paths = resolve_warmup_paths(
+            root=root,
+            spec=spec,
+            output_paths=paths,
+            expected_episodes=args.collect_episodes,
+            reuse_existing=args.reuse_existing_warmup,
+        )
         print(
             f"[{spec.key}] post_mutation={paths.source_post_state}\n"
             f"[{spec.key}] hdv_state={paths.source_hdv_state}\n"
-            f"[{spec.key}] portable_post_mutation={paths.portable_post_state}",
+            f"[{spec.key}] portable_post_mutation={paths.portable_post_state}\n"
+            f"[{spec.key}] warmup_data={warmup_paths.data_dir}\n"
+            f"[{spec.key}] warmup_records={warmup_paths.records_dir}",
             flush=True,
         )
     if args.preflight_only:
         print("Preflight complete: all required inputs exist and portable copies were written.")
         return 0
 
-    results: list[dict[str, Any]] = []
-    for spec in cities:
-        paths = city_paths(root, args.run_id, spec)
-        try:
-            results.append(
-                run_city(
-                    root=root,
-                    python_bin=python_bin,
-                    spec=spec,
-                    checkpoints=checkpoints,
-                    args=args,
-                    env=env,
-                )
-            )
-        except BaseException as exc:
-            if not args.dry_run:
-                _write_status(paths, stage="pipeline", state="failed", error=repr(exc))
-            raise
+    results = run_cities(
+        root=root,
+        python_bin=python_bin,
+        cities=cities,
+        checkpoints=checkpoints,
+        args=args,
+        env=env,
+        city_workers=args.city_workers,
+    )
 
     aggregate = {
         "schema_version": 1,
         "completed_at": _now(),
         "run_id": args.run_id,
+        "execution": {
+            "city_workers": min(
+                int(args.city_workers),
+                len(cities),
+                len(city_gpu_ids) if city_gpu_ids else len(cities),
+            ),
+            "city_gpus": list(city_gpu_ids),
+        },
         "protocol": {
-            "warmup": "all_fixed_cavs_epsilon_greedy_eps_0.4",
+            "warmup": (
+                "legacy_fixed_cav_random0.6_epsilon0.4_split_reused"
+                if args.reuse_existing_warmup
+                else "all_fixed_cavs_epsilon_greedy_eps_0.4"
+            ),
+            "warmup_reused": bool(args.reuse_existing_warmup),
             "warmup_hdv_learning": False,
             "wm_init": "cfm_current_8k",
             "online_real_action": "masked_policy_sample_one_hot",
@@ -1242,14 +1771,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "eval_action": "masked_policy_sample",
             "eval_episodes_per_checkpoint": int(args.eval_episodes),
             "eval_hdv_variants": {
-                "final": {
-                    "state": "final_online_training_state",
-                    "human_learning_after_mutation": True,
-                },
-                "original": {
-                    "state": "source_post_mutation_state",
-                    "human_learning_after_mutation": False,
-                },
+                variant: EVAL_HDV_PROTOCOLS[variant]
+                for variant in args.eval_hdv_variants
             },
         },
         "cities": results,

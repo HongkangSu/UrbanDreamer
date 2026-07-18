@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 from tensordict import TensorDict
 
@@ -16,6 +17,8 @@ from baseline.run_toy_cross_bottleneck_mappo_torchrl import (  # noqa: E402
     TorchRLMappoActorCritic,
     ToyMappoTorchRLConfig,
     ToyMappoTorchRLTrainer,
+    _mappo_effective_minibatch_size,
+    _random_minibatch_indices,
     build_config,
     build_plan,
     build_torchrl_mappo_batch,
@@ -128,6 +131,23 @@ def test_mappo_forward_logits_masks_invalid_routes_from_obs_route_cost_block():
     assert torch.isfinite(logits[0, [0, 2, 3]]).all()
 
 
+def test_mappo_eval_can_reuse_training_categorical_sampling():
+    args = parse_args(
+        [
+            "--eval-only",
+            "--eval-policy-route-selection",
+            "training",
+            "--device",
+            "cpu",
+        ]
+    )
+
+    cfg = build_config(args)
+
+    assert cfg.real_policy_route_selection == "sample"
+    assert cfg.disable_human_learning_after_mutation is True
+
+
 def test_build_torchrl_mappo_batch_preserves_active_slots_and_advantages():
     torch.manual_seed(0)
     actor_critic = _actor_critic(obs_dim=6)
@@ -193,6 +213,94 @@ def test_torchrl_clip_ppo_update_runs_on_masked_active_samples():
     assert math.isfinite(metrics["loss"])
     assert math.isfinite(metrics["loss_objective"])
     assert math.isfinite(metrics["loss_critic"])
+
+
+def test_mappo_epoch_batches_cover_every_sample_once_and_keep_remainder():
+    np.random.seed(7)
+
+    batches = _random_minibatch_indices(n_samples=5, minibatch_size=2)
+
+    assert [len(batch) for batch in batches] == [2, 2, 1]
+    flattened = np.concatenate(batches)
+    assert sorted(flattened.tolist()) == [0, 1, 2, 3, 4]
+    assert len(np.unique(flattened)) == 5
+
+
+def test_mappo_dense_batch_cap_scales_linearly_for_fontenay_sized_actor():
+    class FontenayActorShape:
+        n_agents = 827
+        obs_dim = 63
+        n_routes = 4
+
+    assert _mappo_effective_minibatch_size(
+        configured_minibatch_size=32,
+        actor_critic=FontenayActorShape(),  # type: ignore[arg-type]
+    ) == 32
+
+
+def test_mappo_update_backpropagates_every_sample_once_per_epoch_when_microbatch_is_one(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import baseline.run_toy_cross_bottleneck_mappo_torchrl as mappo_module
+
+    torch.manual_seed(3)
+    actor_critic = _actor_critic(obs_dim=5)
+    cfg = ToyMappoTorchRLConfig(
+        device="cpu",
+        n_routes=4,
+        lr=1e-3,
+        max_grad_norm=3.0,
+        clip_epsilon=0.2,
+        gamma=0.99,
+        lmbda=0.9,
+        entropy_eps=1e-4,
+        normalize_advantage=False,
+        num_epochs=2,
+        minibatch_size=2,
+        min_samples_per_update=1,
+    )
+    loss_module = build_torchrl_mappo_loss(actor_critic=actor_critic, cfg=cfg)
+    trainer = object.__new__(ToyMappoTorchRLTrainer)
+    trainer.cfg = cfg
+    trainer.actor = actor_critic
+    trainer.loss_module = loss_module
+    trainer.optimizer = torch.optim.Adam(loss_module.parameters(), lr=float(cfg.lr))
+    trainer.device = torch.device("cpu")
+    samples = [
+        _sample(episode=1, decision_idx=0, veh_id="0", obs=np.ones(5), action=0, reward=1.0),
+        _sample(episode=1, decision_idx=1, veh_id="0", obs=np.ones(5) * 1.5, action=1, reward=0.5),
+        _sample(episode=1, decision_idx=0, veh_id="2", obs=np.ones(5) * 2.0, action=2, reward=-0.25),
+    ]
+
+    seen_indices: list[int] = []
+    original_builder = mappo_module._build_mappo_minibatch_td
+
+    def recording_builder(**kwargs):
+        seen_indices.extend(int(index) for index in kwargs["indices"])
+        return original_builder(**kwargs)
+
+    optimizer_steps = 0
+    original_step = trainer.optimizer.step
+
+    def recording_step(*args, **kwargs):
+        nonlocal optimizer_steps
+        optimizer_steps += 1
+        return original_step(*args, **kwargs)
+
+    monkeypatch.setattr(mappo_module, "_mappo_effective_minibatch_size", lambda **_kwargs: 1)
+    monkeypatch.setattr(mappo_module, "_build_mappo_minibatch_td", recording_builder)
+    monkeypatch.setattr(trainer.optimizer, "step", recording_step)
+
+    metrics = ToyMappoTorchRLTrainer.update_from_replay(trainer, [samples])
+
+    assert metrics["n_samples"] == 3.0
+    assert metrics["frames_per_batch"] == 3.0
+    assert metrics["updates_per_epoch"] == 2.0
+    assert metrics["effective_minibatch_size"] == 1.0
+    assert optimizer_steps == 4
+    assert len(seen_indices) == 6
+    for sample_index in range(3):
+        assert seen_indices.count(sample_index) == 2
 
 
 def test_mappo_torchrl_dry_run_plan_matches_no_cfm_toy_interface():

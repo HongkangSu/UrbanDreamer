@@ -275,6 +275,14 @@ def test_data_collector_seeds_departures_and_deduplicates_arrivals(monkeypatch):
     assert veh_travel_times == {"1": 30.0, "2": 60.0}
 
 
+def test_routerl_connector_close_handles_failed_initialization():
+    connector = RouteRLConnector.__new__(RouteRLConnector)
+
+    connector.close()
+
+    assert connector._started is False
+
+
 def test_routerl_bulk_advance_stops_when_sumo_has_no_expected_vehicles(monkeypatch):
     class _FakeSimulation:
         def __init__(self):

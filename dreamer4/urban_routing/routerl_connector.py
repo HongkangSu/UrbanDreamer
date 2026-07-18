@@ -32,6 +32,7 @@ import os
 import logging
 import random as _random
 import shlex
+import shutil
 import types
 from typing import Dict, Tuple, Optional, Any, List
 
@@ -43,7 +44,7 @@ try:
     ROUTERL_AVAILABLE = True
 except ImportError:
     ROUTERL_AVAILABLE = False
-    print("Warning: routerl not available. Please install routerl.")
+    print("Warning: routerl not available. Install the routerlurb distribution.")
 
 try:
     import traci
@@ -103,8 +104,12 @@ class RouteRLConnector:
         incident_end: float = 0.0,
         incident_speed: float = 0.0,
     ):
+        self.env = None
+        self._started = False
         if not ROUTERL_AVAILABLE:
-            raise RuntimeError("routerl is not installed. Run: pip install routerl")
+            raise RuntimeError(
+                "routerl is not installed. Run: python -m pip install routerlurb==1.0.0"
+            )
 
         self.network_name = network_name
         self.network_folder = os.path.abspath(network_folder)
@@ -139,6 +144,17 @@ class RouteRLConnector:
         self._records_agents_csv = os.path.join(self.records_folder, "agents.csv")
         self._use_custom_agents = os.path.exists(self._records_agents_csv)
 
+        sumo_command = "sumo-gui" if use_gui else "sumo"
+        sumo_home_command = os.path.join(
+            str(os.environ.get("SUMO_HOME", "")),
+            "bin",
+            sumo_command,
+        )
+        resolved_sumo_command = (
+            sumo_home_command
+            if os.path.isfile(sumo_home_command)
+            else (shutil.which(sumo_command) or sumo_command)
+        )
         self.env = create_routerl_environment(
             TrafficEnvironment,
             seed=seed,
@@ -161,7 +177,7 @@ class RouteRLConnector:
             phase_names=["Data collection"],
             smooth_by=5,
             plot_choices="none",
-            sumo_type="sumo-gui" if use_gui else "sumo",
+            sumo_type=resolved_sumo_command,
             path_beta=path_gen_beta,
             path_num_samples=num_samples,
             visualize_paths=False,
@@ -315,7 +331,7 @@ class RouteRLConnector:
             or self._sumo_extra_args
         ):
             return
-        simulator = getattr(self.env, "simulator", None)
+        simulator = getattr(getattr(self, "env", None), "simulator", None)
         if simulator is None:
             return
 
@@ -868,7 +884,7 @@ class RouteRLConnector:
             self._restore_incident_lanes()
         except Exception:
             pass
-        simulator = getattr(self.env, "simulator", None)
+        simulator = getattr(getattr(self, "env", None), "simulator", None)
         sumo_id = getattr(simulator, "sumo_id", None) if simulator is not None else None
         if sumo_id:
             try:
@@ -887,4 +903,7 @@ class RouteRLConnector:
         self._started = False
 
     def __del__(self):
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass

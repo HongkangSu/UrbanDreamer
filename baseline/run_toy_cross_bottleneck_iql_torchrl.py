@@ -21,6 +21,9 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from torchrl.data import Categorical as CategoricalSpec
 from torchrl.data import Composite
+from torchrl.data.replay_buffers import ReplayBuffer
+from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
+from torchrl.data.replay_buffers.storages import ListStorage
 from torchrl.modules import MultiAgentMLP, QValueModule, SafeSequential
 from torchrl.objectives import DQNLoss, SoftUpdate, ValueEstimators
 
@@ -97,6 +100,7 @@ class ToyIqlTorchRLConfig(OnlineNoCfmConfig):
     checkpoint_interval: int = 100
     num_epochs: int = 1
     minibatch_size: int = 32
+    memory_size: int = 20_000
     q_network_depth: int = 3
     q_network_num_cells: int = 64
     eps_init: float = 1.0
@@ -107,6 +111,8 @@ class ToyIqlTorchRLConfig(OnlineNoCfmConfig):
 
     def resolve(self) -> "ToyIqlTorchRLConfig":
         values = asdict(self)
+        if int(values["memory_size"]) <= 0:
+            raise ValueError("memory_size must be positive")
         for key in (
             "settings",
             "output_dir",
@@ -132,6 +138,68 @@ class ToyIqlTorchRLConfig(OnlineNoCfmConfig):
         base = OnlineNoCfmConfig.from_settings(settings_path, **base_overrides).resolve()
         values = {**asdict(cls()), **asdict(base), **own_overrides}
         return cls(**values).resolve()
+
+
+@dataclass(frozen=True)
+class IqlReplayTransition:
+    episode: int
+    decision_idx: int
+    veh_id: str
+    obs: np.ndarray
+    action: int
+    action_mask: np.ndarray
+    reward: float
+    next_obs: np.ndarray
+    next_action_mask: np.ndarray
+    done: bool
+
+
+def _list_collate(samples: Sequence[IqlReplayTransition]) -> List[IqlReplayTransition]:
+    return list(samples)
+
+
+class IqlTransitionReplayBuffer:
+    """Compact materialized replay with the official TorchRL ring/sampler semantics."""
+
+    def __init__(self, *, memory_size: int, minibatch_size: int) -> None:
+        self.memory_size = int(memory_size)
+        if self.memory_size <= 0:
+            raise ValueError("memory_size must be positive")
+        self._buffer = ReplayBuffer(
+            storage=ListStorage(self.memory_size),
+            sampler=SamplerWithoutReplacement(drop_last=False),
+            batch_size=max(int(minibatch_size), 1),
+            collate_fn=_list_collate,
+        )
+
+    def __len__(self) -> int:
+        return int(len(self._buffer))
+
+    @property
+    def sampler_name(self) -> str:
+        return type(self._buffer.sampler).__name__
+
+    def extend(self, samples: Sequence[IqlReplayTransition]) -> None:
+        values = list(samples)
+        if values:
+            self._buffer.extend(values)
+
+    def snapshot(self) -> List[IqlReplayTransition]:
+        if not len(self):
+            return []
+        return list(self._buffer.storage[:])
+
+    def sample_indices(self, *, batch_size: int) -> np.ndarray:
+        if not len(self):
+            return np.empty((0,), dtype=np.int64)
+        _samples, info = self._buffer.sample(
+            batch_size=max(int(batch_size), 1),
+            return_info=True,
+        )
+        indices = info["index"]
+        if torch.is_tensor(indices):
+            indices = indices.detach().cpu().numpy()
+        return np.asarray(indices, dtype=np.int64).reshape(-1)
 
 
 def _jsonable_config(cfg: ToyIqlTorchRLConfig) -> Dict[str, Any]:
@@ -398,26 +466,6 @@ def _dense_observation_and_slots(
     return obs, slots
 
 
-def _random_minibatch_indices(
-    *,
-    n_samples: int,
-    minibatch_size: int,
-    num_batches: int,
-) -> List[np.ndarray]:
-    n = int(n_samples)
-    batch = max(1, min(int(minibatch_size), n))
-    out: List[np.ndarray] = []
-    order = np.random.permutation(n)
-    cursor = 0
-    for _ in range(max(int(num_batches), 1)):
-        if cursor + batch > n:
-            order = np.random.permutation(n)
-            cursor = 0
-        out.append(order[cursor : cursor + batch])
-        cursor += batch
-    return out
-
-
 def _build_iql_next_indices(samples: Sequence[OnlineDecisionSample]) -> Tuple[np.ndarray, np.ndarray]:
     next_indices = np.full((len(samples),), -1, dtype=np.int64)
     done = np.ones((len(samples),), dtype=bool)
@@ -432,25 +480,69 @@ def _build_iql_next_indices(samples: Sequence[OnlineDecisionSample]) -> Tuple[np
     return next_indices, done
 
 
+def _materialize_iql_replay_transitions(
+    samples: Sequence[OnlineDecisionSample],
+    *,
+    n_routes: int,
+) -> List[IqlReplayTransition]:
+    if not samples:
+        return []
+    next_indices, done_flags = _build_iql_next_indices(samples)
+    transitions: List[IqlReplayTransition] = []
+    for sample_idx, sample in enumerate(samples):
+        obs = np.asarray(sample.obs, dtype=np.float32).reshape(-1).copy()
+        action_mask = np.zeros((int(n_routes),), dtype=bool)
+        raw_mask = np.asarray(sample.valid_mask, dtype=bool).reshape(-1)
+        copy_len = min(int(raw_mask.shape[0]), int(n_routes))
+        if copy_len > 0:
+            action_mask[:copy_len] = raw_mask[:copy_len]
+        if not bool(action_mask.any()):
+            action_mask[:] = True
+
+        done = bool(done_flags[sample_idx])
+        if done:
+            next_obs = np.zeros_like(obs)
+            next_action_mask = np.ones((int(n_routes),), dtype=bool)
+        else:
+            next_sample = samples[int(next_indices[sample_idx])]
+            next_obs = np.asarray(next_sample.obs, dtype=np.float32).reshape(-1).copy()
+            next_action_mask = np.zeros((int(n_routes),), dtype=bool)
+            raw_next_mask = np.asarray(next_sample.valid_mask, dtype=bool).reshape(-1)
+            next_copy_len = min(int(raw_next_mask.shape[0]), int(n_routes))
+            if next_copy_len > 0:
+                next_action_mask[:next_copy_len] = raw_next_mask[:next_copy_len]
+            if not bool(next_action_mask.any()):
+                next_action_mask[:] = True
+
+        transitions.append(
+            IqlReplayTransition(
+                episode=int(sample.episode),
+                decision_idx=int(sample.decision_idx),
+                veh_id=str(sample.veh_id),
+                obs=obs,
+                action=int(sample.action),
+                action_mask=action_mask,
+                reward=float(sample.reward),
+                next_obs=next_obs,
+                next_action_mask=next_action_mask,
+                done=done,
+            )
+        )
+    return transitions
+
+
 def _build_iql_minibatch_td(
     *,
-    samples: Sequence[OnlineDecisionSample],
+    transitions: Sequence[IqlReplayTransition],
     indices: Sequence[int],
     q_network: TorchRLIqlQNetwork,
-    next_indices: np.ndarray,
-    done_flags: np.ndarray,
     device: torch.device,
 ) -> TensorDict:
     n = int(len(indices))
     n_agents = int(q_network.n_agents)
     obs_dim = int(q_network.obs_dim)
     n_routes = int(q_network.n_routes)
-    obs, slots = _dense_observation_and_slots(
-        samples=samples,
-        indices=indices,
-        q_network=q_network,
-        device=device,
-    )
+    obs = torch.zeros((n, n_agents, obs_dim), device=device, dtype=torch.float32)
     next_obs = torch.zeros((n, n_agents, obs_dim), device=device, dtype=torch.float32)
     action = torch.zeros((n, n_agents), device=device, dtype=torch.long)
     action_mask = torch.ones((n, n_agents, n_routes), device=device, dtype=torch.bool)
@@ -460,22 +552,29 @@ def _build_iql_minibatch_td(
     done = torch.ones((n, n_agents, 1), device=device, dtype=torch.bool)
     terminated = torch.ones((n, n_agents, 1), device=device, dtype=torch.bool)
 
-    for row, (raw_idx, slot) in enumerate(zip(indices, slots)):
-        sample_idx = int(raw_idx)
-        sample = samples[sample_idx]
-        action[row, slot] = int(np.clip(int(sample.action), 0, n_routes - 1))
-        action_mask[row, slot] = _sample_action_mask(sample, n_routes=n_routes, device=device)
+    for row, raw_idx in enumerate(indices):
+        transition = transitions[int(raw_idx)]
+        slot = q_network.slot_for_vehicle(str(transition.veh_id))
+        current_obs = np.asarray(transition.obs, dtype=np.float32).reshape(-1)
+        successor_obs = np.asarray(transition.next_obs, dtype=np.float32).reshape(-1)
+        if int(current_obs.shape[0]) != obs_dim or int(successor_obs.shape[0]) != obs_dim:
+            raise ValueError("replay transition observation does not match q-network obs_dim")
+        obs[row, slot] = torch.as_tensor(current_obs, device=device, dtype=torch.float32)
+        next_obs[row, slot] = torch.as_tensor(successor_obs, device=device, dtype=torch.float32)
+        action[row, slot] = int(np.clip(int(transition.action), 0, n_routes - 1))
+        action_mask[row, slot] = torch.as_tensor(
+            transition.action_mask,
+            device=device,
+            dtype=torch.bool,
+        )
+        next_action_mask[row, slot] = torch.as_tensor(
+            transition.next_action_mask,
+            device=device,
+            dtype=torch.bool,
+        )
         active_mask[row, slot] = True
-        rewards[row, slot, 0] = float(sample.reward)
-        if not bool(done_flags[sample_idx]):
-            next_idx = int(next_indices[sample_idx])
-            next_sample = samples[next_idx]
-            next_obs[row, slot] = torch.as_tensor(
-                _sample_observation(next_sample, obs_dim=obs_dim),
-                device=device,
-                dtype=torch.float32,
-            )
-            next_action_mask[row, slot] = _sample_action_mask(next_sample, n_routes=n_routes, device=device)
+        rewards[row, slot, 0] = float(transition.reward)
+        if not bool(transition.done):
             done[row, slot, 0] = False
             terminated[row, slot, 0] = False
 
@@ -562,65 +661,14 @@ def build_torchrl_iql_batch(
     n = int(len(samples))
     if n <= 0:
         raise ValueError("cannot build an IQL TorchRL batch with no samples")
-
-    n_agents = int(q_network.n_agents)
-    obs_dim = int(q_network.obs_dim)
-    n_routes = int(q_network.n_routes)
-    obs = torch.zeros((n, n_agents, obs_dim), device=device, dtype=torch.float32)
-    next_obs = torch.zeros((n, n_agents, obs_dim), device=device, dtype=torch.float32)
-    action = torch.zeros((n, n_agents), device=device, dtype=torch.long)
-    action_mask = torch.ones((n, n_agents, n_routes), device=device, dtype=torch.bool)
-    next_action_mask = torch.ones((n, n_agents, n_routes), device=device, dtype=torch.bool)
-    active_mask = torch.zeros((n, n_agents), device=device, dtype=torch.bool)
-    rewards = torch.zeros((n, n_agents, 1), device=device, dtype=torch.float32)
-    done = torch.ones((n, n_agents, 1), device=device, dtype=torch.bool)
-    terminated = torch.ones((n, n_agents, 1), device=device, dtype=torch.bool)
-    slot_rows: List[int] = []
-    by_vehicle: Dict[Tuple[int, str], List[int]] = {}
-
-    for row, sample in enumerate(samples):
-        slot = q_network.slot_for_vehicle(str(sample.veh_id))
-        slot_rows.append(int(slot))
-        sample_obs = np.asarray(sample.obs, dtype=np.float32).reshape(-1)
-        if int(sample_obs.shape[0]) != obs_dim:
-            raise ValueError(
-                f"sample obs_dim={sample_obs.shape[0]} does not match q-network obs_dim={obs_dim}"
-            )
-        obs[row, slot] = torch.as_tensor(sample_obs, device=device, dtype=torch.float32)
-        action[row, slot] = int(np.clip(int(sample.action), 0, n_routes - 1))
-        action_mask[row, slot] = _sample_action_mask(sample, n_routes=n_routes, device=device)
-        active_mask[row, slot] = True
-        rewards[row, slot, 0] = float(sample.reward)
-        by_vehicle.setdefault((int(sample.episode), str(sample.veh_id)), []).append(row)
-
-    for indices in by_vehicle.values():
-        ordered = sorted(indices, key=lambda i: (int(samples[i].decision_idx), int(samples[i].sim_step)))
-        for pos, row in enumerate(ordered):
-            slot = int(slot_rows[row])
-            if pos + 1 >= len(ordered):
-                continue
-            next_row = int(ordered[pos + 1])
-            next_sample = samples[next_row]
-            next_sample_obs = np.asarray(next_sample.obs, dtype=np.float32).reshape(-1)
-            next_obs[row, slot] = torch.as_tensor(next_sample_obs, device=device, dtype=torch.float32)
-            next_action_mask[row, slot] = _sample_action_mask(next_sample, n_routes=n_routes, device=device)
-            done[row, slot, 0] = False
-            terminated[row, slot, 0] = False
-
-    return TensorDict(
-        {
-            ("agents", "observation"): obs,
-            ("agents", "action"): action,
-            ("agents", "action_mask"): action_mask,
-            ("agents", "active_mask"): active_mask,
-            ("agents", "reward"): rewards,
-            ("next", "agents", "observation"): next_obs,
-            ("next", "agents", "action_mask"): next_action_mask,
-            ("next", "agents", "reward"): rewards,
-            ("next", "agents", "done"): done,
-            ("next", "agents", "terminated"): terminated,
-        },
-        batch_size=[n],
+    transitions = _materialize_iql_replay_transitions(
+        samples,
+        n_routes=int(q_network.n_routes),
+    )
+    return _build_iql_minibatch_td(
+        transitions=transitions,
+        indices=np.arange(n, dtype=np.int64),
+        q_network=q_network,
         device=device,
     )
 
@@ -676,8 +724,22 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
         self.loss_module = build_torchrl_iql_loss(q_network=self.actor, cfg=self.cfg).to(self.device)
         self.target_net_updater = SoftUpdate(self.loss_module, eps=float(self.cfg.target_update_eps))
         self.optimizer = torch.optim.Adam(self.loss_module.parameters(), lr=float(self.cfg.lr))
+        self.replay_buffer = IqlTransitionReplayBuffer(
+            memory_size=int(self.cfg.memory_size),
+            minibatch_size=int(self.cfg.minibatch_size),
+        )
         self.collector = None
         self.loaded_resume_episode = self._load_resume_checkpoint()
+
+    def _ensure_replay_buffer(self) -> IqlTransitionReplayBuffer:
+        replay_buffer = getattr(self, "replay_buffer", None)
+        if replay_buffer is None:
+            replay_buffer = IqlTransitionReplayBuffer(
+                memory_size=int(self.cfg.memory_size),
+                minibatch_size=int(self.cfg.minibatch_size),
+            )
+            self.replay_buffer = replay_buffer
+        return replay_buffer
 
     @staticmethod
     def _pending_update_metrics(
@@ -685,12 +747,18 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
         n_samples: int,
         pending_episodes: int,
         epsilon: float,
+        replay_size: int = 0,
+        replay_episodes: int = 0,
     ) -> Dict[str, float]:
         return {
             "loss": 0.0,
             "q_loss": 0.0,
             "n_samples": float(n_samples),
-            "replay_episodes": float(pending_episodes),
+            "new_samples": float(n_samples),
+            "replay_size": float(replay_size),
+            "sampled_transitions": 0.0,
+            "replay_episodes": float(replay_episodes),
+            "pending_episodes": float(pending_episodes),
             "update_epochs": 0.0,
             "updates_per_epoch": 0.0,
             "frames_per_batch": 0.0,
@@ -733,53 +801,53 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
         return episode
 
     def update_from_replay(self, episode_batches: Sequence[Sequence[OnlineDecisionSample]]) -> Dict[str, float]:
-        samples = [sample for batch in episode_batches for sample in batch]
+        new_samples = [sample for batch in episode_batches for sample in batch]
+        new_transitions = _materialize_iql_replay_transitions(
+            new_samples,
+            n_routes=int(self.actor.n_routes),
+        )
+        replay_buffer = self._ensure_replay_buffer()
+        replay_buffer.extend(new_transitions)
+        replay_transitions = replay_buffer.snapshot()
         epsilon = float(getattr(self.actor, "epsilon", 0.0))
-        if len(samples) < int(self.cfg.min_samples_per_update):
+        if len(new_samples) < int(self.cfg.min_samples_per_update) or not replay_transitions:
             return {
                 "loss": 0.0,
                 "q_loss": 0.0,
-                "n_samples": float(len(samples)),
-                "replay_episodes": float(len(episode_batches)),
+                "n_samples": float(len(new_samples)),
+                "new_samples": float(len(new_samples)),
+                "replay_size": float(len(replay_transitions)),
+                "sampled_transitions": 0.0,
+                "replay_episodes": float(len({transition.episode for transition in replay_transitions})),
+                "pending_episodes": 0.0,
                 "update_epochs": 0.0,
+                "updates_per_epoch": 0.0,
+                "frames_per_batch": 0.0,
                 "epsilon": epsilon,
                 "skipped": 1.0,
             }
 
-        next_indices, done_flags = _build_iql_next_indices(samples)
-        active_total = int(len(samples))
-        if active_total <= 0:
-            return {
-                "loss": 0.0,
-                "q_loss": 0.0,
-                "n_samples": 0.0,
-                "replay_episodes": float(len(episode_batches)),
-                "update_epochs": 0.0,
-                "epsilon": epsilon,
-                "skipped": 1.0,
-            }
-
-        frames = int(len(samples))
-        minibatch_size = min(max(int(self.cfg.minibatch_size), 1), max(frames, 1))
-        frames_per_batch = max(int(self.actor.n_agents) * max(int(self.cfg.agent_frames_per_batch), 1), 1)
-        updates_per_epoch = max(frames_per_batch // minibatch_size, 1)
+        minibatch_size = max(int(self.cfg.minibatch_size), 1)
+        frames_per_batch = max(
+            int(self.actor.n_agents) * max(int(self.cfg.agent_frames_per_batch), 1),
+            1,
+        )
+        updates_per_epoch = frames_per_batch // minibatch_size
         update_epochs = max(int(self.cfg.num_epochs), 1)
         self.actor.train()
         self.loss_module.train()
 
         loss_values: List[float] = []
+        sampled_transitions = 0
         for _epoch in range(update_epochs):
-            for batch_indices in _random_minibatch_indices(
-                n_samples=frames,
-                minibatch_size=minibatch_size,
-                num_batches=updates_per_epoch,
-            ):
+            for _batch in range(updates_per_epoch):
+                batch_indices = replay_buffer.sample_indices(batch_size=minibatch_size)
+                if not batch_indices.size:
+                    continue
                 subdata = _build_iql_minibatch_td(
-                    samples=samples,
+                    transitions=replay_transitions,
                     indices=batch_indices,
                     q_network=self.actor,
-                    next_indices=next_indices,
-                    done_flags=done_flags,
                     device=self.device,
                 )
                 active = subdata.get(("agents", "active_mask")).to(device=self.device, dtype=torch.bool)
@@ -793,12 +861,13 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
                 torch.nn.utils.clip_grad_norm_(self.loss_module.parameters(), float(self.cfg.max_grad_norm))
                 self.optimizer.step()
                 loss_values.append(float(loss.detach().cpu().item()))
+                sampled_transitions += int(len(batch_indices))
             self.target_net_updater.step()
 
-        active_rewards = np.asarray([float(sample.reward) for sample in samples], dtype=np.float32)
-        active_done = done_flags.astype(np.float32)
+        active_rewards = np.asarray([float(sample.reward) for sample in new_samples], dtype=np.float32)
+        active_done = np.asarray([float(transition.done) for transition in new_transitions], dtype=np.float32)
         active_q = _chosen_q_for_samples(
-            samples=samples,
+            samples=new_samples,
             q_network=self.actor,
             chunk_size=minibatch_size,
             device=self.device,
@@ -810,8 +879,12 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
         return {
             "loss": mean(loss_values),
             "q_loss": mean(loss_values),
-            "n_samples": float(active_total),
-            "replay_episodes": float(len(episode_batches)),
+            "n_samples": float(len(new_samples)),
+            "new_samples": float(len(new_samples)),
+            "replay_size": float(len(replay_transitions)),
+            "sampled_transitions": float(sampled_transitions),
+            "replay_episodes": float(len({transition.episode for transition in replay_transitions})),
+            "pending_episodes": 0.0,
             "update_epochs": float(update_epochs),
             "updates_per_epoch": float(updates_per_epoch),
             "frames_per_batch": float(frames_per_batch),
@@ -875,10 +948,13 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
                     pending_batches = []
                 else:
                     pending_samples = sum(len(batch) for batch in pending_batches)
+                    replay_transitions = self._ensure_replay_buffer().snapshot()
                     update = self._pending_update_metrics(
                         n_samples=pending_samples,
                         pending_episodes=len(pending_batches),
                         epsilon=epsilon,
+                        replay_size=len(replay_transitions),
+                        replay_episodes=len({transition.episode for transition in replay_transitions}),
                     )
                 row.update({f"update_{k}": v for k, v in update.items()})
                 train_rows.append(row)
@@ -892,7 +968,9 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
                     f"t_CAV={row.get('t_CAV', float('nan')):.3f} t_HDV={row.get('t_HDV', float('nan')):.3f} "
                     f"completion={row.get('completion_rate', float('nan')):.6f} "
                     f"unfinished={int(row.get('unfinished_all', 0))} "
-                    f"batch={update.get('replay_episodes', 0.0):.0f}/{batch_episodes} "
+                    f"new={update.get('new_samples', 0.0):.0f} "
+                    f"replay={update.get('replay_size', 0.0):.0f}/{int(self.cfg.memory_size)} "
+                    f"sampled={update.get('sampled_transitions', 0.0):.0f} "
                     f"pending={int(update.get('pending_batch', 0.0))}",
                     flush=True,
                 )
@@ -927,6 +1005,8 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
                 "loss": "DQNLoss",
                 "target_update": "SoftUpdate",
                 "agent_frames_per_batch": int(self.cfg.agent_frames_per_batch),
+                "memory_size": int(self.cfg.memory_size),
+                "replay_sampler": "SamplerWithoutReplacement",
                 "gamma": float(self.cfg.gamma),
                 "eps_init": float(self.cfg.eps_init),
                 "eps_end": float(self.cfg.eps_end),
@@ -952,17 +1032,21 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
         return summary
 
     def evaluate(self, *, eval_episodes: int) -> Dict[str, Any]:
-        self.cfg.real_policy_route_selection = "argmax"
         self.cfg.disable_human_learning_after_mutation = True
         collector = self._build_collector()
         collector._av_execution_mode = "dynamic"
-        self.actor.eval()
-        self.actor.set_epsilon(0.0)
         rows: List[Dict[str, Any]] = []
         started = time.time()
         start_episode = int(getattr(self.cfg, "resume_start_episode", 0) or 0)
         if start_episode <= 0:
             start_episode = int(self.loaded_resume_episode)
+        if str(self.cfg.real_policy_route_selection) == "sample":
+            eval_epsilon = float(self.cfg.eps_end)
+            self.actor.train()
+        else:
+            eval_epsilon = 0.0
+            self.actor.eval()
+        self.actor.set_epsilon(eval_epsilon)
         try:
             for idx in range(int(eval_episodes)):
                 episode = int(start_episode) + idx + 1
@@ -999,6 +1083,9 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
             "hdv_state_in": str(self.cfg.hdv_state_in),
             "eval_episodes": int(eval_episodes),
             "dynamic_routing": True,
+            "eval_policy_route_selection": str(self.cfg.real_policy_route_selection),
+            "eval_policy_executor": "valid_mask_epsilon_greedy",
+            "eval_epsilon": float(eval_epsilon),
             "hdv_updates_disabled": bool(self.cfg.disable_human_learning_after_mutation),
             "human_learning_after_mutation": not bool(self.cfg.disable_human_learning_after_mutation),
             "summary": _mean_complete(rows),
@@ -1079,12 +1166,19 @@ def build_config(args: argparse.Namespace) -> ToyIqlTorchRLConfig:
         min_samples_per_update=1,
         max_grad_norm=float(args.max_grad_norm),
         disable_human_learning_after_mutation=bool(args.eval_only),
-        real_policy_route_selection="argmax" if bool(args.eval_only) else "sample",
+        real_policy_route_selection=(
+            "sample"
+            if bool(args.eval_only) and str(args.eval_policy_route_selection) == "training"
+            else "argmax"
+            if bool(args.eval_only)
+            else "sample"
+        ),
         sumo_time_to_teleport=str(args.sumo_time_to_teleport),
         sumo_extra_args=str(args.sumo_extra_args or ""),
         agent_frames_per_batch=int(args.agent_frames_per_batch),
         num_epochs=int(args.num_epochs),
         minibatch_size=int(args.minibatch_size),
+        memory_size=int(args.memory_size),
         q_network_depth=int(args.q_network_depth),
         q_network_num_cells=int(args.q_network_num_cells),
         eps_init=float(args.eps_init),
@@ -1159,6 +1253,12 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--num-epochs", type=int, default=1)
     parser.add_argument("--minibatch-size", type=int, default=32)
+    parser.add_argument(
+        "--memory-size",
+        type=int,
+        default=20_000,
+        help="Transition replay capacity, matching the official URB IQL TensorDictReplayBuffer.",
+    )
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--q-network-depth", type=int, default=3)
     parser.add_argument("--q-network-num-cells", type=int, default=64)
@@ -1176,6 +1276,15 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--incident-speed", type=float, default=0.0)
     parser.add_argument("--sumo-time-to-teleport", default="-1")
     parser.add_argument("--sumo-extra-args", default="")
+    parser.add_argument(
+        "--eval-policy-route-selection",
+        choices=["argmax", "training"],
+        default="argmax",
+        help=(
+            "Evaluation executor: argmax preserves the legacy benchmark; training uses "
+            "the final-episode valid-mask epsilon-greedy policy."
+        ),
+    )
     parser.add_argument("--eval-only", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
@@ -1197,8 +1306,6 @@ def build_plan(cfg: ToyIqlTorchRLConfig) -> Dict[str, Any]:
             "path_num_samples": int(cfg.path_num_samples),
             "post_mutation_state_in": cfg.post_mutation_state_in,
             "hdv_state_in": cfg.hdv_state_in,
-            "replay_buffer_episodes": cfg.replay_buffer_episodes,
-            "replay_update_epochs": cfg.num_epochs,
             "return_horizon_steps": cfg.return_horizon_steps,
             "hdv_learning": cfg.hdv_gawron_mode,
             "human_learning_after_mutation": not bool(cfg.disable_human_learning_after_mutation),
@@ -1216,6 +1323,8 @@ def build_plan(cfg: ToyIqlTorchRLConfig) -> Dict[str, Any]:
             "checkpoint_episodes": list(cfg.checkpoint_episodes),
             "num_epochs": int(cfg.num_epochs),
             "minibatch_size": int(cfg.minibatch_size),
+            "memory_size": int(cfg.memory_size),
+            "replay_sampler": "SamplerWithoutReplacement",
             "lr": float(cfg.lr),
             "max_grad_norm": float(cfg.max_grad_norm),
             "gamma": float(cfg.gamma),

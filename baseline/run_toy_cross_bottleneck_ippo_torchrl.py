@@ -456,20 +456,13 @@ def _random_minibatch_indices(
     *,
     n_samples: int,
     minibatch_size: int,
-    num_batches: int,
 ) -> List[np.ndarray]:
-    n = int(n_samples)
+    n = max(int(n_samples), 0)
+    if n == 0:
+        return []
     batch = max(1, min(int(minibatch_size), n))
-    out: List[np.ndarray] = []
     order = np.random.permutation(n)
-    cursor = 0
-    for _ in range(max(int(num_batches), 1)):
-        if cursor + batch > n:
-            order = np.random.permutation(n)
-            cursor = 0
-        out.append(order[cursor : cursor + batch])
-        cursor += batch
-    return out
+    return [order[start : start + batch] for start in range(0, n, batch)]
 
 
 def _compute_ippo_advantages(
@@ -809,8 +802,8 @@ class ToyIppoTorchRLTrainer(ToyOnlineAcTrainer):
 
         frames = int(len(samples))
         minibatch_size = min(max(int(self.cfg.minibatch_size), 1), max(frames, 1))
-        frames_per_batch = max(int(self.actor.n_agents) * max(int(self.cfg.agent_frames_per_batch), 1), 1)
-        updates_per_epoch = max(frames_per_batch // minibatch_size, 1)
+        frames_per_batch = frames
+        updates_per_epoch = max((frames + minibatch_size - 1) // minibatch_size, 1)
         update_epochs = max(int(self.cfg.num_epochs), 1)
         self.actor.train()
         self.loss_module.train()
@@ -825,7 +818,6 @@ class ToyIppoTorchRLTrainer(ToyOnlineAcTrainer):
             for batch_indices in _random_minibatch_indices(
                 n_samples=frames,
                 minibatch_size=minibatch_size,
-                num_batches=updates_per_epoch,
             ):
                 subdata = _build_ippo_minibatch_td(
                     samples=samples,
@@ -1007,7 +999,6 @@ class ToyIppoTorchRLTrainer(ToyOnlineAcTrainer):
         return summary
 
     def evaluate(self, *, eval_episodes: int) -> Dict[str, Any]:
-        self.cfg.real_policy_route_selection = "argmax"
         self.cfg.disable_human_learning_after_mutation = True
         collector = self._build_collector()
         collector._av_execution_mode = "dynamic"
@@ -1053,6 +1044,8 @@ class ToyIppoTorchRLTrainer(ToyOnlineAcTrainer):
             "hdv_state_in": str(self.cfg.hdv_state_in),
             "eval_episodes": int(eval_episodes),
             "dynamic_routing": True,
+            "eval_policy_route_selection": str(self.cfg.real_policy_route_selection),
+            "eval_policy_executor": "masked_categorical",
             "hdv_updates_disabled": bool(self.cfg.disable_human_learning_after_mutation),
             "human_learning_after_mutation": not bool(self.cfg.disable_human_learning_after_mutation),
             "summary": _mean_complete(rows),
@@ -1135,7 +1128,13 @@ def build_config(args: argparse.Namespace) -> ToyIppoTorchRLConfig:
         min_samples_per_update=1,
         max_grad_norm=float(args.max_grad_norm),
         disable_human_learning_after_mutation=bool(args.eval_only),
-        real_policy_route_selection="argmax" if bool(args.eval_only) else "sample",
+        real_policy_route_selection=(
+            "sample"
+            if bool(args.eval_only) and str(args.eval_policy_route_selection) == "training"
+            else "argmax"
+            if bool(args.eval_only)
+            else "sample"
+        ),
         sumo_time_to_teleport=str(args.sumo_time_to_teleport),
         sumo_extra_args=str(args.sumo_extra_args or ""),
         agent_frames_per_batch=int(args.agent_frames_per_batch),
@@ -1236,6 +1235,15 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--incident-speed", type=float, default=0.0)
     parser.add_argument("--sumo-time-to-teleport", default="-1")
     parser.add_argument("--sumo-extra-args", default="")
+    parser.add_argument(
+        "--eval-policy-route-selection",
+        choices=["argmax", "training"],
+        default="argmax",
+        help=(
+            "Evaluation executor: argmax preserves the legacy benchmark; training uses "
+            "the masked categorical sampling used for IPPO data collection."
+        ),
+    )
     parser.add_argument("--eval-only", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)

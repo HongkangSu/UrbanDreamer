@@ -96,6 +96,32 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         help="Allow incomplete SUMO episodes into WM replay. Default is to require completion.",
     )
     parser.add_argument("--wm-batch-size", type=int, default=16)
+    parser.add_argument(
+        "--wm-gradient-checkpointing",
+        action="store_true",
+        help="Recompute online-WM transformer layers during backward to reduce GPU memory.",
+    )
+    parser.add_argument(
+        "--wm-space-attention-batch-chunk-size",
+        type=int,
+        default=0,
+        help=(
+            "Maximum flattened batch/time items per online-WM spatial-attention call; "
+            "0 disables chunking."
+        ),
+    )
+    parser.add_argument(
+        "--wm-mlp-token-chunk-size",
+        type=int,
+        default=0,
+        help="Maximum flattened tokens per online-WM transformer MLP call.",
+    )
+    parser.add_argument(
+        "--wm-time-attention-batch-chunk-size",
+        type=int,
+        default=0,
+        help="Maximum sequences per online-WM temporal-attention call.",
+    )
     parser.add_argument("--wm-lr", type=float, default=1e-5)
     parser.add_argument("--wm-grad-clip", type=float, default=10.0)
     parser.add_argument("--wm-transition-decoded-supervision-weight", type=float, default=1.0)
@@ -185,6 +211,12 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         help="Number of imagined actor-critic update calls after each real SUMO collection episode.",
     )
     parser.add_argument("--imagined-rollouts-per-update", type=int, default=1)
+    parser.add_argument(
+        "--imagined-rollout-batch-size",
+        type=int,
+        default=1,
+        help="Number of independent imagined rollouts advanced together at each causal horizon step.",
+    )
     parser.add_argument("--min-replay-episodes-before-actor", type=int, default=1)
     parser.add_argument("--ac-lambda", type=float, default=0.95)
     parser.add_argument(
@@ -354,6 +386,14 @@ def build_config(args: argparse.Namespace) -> OnlineWmDreamerConfig:
         "wm_replay_require_completion": not bool(args.allow_incomplete_wm_replay),
         "wm_replay_completion_threshold": float(args.wm_replay_completion_threshold),
         "wm_batch_size": int(args.wm_batch_size),
+        "wm_gradient_checkpointing": bool(args.wm_gradient_checkpointing),
+        "wm_space_attention_batch_chunk_size": int(
+            args.wm_space_attention_batch_chunk_size
+        ),
+        "wm_mlp_token_chunk_size": int(args.wm_mlp_token_chunk_size),
+        "wm_time_attention_batch_chunk_size": int(
+            args.wm_time_attention_batch_chunk_size
+        ),
         "wm_lr": float(args.wm_lr),
         "wm_grad_clip": float(args.wm_grad_clip),
         "wm_transition_decoded_supervision_weight": float(args.wm_transition_decoded_supervision_weight),
@@ -382,6 +422,7 @@ def build_config(args: argparse.Namespace) -> OnlineWmDreamerConfig:
         "imagined_updates_per_episode": int(args.imagined_updates_per_episode),
         "imagined_update_passes_per_collect": int(args.imagined_update_passes_per_collect),
         "imagined_rollouts_per_update": int(args.imagined_rollouts_per_update),
+        "imagined_rollout_batch_size": int(args.imagined_rollout_batch_size),
         "min_replay_episodes_before_actor": int(args.min_replay_episodes_before_actor),
         "ac_lambda": float(args.ac_lambda),
         "ac_global_advantage_weight": float(args.global_advantage_weight),

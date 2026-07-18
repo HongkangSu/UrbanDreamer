@@ -80,9 +80,15 @@ _ensure_sumo_runtime_env()
 try:
     from routerl import TrafficEnvironment
     ROUTERL_AVAILABLE = True
-except ImportError:
+    ROUTERL_IMPORT_ERROR = None
+except ImportError as exc:
     ROUTERL_AVAILABLE = False
-    print("ERROR: routerl not installed. Activate the URB conda environment first.")
+    ROUTERL_IMPORT_ERROR = exc
+    print(
+        "ERROR: the selected Python interpreter cannot import "
+        f"routerl.TrafficEnvironment ({sys.executable}). Install routerlurb into "
+        "this interpreter or launch with another interpreter."
+    )
 
 try:
     import traci
@@ -679,7 +685,12 @@ def main():
     args = parse_args()
 
     if not ROUTERL_AVAILABLE:
-        sys.exit("routerl is not installed. Please activate the URB conda environment.")
+        sys.exit(
+            "routerl.TrafficEnvironment is unavailable in the selected Python "
+            f"interpreter ({sys.executable}). Install it with: "
+            f"{sys.executable} -m pip install routerlurb==1.0.0. "
+            f"Underlying import error: {ROUTERL_IMPORT_ERROR}"
+        )
 
     tcp_ok, tcp_reason = _check_local_tcp_accept_support()
     if not tcp_ok:

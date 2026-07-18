@@ -988,16 +988,16 @@ class UrbanWorldModel(nn.Module):
     @torch.inference_mode()
     def predict_next_state_batch(
         self,
-        z_current: torch.Tensor,    # (E, D)
+        z_current: torch.Tensor,    # (E, D) or (N, E, D)
         actions: torch.Tensor,      # (N, E) batch of joint edge actions
         departs: Optional[torch.Tensor] = None,   # (N, E)
         contexts: Optional[torch.Tensor] = None,   # (N, C)
         hdv_contexts: Optional[torch.Tensor] = None,   # (N, E)
     ) -> torch.Tensor:
-        """Predict next states for N candidate actions in parallel.
+        """Predict next states for N candidate actions or rollouts in parallel.
 
         Args:
-            z_current: (E, D) current latent state.
+            z_current: shared ``(E, D)`` state or per-rollout ``(N, E, D)`` states.
             actions:   (N, E) batch of normalized edge-level joint actions.
             departs:   optional (N, E) departure schedule vectors.
             contexts:  optional (N, C) context vectors.
@@ -1005,8 +1005,23 @@ class UrbanWorldModel(nn.Module):
         Returns:
             (N, E, D) predicted next latent states.
         """
-        N = actions.shape[0]
-        E, D = z_current.shape
+        N = int(actions.shape[0])
+        if z_current.dim() == 2:
+            E, D = z_current.shape
+            z_batch = z_current.unsqueeze(0).expand(N, E, D)
+        elif z_current.dim() == 3:
+            if int(z_current.shape[0]) != N:
+                raise ValueError(
+                    "batched z_current/action size mismatch: "
+                    f"{int(z_current.shape[0])} != {N}"
+                )
+            _, E, D = z_current.shape
+            z_batch = z_current
+        else:
+            raise ValueError(
+                "z_current must be (E,D) or (N,E,D), "
+                f"got {tuple(z_current.shape)}"
+            )
         dtype = z_current.dtype
 
         # Keep graph_cond inputs as a tuple; other encoders use flat action vectors.
@@ -1021,7 +1036,7 @@ class UrbanWorldModel(nn.Module):
             dtype=dtype,
         )
 
-        past_packed = z_current.unsqueeze(0).unsqueeze(0).expand(N, 1, E, D)  # (N, 1, E, D)
+        past_packed = z_batch.unsqueeze(1)  # (N, 1, E, D)
 
         z_next = self._predict_one_step(past_packed, actions_full)  # (N, 1, E, D)
         return z_next[:, 0]  # (N, E, D)

@@ -39,12 +39,10 @@ except ImportError:
     from routerl_shared import load_od_data, ensure_agents_csv_in_records
 
 try:
-    from .routerl_connector import RouteRLConnector
-    ROUTERL_AVAILABLE = True
+    from .routerl_connector import ROUTERL_AVAILABLE, RouteRLConnector
 except ImportError:
     try:
-        from routerl_connector import RouteRLConnector
-        ROUTERL_AVAILABLE = True
+        from routerl_connector import ROUTERL_AVAILABLE, RouteRLConnector
     except ImportError:
         ROUTERL_AVAILABLE = False
 
@@ -554,7 +552,8 @@ class DataCollector:
         if backend == "routerl":
             if not ROUTERL_AVAILABLE:
                 raise RuntimeError(
-                    "routerl is not installed. Run: pip install routerl  "
+                    "routerl is not installed. Run: python -m pip install "
+                    "routerlurb==1.0.0  "
                     "or use --backend legacy"
                 )
             if not network_folder:

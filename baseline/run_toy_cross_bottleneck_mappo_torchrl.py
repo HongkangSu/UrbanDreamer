@@ -456,20 +456,13 @@ def _random_minibatch_indices(
     *,
     n_samples: int,
     minibatch_size: int,
-    num_batches: int,
 ) -> List[np.ndarray]:
-    n = int(n_samples)
+    n = max(int(n_samples), 0)
+    if n == 0:
+        return []
     batch = max(1, min(int(minibatch_size), n))
-    out: List[np.ndarray] = []
     order = np.random.permutation(n)
-    cursor = 0
-    for _ in range(max(int(num_batches), 1)):
-        if cursor + batch > n:
-            order = np.random.permutation(n)
-            cursor = 0
-        out.append(order[cursor : cursor + batch])
-        cursor += batch
-    return out
+    return [order[start : start + batch] for start in range(0, n, batch)]
 
 
 def _mappo_effective_minibatch_size(
@@ -477,14 +470,21 @@ def _mappo_effective_minibatch_size(
     configured_minibatch_size: int,
     actor_critic: TorchRLMappoActorCritic,
 ) -> int:
-    # TorchRL's centralized MultiAgentMLP materializes features that scale with
-    # batch * n_agents^2 * obs_dim. Keep the forward batch bounded for real nets.
-    target_centralized_elements = 16_000_000
+    # Each dense row is [n_agents, obs_dim]. The shared centralized critic
+    # flattens that row once; it does not materialize n_agents copies of it.
+    # Include conservative room for actions, masks, activations, and gradients
+    # while retaining a useful microbatch on large real networks.
+    target_working_elements = 16_000_000
     per_sample_elements = max(
-        int(actor_critic.n_agents) * int(actor_critic.n_agents) * int(actor_critic.obs_dim),
+        int(actor_critic.n_agents)
+        * (
+            4 * int(actor_critic.obs_dim)
+            + 4 * int(actor_critic.n_routes)
+            + 64
+        ),
         1,
     )
-    centralized_cap = max(int(target_centralized_elements // per_sample_elements), 1)
+    centralized_cap = max(int(target_working_elements // per_sample_elements), 1)
     return max(1, min(int(configured_minibatch_size), int(centralized_cap)))
 
 
@@ -801,8 +801,11 @@ class ToyMappoTorchRLTrainer(ToyOnlineAcTrainer):
                 "skipped": 1.0,
             }
 
-        frames_per_batch = max(int(self.actor.n_agents) * max(int(self.cfg.agent_frames_per_batch), 1), 1)
-        updates_per_epoch = max(frames_per_batch // configured_minibatch_size, 1)
+        frames_per_batch = frames
+        updates_per_epoch = max(
+            (frames + configured_minibatch_size - 1) // configured_minibatch_size,
+            1,
+        )
         update_epochs = max(int(self.cfg.num_epochs), 1)
         self.actor.train()
         self.loss_module.train()
@@ -814,43 +817,66 @@ class ToyMappoTorchRLTrainer(ToyOnlineAcTrainer):
         entropy_values: List[float] = []
         clip_values: List[float] = []
         for _epoch in range(update_epochs):
-            for batch_indices in _random_minibatch_indices(
+            for optimizer_batch_indices in _random_minibatch_indices(
                 n_samples=frames,
-                minibatch_size=effective_minibatch_size,
-                num_batches=updates_per_epoch,
+                minibatch_size=configured_minibatch_size,
             ):
-                subdata = _build_mappo_minibatch_td(
-                    samples=samples,
-                    indices=batch_indices,
-                    actor_critic=self.actor,
-                    advantages=advantages,
-                    value_targets=value_targets,
-                    device=self.device,
-                )
-                active = subdata.get(("agents", "active_mask")).to(device=self.device, dtype=torch.bool)
-                if not bool(active.any().detach().cpu().item()):
-                    continue
-                loss_vals = self.loss_module(subdata)
-                objective = _loss_matrix(loss_vals.get("loss_objective"), active.to(dtype=torch.float32))
-                entropy_loss = _loss_matrix(loss_vals.get("loss_entropy"), active.to(dtype=torch.float32))
-                critic_loss = _loss_matrix(loss_vals.get("loss_critic"), active.to(dtype=torch.float32))
-                total_matrix = objective + entropy_loss + critic_loss
-                loss = _masked_mean(total_matrix, active)
                 self.optimizer.zero_grad(set_to_none=True)
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.loss_module.parameters(), float(self.cfg.max_grad_norm))
-                self.optimizer.step()
+                optimizer_batch_size = int(len(optimizer_batch_indices))
+                optimizer_batch_has_grad = False
+                for start in range(0, optimizer_batch_size, effective_minibatch_size):
+                    batch_indices = optimizer_batch_indices[
+                        start : start + effective_minibatch_size
+                    ]
+                    subdata = _build_mappo_minibatch_td(
+                        samples=samples,
+                        indices=batch_indices,
+                        actor_critic=self.actor,
+                        advantages=advantages,
+                        value_targets=value_targets,
+                        device=self.device,
+                    )
+                    active = subdata.get(("agents", "active_mask")).to(
+                        device=self.device,
+                        dtype=torch.bool,
+                    )
+                    active_count = int(active.sum().detach().cpu().item())
+                    if active_count <= 0:
+                        continue
+                    loss_vals = self.loss_module(subdata)
+                    active_float = active.to(dtype=torch.float32)
+                    objective = _loss_matrix(loss_vals.get("loss_objective"), active_float)
+                    entropy_loss = _loss_matrix(loss_vals.get("loss_entropy"), active_float)
+                    critic_loss = _loss_matrix(loss_vals.get("loss_critic"), active_float)
+                    total_matrix = objective + entropy_loss + critic_loss
+                    loss = _masked_mean(total_matrix, active)
+                    loss_scale = float(active_count) / float(max(optimizer_batch_size, 1))
+                    (loss * loss_scale).backward()
+                    optimizer_batch_has_grad = True
 
-                loss_values.append(float(loss.detach().cpu().item()))
-                loss_objective_values.append(float(_masked_mean(objective.detach(), active).cpu().item()))
-                loss_entropy_values.append(float(_masked_mean(entropy_loss.detach(), active).cpu().item()))
-                loss_critic_values.append(float(_masked_mean(critic_loss.detach(), active).cpu().item()))
-                entropy_tensor = loss_vals.get("entropy")
-                if torch.is_tensor(entropy_tensor):
-                    entropy_values.append(float(entropy_tensor.detach().mean().cpu().item()))
-                clip_tensor = loss_vals.get("clip_fraction")
-                if torch.is_tensor(clip_tensor):
-                    clip_values.append(float(clip_tensor.detach().mean().cpu().item()))
+                    loss_values.append(float(loss.detach().cpu().item()))
+                    loss_objective_values.append(
+                        float(_masked_mean(objective.detach(), active).cpu().item())
+                    )
+                    loss_entropy_values.append(
+                        float(_masked_mean(entropy_loss.detach(), active).cpu().item())
+                    )
+                    loss_critic_values.append(
+                        float(_masked_mean(critic_loss.detach(), active).cpu().item())
+                    )
+                    entropy_tensor = loss_vals.get("entropy")
+                    if torch.is_tensor(entropy_tensor):
+                        entropy_values.append(float(entropy_tensor.detach().mean().cpu().item()))
+                    clip_tensor = loss_vals.get("clip_fraction")
+                    if torch.is_tensor(clip_tensor):
+                        clip_values.append(float(clip_tensor.detach().mean().cpu().item()))
+
+                if optimizer_batch_has_grad:
+                    torch.nn.utils.clip_grad_norm_(
+                        self.loss_module.parameters(),
+                        float(self.cfg.max_grad_norm),
+                    )
+                    self.optimizer.step()
 
         def mean(values: Sequence[float]) -> float:
             return float(np.mean(values)) if values else 0.0
@@ -1001,7 +1027,6 @@ class ToyMappoTorchRLTrainer(ToyOnlineAcTrainer):
         return summary
 
     def evaluate(self, *, eval_episodes: int) -> Dict[str, Any]:
-        self.cfg.real_policy_route_selection = "argmax"
         self.cfg.disable_human_learning_after_mutation = True
         collector = self._build_collector()
         collector._av_execution_mode = "dynamic"
@@ -1047,6 +1072,8 @@ class ToyMappoTorchRLTrainer(ToyOnlineAcTrainer):
             "hdv_state_in": str(self.cfg.hdv_state_in),
             "eval_episodes": int(eval_episodes),
             "dynamic_routing": True,
+            "eval_policy_route_selection": str(self.cfg.real_policy_route_selection),
+            "eval_policy_executor": "masked_categorical",
             "hdv_updates_disabled": bool(self.cfg.disable_human_learning_after_mutation),
             "human_learning_after_mutation": not bool(self.cfg.disable_human_learning_after_mutation),
             "summary": _mean_complete(rows),
@@ -1129,7 +1156,13 @@ def build_config(args: argparse.Namespace) -> ToyMappoTorchRLConfig:
         min_samples_per_update=1,
         max_grad_norm=float(args.max_grad_norm),
         disable_human_learning_after_mutation=bool(args.eval_only),
-        real_policy_route_selection="argmax" if bool(args.eval_only) else "sample",
+        real_policy_route_selection=(
+            "sample"
+            if bool(args.eval_only) and str(args.eval_policy_route_selection) == "training"
+            else "argmax"
+            if bool(args.eval_only)
+            else "sample"
+        ),
         sumo_time_to_teleport=str(args.sumo_time_to_teleport),
         sumo_extra_args=str(args.sumo_extra_args or ""),
         agent_frames_per_batch=int(args.agent_frames_per_batch),
@@ -1230,6 +1263,15 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--incident-speed", type=float, default=0.0)
     parser.add_argument("--sumo-time-to-teleport", default="-1")
     parser.add_argument("--sumo-extra-args", default="")
+    parser.add_argument(
+        "--eval-policy-route-selection",
+        choices=["argmax", "training"],
+        default="argmax",
+        help=(
+            "Evaluation executor: argmax preserves the legacy benchmark; training uses "
+            "the masked categorical sampling used for MAPPO data collection."
+        ),
+    )
     parser.add_argument("--eval-only", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)

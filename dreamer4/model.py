@@ -7,6 +7,7 @@ from typing import Optional, Tuple, Dict, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint as activation_checkpoint
 
 
 class EdgeGNNLayer(nn.Module):
@@ -107,14 +108,32 @@ class MLP(nn.Module):
         self.fc_in = nn.Linear(d_model, 2 * hidden)
         self.fc_out = nn.Linear(hidden, d_model)
         self.drop = nn.Dropout(dropout)
+        self.token_chunk_size = 0
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def _forward_chunk(self, x: torch.Tensor) -> torch.Tensor:
         u, v = self.fc_in(x).chunk(2, dim=-1)
         h = u * F.silu(v)
         h = self.drop(h)
         y = self.fc_out(h)
         y = self.drop(y)
         return y
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        chunk_size = int(self.token_chunk_size)
+        if chunk_size <= 0:
+            return self._forward_chunk(x)
+        shape = x.shape
+        flat = x.reshape(-1, shape[-1])
+        if int(flat.shape[0]) <= chunk_size:
+            return self._forward_chunk(x)
+        output = torch.cat(
+            [
+                self._forward_chunk(flat[start : start + chunk_size])
+                for start in range(0, int(flat.shape[0]), chunk_size)
+            ],
+            dim=0,
+        )
+        return output.reshape(shape)
 
 
 class MultiheadSelfAttention(nn.Module):
@@ -159,6 +178,7 @@ class SpaceSelfAttentionModality(nn.Module):
         attn_mask = allow.unsqueeze(0).unsqueeze(0)                # (1,1,S,S) True=allowed (PyTorch SDPA bool mask)
         self.register_buffer("attn_mask", attn_mask, persistent=False)
 
+        self.attention_batch_chunk_size = 0
         self.attn = MultiheadSelfAttention(d_model, n_heads, dropout=dropout)
 
     def _build_allow(self, S: int) -> torch.Tensor:
@@ -208,8 +228,24 @@ class SpaceSelfAttentionModality(nn.Module):
     def forward(self, x_btSd: torch.Tensor) -> torch.Tensor:
         B, T, S, D = x_btSd.shape
         x = x_btSd.reshape(B * T, S, D)
-        mask = self.attn_mask.expand(B * T, 1, S, S)
-        y = self.attn(x, attn_mask=mask, is_causal=False)
+        chunk_size = int(self.attention_batch_chunk_size)
+        if chunk_size <= 0 or int(x.shape[0]) <= chunk_size:
+            mask = self.attn_mask.expand(B * T, 1, S, S)
+            y = self.attn(x, attn_mask=mask, is_causal=False)
+        else:
+            y = torch.cat(
+                [
+                    self.attn(
+                        x[start : start + chunk_size],
+                        attn_mask=self.attn_mask.expand(
+                            min(chunk_size, int(x.shape[0]) - start), 1, S, S
+                        ),
+                        is_causal=False,
+                    )
+                    for start in range(0, int(x.shape[0]), chunk_size)
+                ],
+                dim=0,
+            )
         return y.reshape(B, T, S, D)
 
 
@@ -218,7 +254,20 @@ class TimeSelfAttention(nn.Module):
         super().__init__()
         self.latents_only = bool(latents_only)
         self.n_latents = int(n_latents)
+        self.attention_batch_chunk_size = 32_768
         self.attn = MultiheadSelfAttention(d_model, n_heads, dropout=dropout)
+
+    def _attend(self, x_nld: torch.Tensor) -> torch.Tensor:
+        chunk_size = int(self.attention_batch_chunk_size)
+        if chunk_size <= 0 or int(x_nld.shape[0]) <= chunk_size:
+            return self.attn(x_nld, is_causal=True)
+        return torch.cat(
+            [
+                self.attn(x_nld[start : start + chunk_size], is_causal=True)
+                for start in range(0, int(x_nld.shape[0]), chunk_size)
+            ],
+            dim=0,
+        )
 
     def forward(self, x_btSd: torch.Tensor) -> torch.Tensor:
         B, T, S, D = x_btSd.shape
@@ -226,14 +275,14 @@ class TimeSelfAttention(nn.Module):
             L = self.n_latents
             lat = x_btSd[:, :, :L, :]  # (B,T,L,D)
             lat_nld = lat.permute(0, 2, 1, 3).contiguous().view(B * L, T, D)
-            out = self.attn(lat_nld, is_causal=True)
+            out = self._attend(lat_nld)
             out = out.view(B, L, T, D).permute(0, 2, 1, 3).contiguous()
             x = x_btSd.clone()
             x[:, :, :L, :] = out
             return x
         else:
             x_nld = x_btSd.permute(0, 2, 1, 3).contiguous().view(B * S, T, D)
-            out = self.attn(x_nld, is_causal=True)
+            out = self._attend(x_nld)
             return out.view(B, S, T, D).permute(0, 2, 1, 3).contiguous()
 
 
@@ -290,6 +339,7 @@ class BlockCausalTransformer(nn.Module):
         latents_only_time: bool,
     ):
         super().__init__()
+        self.gradient_checkpointing = False
         self.layers = nn.ModuleList([
             BlockCausalLayer(
                 d_model=d_model, n_heads=n_heads, n_latents=n_latents,
@@ -303,7 +353,10 @@ class BlockCausalTransformer(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         for layer in self.layers:
-            x = layer(x)
+            if self.gradient_checkpointing and self.training and torch.is_grad_enabled():
+                x = activation_checkpoint(layer, x, use_reentrant=False)
+            else:
+                x = layer(x)
         return x
 
 

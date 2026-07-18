@@ -7,6 +7,13 @@ import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "dreamer4"))
 from flow_dataset import FlowDataset  # noqa: E402
+from model import (  # noqa: E402
+    BlockCausalTransformer,
+    MLP,
+    Modality,
+    SpaceSelfAttentionModality,
+    TimeSelfAttention,
+)
 from train_dynamics import (  # noqa: E402
     _build_adm_action_windows,
     _build_graph_cond_model_actions,
@@ -19,6 +26,122 @@ from train_dynamics import (  # noqa: E402
     _select_rollout_state,
     cfm_predict_one_timestep,
 )
+
+
+def test_time_attention_batch_chunking_preserves_outputs_and_gradients():
+    torch.manual_seed(7)
+    unchunked = TimeSelfAttention(
+        d_model=8,
+        n_heads=2,
+        dropout=0.0,
+        latents_only=False,
+        n_latents=1,
+    )
+    chunked = TimeSelfAttention(
+        d_model=8,
+        n_heads=2,
+        dropout=0.0,
+        latents_only=False,
+        n_latents=1,
+    )
+    chunked.load_state_dict(unchunked.state_dict())
+    chunked.attention_batch_chunk_size = 3
+
+    x_full = torch.randn(2, 4, 5, 8, requires_grad=True)
+    x_chunked = x_full.detach().clone().requires_grad_(True)
+    out_full = unchunked(x_full)
+    out_chunked = chunked(x_chunked)
+
+    assert torch.allclose(out_chunked, out_full, atol=1e-6, rtol=1e-6)
+    out_full.square().mean().backward()
+    out_chunked.square().mean().backward()
+    assert torch.allclose(x_chunked.grad, x_full.grad, atol=1e-6, rtol=1e-6)
+
+
+def test_space_attention_batch_chunking_preserves_outputs_and_gradients():
+    torch.manual_seed(9)
+    modality_ids = torch.full((4,), int(Modality.SPATIAL), dtype=torch.int32)
+    regular = SpaceSelfAttentionModality(
+        d_model=8,
+        n_heads=2,
+        modality_ids=modality_ids,
+        n_latents=0,
+        mode='wm_agent',
+        dropout=0.0,
+    )
+    chunked = SpaceSelfAttentionModality(
+        d_model=8,
+        n_heads=2,
+        modality_ids=modality_ids,
+        n_latents=0,
+        mode='wm_agent',
+        dropout=0.0,
+    )
+    chunked.load_state_dict(regular.state_dict())
+    chunked.attention_batch_chunk_size = 2
+
+    x_regular = torch.randn(2, 3, 4, 8, requires_grad=True)
+    x_chunked = x_regular.detach().clone().requires_grad_(True)
+    out_regular = regular(x_regular)
+    out_chunked = chunked(x_chunked)
+
+    assert torch.allclose(out_chunked, out_regular, atol=1e-6, rtol=1e-6)
+    out_regular.square().mean().backward()
+    out_chunked.square().mean().backward()
+    assert torch.allclose(x_chunked.grad, x_regular.grad, atol=1e-6, rtol=1e-6)
+
+
+def test_mlp_token_chunking_preserves_outputs_and_gradients():
+    torch.manual_seed(10)
+    regular = MLP(d_model=8, mlp_ratio=2.0, dropout=0.0)
+    chunked = MLP(d_model=8, mlp_ratio=2.0, dropout=0.0)
+    chunked.load_state_dict(regular.state_dict())
+    chunked.token_chunk_size = 5
+
+    x_regular = torch.randn(2, 3, 4, 8, requires_grad=True)
+    x_chunked = x_regular.detach().clone().requires_grad_(True)
+    out_regular = regular(x_regular)
+    out_chunked = chunked(x_chunked)
+
+    assert torch.allclose(out_chunked, out_regular, atol=1e-6, rtol=1e-6)
+    out_regular.square().mean().backward()
+    out_chunked.square().mean().backward()
+    assert torch.allclose(x_chunked.grad, x_regular.grad, atol=1e-6, rtol=1e-6)
+
+
+def test_transformer_activation_checkpointing_preserves_outputs_and_gradients():
+    torch.manual_seed(11)
+    kwargs = {
+        'd_model': 8,
+        'n_heads': 2,
+        'depth': 2,
+        'n_latents': 0,
+        'modality_ids': torch.full((3,), int(Modality.SPATIAL), dtype=torch.int32),
+        'space_mode': 'wm_agent',
+        'dropout': 0.0,
+        'mlp_ratio': 2.0,
+        'time_every': 1,
+        'latents_only_time': False,
+    }
+    regular = BlockCausalTransformer(**kwargs)
+    checkpointed = BlockCausalTransformer(**kwargs)
+    checkpointed.load_state_dict(regular.state_dict())
+    checkpointed.gradient_checkpointing = True
+
+    x_regular = torch.randn(2, 3, 3, 8, requires_grad=True)
+    x_checkpointed = x_regular.detach().clone().requires_grad_(True)
+    out_regular = regular(x_regular)
+    out_checkpointed = checkpointed(x_checkpointed)
+
+    assert torch.allclose(out_checkpointed, out_regular, atol=1e-6, rtol=1e-6)
+    out_regular.square().mean().backward()
+    out_checkpointed.square().mean().backward()
+    assert torch.allclose(
+        x_checkpointed.grad,
+        x_regular.grad,
+        atol=1e-6,
+        rtol=1e-6,
+    )
 
 
 
@@ -268,6 +391,7 @@ def test_cfm_predict_one_timestep_slices_graph_cond_action_tuple():
         actions=actions,
         n_steps=1,
         initial_state=torch.ones(2, 1, 4, 5),
+        use_autocast=False,
     )
 
     assert torch.equal(out, torch.ones(2, 4, 5))

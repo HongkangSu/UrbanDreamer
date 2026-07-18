@@ -870,10 +870,19 @@ class OnlineNoCfmCollector(DataCollector):
         actor: VehicleRouteActor,
         cfg: OnlineNoCfmConfig,
         loaded_hdv_state: Optional[Dict[str, Any]] = None,
+        current_to_dest_path_cache: Optional[Any] = None,
         **collector_kwargs: Any,
     ):
         collector_kwargs.setdefault("loaded_hdv_state", loaded_hdv_state)
         candidate_source = normalize_av_candidate_source(cfg.av_candidate_source)
+        if (
+            current_to_dest_path_cache is not None
+            and candidate_source != "current_shortest_freeflow"
+        ):
+            raise ValueError(
+                "current_to_dest_path_cache is only valid for static "
+                "current_shortest_freeflow candidates"
+            )
         base_candidate_source = "od_suffix" if candidate_source == "od_suffix" else "current_to_dest"
         collector_kwargs.setdefault("av_candidate_source", base_candidate_source)
         super().__init__(**collector_kwargs)
@@ -891,6 +900,7 @@ class OnlineNoCfmCollector(DataCollector):
         }:
             raise ValueError(f"Unsupported av_candidate_source={cfg.av_candidate_source!r}")
         self._av_candidate_path_penalty_factor = max(float(cfg.av_candidate_path_penalty_factor), 1.0)
+        self._current_to_dest_path_cache = current_to_dest_path_cache
         self._av_candidate_adj_list = _build_edge_adj_list(
             getattr(self._edge_registry, "adjacency", None),
             getattr(self._edge_registry, "passenger_allowed", None),
@@ -1003,8 +1013,6 @@ class OnlineNoCfmCollector(DataCollector):
         current_edge: str,
         edge_cost: Optional[np.ndarray],
     ) -> List[List[str]]:
-        if build_diverse_paths_current_to_dest is None:
-            return []
         if not self._av_candidate_adj_list or edge_cost is None:
             return []
         if (not current_edge) or current_edge.startswith(":"):
@@ -1020,14 +1028,22 @@ class OnlineNoCfmCollector(DataCollector):
         n_edges = len(edge_ids)
         if n_edges <= 0 or costs.shape[0] < n_edges:
             return []
-        paths = build_diverse_paths_current_to_dest(
-            adj_list=self._av_candidate_adj_list,
-            edge_tt=costs[:n_edges],
-            src_idx=int(edge_to_idx[current_edge]),
-            dst_idx=int(edge_to_idx[dest_edge]),
-            K=int(self.n_routes),
-            penalty_factor=float(self._av_candidate_path_penalty_factor),
-        )
+        src_idx = int(edge_to_idx[current_edge])
+        dst_idx = int(edge_to_idx[dest_edge])
+        path_cache = getattr(self, "_current_to_dest_path_cache", None)
+        if path_cache is not None:
+            paths = path_cache.lookup(src_idx, dst_idx, costs[:n_edges])
+        else:
+            if build_diverse_paths_current_to_dest is None:
+                return []
+            paths = build_diverse_paths_current_to_dest(
+                adj_list=self._av_candidate_adj_list,
+                edge_tt=costs[:n_edges],
+                src_idx=src_idx,
+                dst_idx=dst_idx,
+                K=int(self.n_routes),
+                penalty_factor=float(self._av_candidate_path_penalty_factor),
+            )
         named: List[List[str]] = []
         for path in paths[: int(self.n_routes)]:
             route = [

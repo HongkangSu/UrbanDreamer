@@ -10,7 +10,7 @@ tqdm==4.67.1
 wandb==0.23.1
 
 # Learning stack. Keep TorchRL and TensorDict aligned with routerlurb.
-torch==2.10.0
+torch==2.6.0
 tensordict==0.7.0
 torchrl==0.7.0
 routerlurb==1.0.0

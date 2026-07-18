@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "generated_at": "2026-07-13T17:54:34.716126+00:00",
+  "schema_version": 2,
+  "generated_at": "2026-07-17T15:32:51.672702+00:00",
   "protocol": {
     "episodes_per_method": 5,
     "episode_ids": {
@@ -31,7 +31,7 @@
       "ingolstadt": 1035,
       "fontenay": 2068
     },
-    "policy_selection": "deterministic_masked_argmax",
+    "policy_selection": "staged_mixed: native training executors for Gretz/Ingolstadt TorchRL; legacy deterministic executors for pending Fontenay/comparison rows",
     "hdv_learning_after_mutation": false,
     "av_candidate_source": "current_shortest_freeflow",
     "sim_buffer_after_last_depart": 7200,
@@ -46,7 +46,12 @@
     "standard_deviation_ddof": 0,
     "completion_source": "integer arrivals cross-checked against completion_rate",
     "incomplete_metric_scope": "arrived_only; no delta",
-    "delta_definition": "method metric mean - current mainline metric mean"
+    "delta_definition": "method metric mean - current mainline metric mean",
+    "torchrl_native_executors": {
+      "ippo": "strict_valid_mask_categorical_sampling",
+      "mappo": "strict_valid_mask_categorical_sampling",
+      "iql": "valid_mask_epsilon_greedy_epsilon_0.05"
+    }
   },
   "completed_torchrl_inputs": 8,
   "required_comparison_inputs": 9,
@@ -215,60 +220,60 @@
         205
       ],
       "expected_agents": 636,
-      "complete_episodes": 5,
-      "all_episodes_complete": true,
-      "metric_scope": "all_agents",
+      "complete_episodes": 3,
+      "all_episodes_complete": false,
+      "metric_scope": "arrived_only",
       "arrived_all": {
-        "mean": 636.0,
-        "std": 0.0,
-        "min": 636.0,
+        "mean": 613.6,
+        "std": 27.434285119171594,
+        "min": 580.0,
         "max": 636.0
       },
-      "arrived_all_sum": 3180,
+      "arrived_all_sum": 3068,
       "total_agents_sum": 3180,
       "completion_rate": {
-        "mean": 1.0,
-        "std": 0.0,
-        "min": 1.0,
+        "mean": 0.9647798742138365,
+        "std": 0.04313566842637042,
+        "min": 0.9119496855345912,
         "max": 1.0
       },
       "metrics": {
         "t_all": {
-          "mean": 5.434596436058699,
-          "std": 0.0012581236624361076,
-          "min": 5.433569182389936,
-          "max": 5.436137316561845,
-          "delta_vs_mainline": 1.320969601677148
+          "mean": 4.651840996168582,
+          "std": 0.6999816683974407,
+          "min": 3.8076149425287356,
+          "max": 5.441352201257861,
+          "delta_vs_mainline": null
         },
         "t_CAV": {
-          "mean": 5.871627296587926,
-          "std": 0.0034074266763125657,
-          "min": 5.86745406824147,
-          "max": 5.874409448818898,
-          "delta_vs_mainline": 2.6366797900262458
+          "mean": 5.137019551581476,
+          "std": 0.51438100025456,
+          "min": 4.538912429378531,
+          "max": 5.871456692913386,
+          "delta_vs_mainline": null
         },
         "t_HDV": {
-          "mean": 5.144005235602094,
-          "std": 0.004360348233226438,
-          "min": 5.140445026178011,
-          "max": 5.14934554973822,
-          "delta_vs_mainline": 0.4461256544502614
+          "mean": 4.323003673038679,
+          "std": 0.8460512261983758,
+          "min": 3.305910852713178,
+          "max": 5.157024432809774,
+          "delta_vs_mainline": null
         }
       },
       "per_episode": [
         {
           "episode": 201,
           "steps": 60,
-          "arrived_all": 636,
-          "arrived_av": 254,
-          "arrived_hdv": 382,
+          "arrived_all": 580,
+          "arrived_av": 236,
+          "arrived_hdv": 344,
           "total_agents": 636,
-          "unfinished_all": 0,
-          "completion_rate": 1.0,
-          "complete": true,
-          "t_all": 5.436137316561845,
-          "t_CAV": 5.86745406824147,
-          "t_HDV": 5.14934554973822
+          "unfinished_all": 56,
+          "completion_rate": 0.9119496855345912,
+          "complete": false,
+          "t_all": 3.8210344827586207,
+          "t_CAV": 4.564689265536724,
+          "t_HDV": 3.3108527131782943
         },
         {
           "episode": 202,
@@ -280,23 +285,23 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 5.436137316561845,
-          "t_CAV": 5.86745406824147,
-          "t_HDV": 5.14934554973822
+          "t_all": 5.220125786163522,
+          "t_CAV": 5.31502624671916,
+          "t_HDV": 5.157024432809774
         },
         {
           "episode": 203,
           "steps": 60,
-          "arrived_all": 636,
-          "arrived_av": 254,
-          "arrived_hdv": 382,
+          "arrived_all": 580,
+          "arrived_av": 236,
+          "arrived_hdv": 344,
           "total_agents": 636,
-          "unfinished_all": 0,
-          "completion_rate": 1.0,
-          "complete": true,
-          "t_all": 5.433569182389936,
-          "t_CAV": 5.874409448818898,
-          "t_HDV": 5.140445026178011
+          "unfinished_all": 56,
+          "completion_rate": 0.9119496855345912,
+          "complete": false,
+          "t_all": 3.8076149425287356,
+          "t_CAV": 4.538912429378531,
+          "t_HDV": 3.305910852713178
         },
         {
           "episode": 204,
@@ -308,9 +313,9 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 5.433569182389936,
-          "t_CAV": 5.874409448818898,
-          "t_HDV": 5.140445026178011
+          "t_all": 4.969077568134171,
+          "t_CAV": 5.39501312335958,
+          "t_HDV": 4.685863874345549
         },
         {
           "episode": 205,
@@ -322,29 +327,35 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 5.433569182389936,
-          "t_CAV": 5.874409448818898,
-          "t_HDV": 5.140445026178011
+          "t_all": 5.441352201257861,
+          "t_CAV": 5.871456692913386,
+          "t_HDV": 5.155366492146597
         }
       ],
       "source": {
-        "attempt": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/ippo/attempt_001",
-        "episodes_csv": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/ippo/attempt_001/dynamic_episodes.csv",
+        "attempt": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_native_long9000_5ep_20260716/ippo/attempt_002",
+        "episodes_csv": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_native_long9000_5ep_20260716/ippo/attempt_002/dynamic_episodes.csv",
         "audit_kind": "torchrl",
-        "config": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/ippo/attempt_001/toy_ippo_torchrl_config.json",
-        "summary": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/ippo/attempt_001/toy_ippo_torchrl_eval_summary.json",
+        "config": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_native_long9000_5ep_20260716/ippo/attempt_002/toy_ippo_torchrl_config.json",
+        "summary": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_native_long9000_5ep_20260716/ippo/attempt_002/toy_ippo_torchrl_eval_summary.json",
         "manifest": null,
-        "dynamic_agent_decisions": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/ippo/attempt_001/dynamic_agent_decisions.csv",
-        "argmax_decision_rows_audited": 9708,
+        "dynamic_agent_decisions": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_native_long9000_5ep_20260716/ippo/attempt_002/dynamic_agent_decisions.csv",
+        "argmax_decision_rows_audited": null,
         "collector_decision_rows_audited": null,
-        "raw_episode_dir": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/ippo/attempt_001/collector_runtime/episodes",
+        "raw_episode_dir": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_native_long9000_5ep_20260716/ippo/attempt_002/collector_runtime/episodes",
         "raw_episode_files_audited": 5,
         "raw_agent_rows_audited": 3180,
-        "raw_arrived_rows_audited": 3180,
+        "raw_arrived_rows_audited": 3068,
         "raw_travel_time_unit_conversion": "seconds_to_minutes_divide_60",
-        "rejected_newer_attempts": []
+        "rejected_newer_attempts": [],
+        "policy_executor": "masked_categorical",
+        "eval_epsilon": null,
+        "native_decision_rows_audited": 9378,
+        "non_argmax_decision_rows": 227,
+        "non_argmax_rate": 0.024205587545318832,
+        "invalid_selected_rows": 0
       },
-      "note": ""
+      "note": "Training-time executor: masked_categorical."
     },
     {
       "city": "gretz",
@@ -362,43 +373,43 @@
         205
       ],
       "expected_agents": 636,
-      "complete_episodes": 0,
+      "complete_episodes": 2,
       "all_episodes_complete": false,
       "metric_scope": "arrived_only",
       "arrived_all": {
-        "mean": 570.0,
-        "std": 0.0,
-        "min": 570.0,
-        "max": 570.0
+        "mean": 607.4,
+        "std": 30.203311076767726,
+        "min": 567.0,
+        "max": 636.0
       },
-      "arrived_all_sum": 2850,
+      "arrived_all_sum": 3037,
       "total_agents_sum": 3180,
       "completion_rate": {
-        "mean": 0.8962264150943395,
-        "std": 0.0,
-        "min": 0.8962264150943396,
-        "max": 0.8962264150943396
+        "mean": 0.9550314465408805,
+        "std": 0.0474894828251065,
+        "min": 0.8915094339622641,
+        "max": 1.0
       },
       "metrics": {
         "t_all": {
-          "mean": 6.297713450292397,
-          "std": 0.019309427913869567,
-          "min": 6.27406432748538,
-          "max": 6.3134795321637425,
+          "mean": 6.066736923691213,
+          "std": 0.6801040693128686,
+          "min": 4.841358024691358,
+          "max": 6.61333857442348,
           "delta_vs_mainline": null
         },
         "t_CAV": {
-          "mean": 7.995395348837209,
-          "std": 0.02434299108719387,
-          "min": 7.9655813953488375,
-          "max": 8.015271317829457,
+          "mean": 8.07367599448882,
+          "std": 0.7083182013254553,
+          "min": 6.89337899543379,
+          "max": 8.715748031496064,
           "delta_vs_mainline": null
         },
         "t_HDV": {
-          "mean": 5.269539906103286,
-          "std": 0.016260931907490138,
-          "min": 5.24962441314554,
-          "max": 5.2828169014084505,
+          "mean": 4.7735613058344555,
+          "std": 0.6453686893657886,
+          "min": 3.55,
+          "max": 5.2154013961605585,
           "delta_vs_mainline": null
         }
       },
@@ -406,92 +417,98 @@
         {
           "episode": 201,
           "steps": 60,
-          "arrived_all": 570,
-          "arrived_av": 215,
-          "arrived_hdv": 355,
+          "arrived_all": 636,
+          "arrived_av": 254,
+          "arrived_hdv": 382,
           "total_agents": 636,
-          "unfinished_all": 66,
-          "completion_rate": 0.8962264150943396,
-          "complete": false,
-          "t_all": 6.27406432748538,
-          "t_CAV": 7.9655813953488375,
-          "t_HDV": 5.24962441314554
+          "unfinished_all": 0,
+          "completion_rate": 1.0,
+          "complete": true,
+          "t_all": 6.575052410901467,
+          "t_CAV": 8.624409448818898,
+          "t_HDV": 5.212390924956369
         },
         {
           "episode": 202,
           "steps": 60,
-          "arrived_all": 570,
-          "arrived_av": 215,
-          "arrived_hdv": 355,
+          "arrived_all": 567,
+          "arrived_av": 219,
+          "arrived_hdv": 348,
           "total_agents": 636,
-          "unfinished_all": 66,
-          "completion_rate": 0.8962264150943396,
+          "unfinished_all": 69,
+          "completion_rate": 0.8915094339622641,
           "complete": false,
-          "t_all": 6.27406432748538,
-          "t_CAV": 7.9655813953488375,
-          "t_HDV": 5.24962441314554
+          "t_all": 4.841358024691358,
+          "t_CAV": 6.89337899543379,
+          "t_HDV": 3.55
         },
         {
           "episode": 203,
           "steps": 60,
-          "arrived_all": 570,
-          "arrived_av": 215,
-          "arrived_hdv": 355,
+          "arrived_all": 636,
+          "arrived_av": 254,
+          "arrived_hdv": 382,
           "total_agents": 636,
-          "unfinished_all": 66,
-          "completion_rate": 0.8962264150943396,
-          "complete": false,
-          "t_all": 6.3134795321637425,
-          "t_CAV": 8.015271317829457,
-          "t_HDV": 5.2828169014084505
+          "unfinished_all": 0,
+          "completion_rate": 1.0,
+          "complete": true,
+          "t_all": 6.61333857442348,
+          "t_CAV": 8.715748031496064,
+          "t_HDV": 5.2154013961605585
         },
         {
           "episode": 204,
           "steps": 60,
-          "arrived_all": 570,
-          "arrived_av": 215,
-          "arrived_hdv": 355,
+          "arrived_all": 623,
+          "arrived_av": 243,
+          "arrived_hdv": 380,
           "total_agents": 636,
-          "unfinished_all": 66,
-          "completion_rate": 0.8962264150943396,
+          "unfinished_all": 13,
+          "completion_rate": 0.9795597484276729,
           "complete": false,
-          "t_all": 6.3134795321637425,
-          "t_CAV": 8.015271317829457,
-          "t_HDV": 5.2828169014084505
+          "t_all": 6.497993579454254,
+          "t_CAV": 8.514540466392317,
+          "t_HDV": 5.208464912280702
         },
         {
           "episode": 205,
           "steps": 60,
-          "arrived_all": 570,
-          "arrived_av": 215,
+          "arrived_all": 575,
+          "arrived_av": 220,
           "arrived_hdv": 355,
           "total_agents": 636,
-          "unfinished_all": 66,
-          "completion_rate": 0.8962264150943396,
+          "unfinished_all": 61,
+          "completion_rate": 0.9040880503144654,
           "complete": false,
-          "t_all": 6.3134795321637425,
-          "t_CAV": 8.015271317829457,
-          "t_HDV": 5.2828169014084505
+          "t_all": 5.805942028985507,
+          "t_CAV": 7.62030303030303,
+          "t_HDV": 4.681549295774648
         }
       ],
       "source": {
-        "attempt": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/mappo/attempt_001",
-        "episodes_csv": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/mappo/attempt_001/dynamic_episodes.csv",
+        "attempt": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_native_long9000_5ep_20260716/mappo/attempt_002",
+        "episodes_csv": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_native_long9000_5ep_20260716/mappo/attempt_002/dynamic_episodes.csv",
         "audit_kind": "torchrl",
-        "config": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/mappo/attempt_001/toy_mappo_torchrl_config.json",
-        "summary": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/mappo/attempt_001/toy_mappo_torchrl_eval_summary.json",
+        "config": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_native_long9000_5ep_20260716/mappo/attempt_002/toy_mappo_torchrl_config.json",
+        "summary": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_native_long9000_5ep_20260716/mappo/attempt_002/toy_mappo_torchrl_eval_summary.json",
         "manifest": null,
-        "dynamic_agent_decisions": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/mappo/attempt_001/dynamic_agent_decisions.csv",
-        "argmax_decision_rows_audited": 15218,
+        "dynamic_agent_decisions": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_native_long9000_5ep_20260716/mappo/attempt_002/dynamic_agent_decisions.csv",
+        "argmax_decision_rows_audited": null,
         "collector_decision_rows_audited": null,
-        "raw_episode_dir": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/mappo/attempt_001/collector_runtime/episodes",
+        "raw_episode_dir": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_native_long9000_5ep_20260716/mappo/attempt_002/collector_runtime/episodes",
         "raw_episode_files_audited": 5,
         "raw_agent_rows_audited": 3180,
-        "raw_arrived_rows_audited": 2850,
+        "raw_arrived_rows_audited": 3037,
         "raw_travel_time_unit_conversion": "seconds_to_minutes_divide_60",
-        "rejected_newer_attempts": []
+        "rejected_newer_attempts": [],
+        "policy_executor": "masked_categorical",
+        "eval_epsilon": null,
+        "native_decision_rows_audited": 14067,
+        "non_argmax_decision_rows": 94,
+        "non_argmax_rate": 0.006682306106490368,
+        "invalid_selected_rows": 0
       },
-      "note": ""
+      "note": "Training-time executor: masked_categorical."
     },
     {
       "city": "gretz",
@@ -509,44 +526,44 @@
         205
       ],
       "expected_agents": 636,
-      "complete_episodes": 5,
-      "all_episodes_complete": true,
-      "metric_scope": "all_agents",
+      "complete_episodes": 2,
+      "all_episodes_complete": false,
+      "metric_scope": "arrived_only",
       "arrived_all": {
-        "mean": 636.0,
-        "std": 0.0,
-        "min": 636.0,
+        "mean": 579.8,
+        "std": 49.389877505416024,
+        "min": 509.0,
         "max": 636.0
       },
-      "arrived_all_sum": 3180,
+      "arrived_all_sum": 2899,
       "total_agents_sum": 3180,
       "completion_rate": {
-        "mean": 1.0,
-        "std": 0.0,
-        "min": 1.0,
+        "mean": 0.9116352201257861,
+        "std": 0.07765704010285539,
+        "min": 0.800314465408805,
         "max": 1.0
       },
       "metrics": {
         "t_all": {
-          "mean": 7.136677148846959,
-          "std": 0.0024263813489836424,
-          "min": 7.134696016771488,
-          "max": 7.139648846960168,
-          "delta_vs_mainline": 3.023050314465408
+          "mean": 5.963915987341926,
+          "std": 0.9390649264456767,
+          "min": 4.6577603143418465,
+          "max": 7.04685534591195,
+          "delta_vs_mainline": null
         },
         "t_CAV": {
-          "mean": 10.376391076115485,
-          "std": 0.004918266806375598,
-          "min": 10.37237532808399,
-          "max": 10.38241469816273,
-          "delta_vs_mainline": 7.141443569553806
+          "mean": 8.765884580776646,
+          "std": 1.1858606293756095,
+          "min": 7.062739965095986,
+          "max": 10.2003280839895,
+          "delta_vs_mainline": null
         },
         "t_HDV": {
-          "mean": 4.9825218150087265,
-          "std": 0.0007694732176285533,
-          "min": 4.981893542757417,
-          "max": 4.98346422338569,
-          "delta_vs_mainline": 0.2846422338568937
+          "mean": 4.187785849169878,
+          "std": 0.7936136310446964,
+          "min": 3.2132599580712786,
+          "max": 4.9500436300174515,
+          "delta_vs_mainline": null
         }
       },
       "per_episode": [
@@ -560,37 +577,37 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 7.139648846960168,
-          "t_CAV": 10.38241469816273,
-          "t_HDV": 4.98346422338569
+          "t_all": 7.04685534591195,
+          "t_CAV": 10.2003280839895,
+          "t_HDV": 4.9500436300174515
         },
         {
           "episode": 202,
           "steps": 60,
-          "arrived_all": 636,
-          "arrived_av": 254,
-          "arrived_hdv": 382,
+          "arrived_all": 560,
+          "arrived_av": 207,
+          "arrived_hdv": 353,
           "total_agents": 636,
-          "unfinished_all": 0,
-          "completion_rate": 1.0,
-          "complete": true,
-          "t_all": 7.139648846960168,
-          "t_CAV": 10.38241469816273,
-          "t_HDV": 4.98346422338569
+          "unfinished_all": 76,
+          "completion_rate": 0.8805031446540881,
+          "complete": false,
+          "t_all": 6.030863095238095,
+          "t_CAV": 8.291787439613527,
+          "t_HDV": 4.70505193578848
         },
         {
           "episode": 203,
           "steps": 60,
-          "arrived_all": 636,
-          "arrived_av": 254,
-          "arrived_hdv": 382,
+          "arrived_all": 509,
+          "arrived_av": 191,
+          "arrived_hdv": 318,
           "total_agents": 636,
-          "unfinished_all": 0,
-          "completion_rate": 1.0,
-          "complete": true,
-          "t_all": 7.134696016771488,
-          "t_CAV": 10.37237532808399,
-          "t_HDV": 4.981893542757417
+          "unfinished_all": 127,
+          "completion_rate": 0.800314465408805,
+          "complete": false,
+          "t_all": 4.6577603143418465,
+          "t_CAV": 7.062739965095986,
+          "t_HDV": 3.2132599580712786
         },
         {
           "episode": 204,
@@ -602,43 +619,49 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 7.134696016771488,
-          "t_CAV": 10.37237532808399,
-          "t_HDV": 4.981893542757417
+          "t_all": 6.912028301886792,
+          "t_CAV": 10.023950131233596,
+          "t_HDV": 4.8428446771378715
         },
         {
           "episode": 205,
           "steps": 60,
-          "arrived_all": 636,
-          "arrived_av": 254,
-          "arrived_hdv": 382,
+          "arrived_all": 558,
+          "arrived_av": 216,
+          "arrived_hdv": 342,
           "total_agents": 636,
-          "unfinished_all": 0,
-          "completion_rate": 1.0,
-          "complete": true,
-          "t_all": 7.134696016771488,
-          "t_CAV": 10.37237532808399,
-          "t_HDV": 4.981893542757417
+          "unfinished_all": 78,
+          "completion_rate": 0.8773584905660378,
+          "complete": false,
+          "t_all": 5.172072879330944,
+          "t_CAV": 8.250617283950616,
+          "t_HDV": 3.227729044834308
         }
       ],
       "source": {
-        "attempt": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/iql/attempt_001",
-        "episodes_csv": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/iql/attempt_001/dynamic_episodes.csv",
+        "attempt": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_native_long9000_5ep_20260716/iql/attempt_002",
+        "episodes_csv": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_native_long9000_5ep_20260716/iql/attempt_002/dynamic_episodes.csv",
         "audit_kind": "torchrl",
-        "config": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/iql/attempt_001/toy_iql_torchrl_config.json",
-        "summary": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/iql/attempt_001/toy_iql_torchrl_eval_summary.json",
+        "config": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_native_long9000_5ep_20260716/iql/attempt_002/toy_iql_torchrl_config.json",
+        "summary": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_native_long9000_5ep_20260716/iql/attempt_002/toy_iql_torchrl_eval_summary.json",
         "manifest": null,
-        "dynamic_agent_decisions": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/iql/attempt_001/dynamic_agent_decisions.csv",
-        "argmax_decision_rows_audited": 16891,
+        "dynamic_agent_decisions": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_native_long9000_5ep_20260716/iql/attempt_002/dynamic_agent_decisions.csv",
+        "argmax_decision_rows_audited": null,
         "collector_decision_rows_audited": null,
-        "raw_episode_dir": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/iql/attempt_001/collector_runtime/episodes",
+        "raw_episode_dir": "results/gretz_armainvilliers_current_to_dest_incident_completion100_stronglivebad_collisionwarn_drain7200_20260601_neg_986733117_1_S0b_s500_e2500_v0p1/eval_torchrl_ep500_native_long9000_5ep_20260716/iql/attempt_002/collector_runtime/episodes",
         "raw_episode_files_audited": 5,
         "raw_agent_rows_audited": 3180,
-        "raw_arrived_rows_audited": 3180,
+        "raw_arrived_rows_audited": 2899,
         "raw_travel_time_unit_conversion": "seconds_to_minutes_divide_60",
-        "rejected_newer_attempts": []
+        "rejected_newer_attempts": [],
+        "policy_executor": "valid_mask_epsilon_greedy",
+        "eval_epsilon": 0.05,
+        "native_decision_rows_audited": 16819,
+        "non_argmax_decision_rows": 621,
+        "non_argmax_rate": 0.036922528093227894,
+        "invalid_selected_rows": 0
       },
-      "note": ""
+      "note": "Training-time executor: valid_mask_epsilon_greedy (epsilon=0.05)."
     },
     {
       "city": "gretz",
@@ -1116,25 +1139,25 @@
       },
       "metrics": {
         "t_all": {
-          "mean": 5.653333333333333,
-          "std": 0.0,
-          "min": 5.653333333333333,
-          "max": 5.653333333333333,
-          "delta_vs_mainline": 1.1849597423510474
+          "mean": 5.679384863123994,
+          "std": 0.03211170444212376,
+          "min": 5.624090177133655,
+          "max": 5.712753623188406,
+          "delta_vs_mainline": 1.2110112721417083
         },
         "t_CAV": {
-          "mean": 7.468276972624798,
-          "std": 0.0,
-          "min": 7.468276972624798,
-          "max": 7.468276972624798,
-          "delta_vs_mainline": 2.9692028985507237
+          "mean": 7.532431561996779,
+          "std": 0.07594453523035466,
+          "min": 7.410225442834138,
+          "max": 7.632165861513688,
+          "delta_vs_mainline": 3.0333574879227045
         },
         "t_HDV": {
-          "mean": 4.443370907139023,
-          "std": 0.0,
-          "min": 4.443370907139023,
-          "max": 4.443370907139023,
-          "delta_vs_mainline": -0.004535695115405858
+          "mean": 4.444020397208803,
+          "std": 0.016638541671038714,
+          "min": 4.419967793880838,
+          "max": 4.4691626409017715,
+          "delta_vs_mainline": -0.003886205045626312
         }
       },
       "per_episode": [
@@ -1148,9 +1171,9 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 5.653333333333333,
-          "t_CAV": 7.468276972624798,
-          "t_HDV": 4.443370907139023
+          "t_all": 5.712753623188406,
+          "t_CAV": 7.578140096618357,
+          "t_HDV": 4.4691626409017715
         },
         {
           "episode": 202,
@@ -1162,9 +1185,9 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 5.653333333333333,
-          "t_CAV": 7.468276972624798,
-          "t_HDV": 4.443370907139023
+          "t_all": 5.664766505636071,
+          "t_CAV": 7.492552334943639,
+          "t_HDV": 4.4462426194310245
         },
         {
           "episode": 203,
@@ -1176,9 +1199,9 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 5.653333333333333,
-          "t_CAV": 7.468276972624798,
-          "t_HDV": 4.443370907139023
+          "t_all": 5.704847020933978,
+          "t_CAV": 7.632165861513688,
+          "t_HDV": 4.419967793880838
         },
         {
           "episode": 204,
@@ -1190,9 +1213,9 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 5.653333333333333,
-          "t_CAV": 7.468276972624798,
-          "t_HDV": 4.443370907139023
+          "t_all": 5.624090177133655,
+          "t_CAV": 7.410225442834138,
+          "t_HDV": 4.433333333333334
         },
         {
           "episode": 205,
@@ -1204,29 +1227,35 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 5.653333333333333,
-          "t_CAV": 7.468276972624798,
-          "t_HDV": 4.443370907139023
+          "t_all": 5.6904669887278585,
+          "t_CAV": 7.549074074074074,
+          "t_HDV": 4.451395598497047
         }
       ],
       "source": {
-        "attempt": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/ippo/attempt_001",
-        "episodes_csv": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/ippo/attempt_001/dynamic_episodes.csv",
+        "attempt": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_native_long9000_5ep_20260716/ippo/attempt_002",
+        "episodes_csv": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_native_long9000_5ep_20260716/ippo/attempt_002/dynamic_episodes.csv",
         "audit_kind": "torchrl",
-        "config": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/ippo/attempt_001/toy_ippo_torchrl_config.json",
-        "summary": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/ippo/attempt_001/toy_ippo_torchrl_eval_summary.json",
+        "config": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_native_long9000_5ep_20260716/ippo/attempt_002/toy_ippo_torchrl_config.json",
+        "summary": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_native_long9000_5ep_20260716/ippo/attempt_002/toy_ippo_torchrl_eval_summary.json",
         "manifest": null,
-        "dynamic_agent_decisions": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/ippo/attempt_001/dynamic_agent_decisions.csv",
-        "argmax_decision_rows_audited": 21870,
+        "dynamic_agent_decisions": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_native_long9000_5ep_20260716/ippo/attempt_002/dynamic_agent_decisions.csv",
+        "argmax_decision_rows_audited": null,
         "collector_decision_rows_audited": null,
-        "raw_episode_dir": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/ippo/attempt_001/collector_runtime/episodes",
+        "raw_episode_dir": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_native_long9000_5ep_20260716/ippo/attempt_002/collector_runtime/episodes",
         "raw_episode_files_audited": 5,
         "raw_agent_rows_audited": 5175,
         "raw_arrived_rows_audited": 5175,
         "raw_travel_time_unit_conversion": "seconds_to_minutes_divide_60",
-        "rejected_newer_attempts": []
+        "rejected_newer_attempts": [],
+        "policy_executor": "masked_categorical",
+        "eval_epsilon": null,
+        "native_decision_rows_audited": 21810,
+        "non_argmax_decision_rows": 205,
+        "non_argmax_rate": 0.009399358092618064,
+        "invalid_selected_rows": 0
       },
-      "note": ""
+      "note": "Training-time executor: masked_categorical."
     },
     {
       "city": "ingolstadt",
@@ -1263,25 +1292,25 @@
       },
       "metrics": {
         "t_all": {
-          "mean": 7.207020933977456,
-          "std": 0.0,
-          "min": 7.207020933977456,
-          "max": 7.207020933977456,
-          "delta_vs_mainline": 2.7386473429951703
+          "mean": 7.156885668276972,
+          "std": 0.04694989184688642,
+          "min": 7.113719806763285,
+          "max": 7.2408373590982285,
+          "delta_vs_mainline": 2.6885120772946864
         },
         "t_CAV": {
-          "mean": 11.41501610305958,
-          "std": 0.0,
-          "min": 11.41501610305958,
-          "max": 11.41501610305958,
-          "delta_vs_mainline": 6.915942028985506
+          "mean": 11.290587761674718,
+          "std": 0.11464751188310852,
+          "min": 11.175442834138487,
+          "max": 11.493840579710145,
+          "delta_vs_mainline": 6.791513687600644
         },
         "t_HDV": {
-          "mean": 4.401690821256039,
-          "std": 0.0,
-          "min": 4.401690821256039,
-          "max": 4.401690821256039,
-          "delta_vs_mainline": -0.04621578099839052
+          "mean": 4.401084272678476,
+          "std": 0.006284655547969486,
+          "min": 4.389210950080515,
+          "max": 4.405904455179818,
+          "delta_vs_mainline": -0.04682232957595289
         }
       },
       "per_episode": [
@@ -1295,9 +1324,9 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 7.207020933977456,
-          "t_CAV": 11.41501610305958,
-          "t_HDV": 4.401690821256039
+          "t_all": 7.2408373590982285,
+          "t_CAV": 11.493840579710145,
+          "t_HDV": 4.405501878690285
         },
         {
           "episode": 202,
@@ -1309,9 +1338,9 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 7.207020933977456,
-          "t_CAV": 11.41501610305958,
-          "t_HDV": 4.401690821256039
+          "t_all": 7.133526570048309,
+          "t_CAV": 11.226811594202898,
+          "t_HDV": 4.404669887278583
         },
         {
           "episode": 203,
@@ -1323,9 +1352,9 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 7.207020933977456,
-          "t_CAV": 11.41501610305958,
-          "t_HDV": 4.401690821256039
+          "t_all": 7.17475040257649,
+          "t_CAV": 11.336674718196457,
+          "t_HDV": 4.400134192163177
         },
         {
           "episode": 204,
@@ -1337,9 +1366,9 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 7.207020933977456,
-          "t_CAV": 11.41501610305958,
-          "t_HDV": 4.401690821256039
+          "t_all": 7.12159420289855,
+          "t_CAV": 11.220169082125604,
+          "t_HDV": 4.389210950080515
         },
         {
           "episode": 205,
@@ -1351,29 +1380,35 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 7.207020933977456,
-          "t_CAV": 11.41501610305958,
-          "t_HDV": 4.401690821256039
+          "t_all": 7.113719806763285,
+          "t_CAV": 11.175442834138487,
+          "t_HDV": 4.405904455179818
         }
       ],
       "source": {
-        "attempt": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/mappo/attempt_001",
-        "episodes_csv": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/mappo/attempt_001/dynamic_episodes.csv",
+        "attempt": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_native_long9000_5ep_20260716/mappo/attempt_002",
+        "episodes_csv": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_native_long9000_5ep_20260716/mappo/attempt_002/dynamic_episodes.csv",
         "audit_kind": "torchrl",
-        "config": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/mappo/attempt_001/toy_mappo_torchrl_config.json",
-        "summary": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/mappo/attempt_001/toy_mappo_torchrl_eval_summary.json",
+        "config": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_native_long9000_5ep_20260716/mappo/attempt_002/toy_mappo_torchrl_config.json",
+        "summary": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_native_long9000_5ep_20260716/mappo/attempt_002/toy_mappo_torchrl_eval_summary.json",
         "manifest": null,
-        "dynamic_agent_decisions": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/mappo/attempt_001/dynamic_agent_decisions.csv",
-        "argmax_decision_rows_audited": 30585,
+        "dynamic_agent_decisions": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_native_long9000_5ep_20260716/mappo/attempt_002/dynamic_agent_decisions.csv",
+        "argmax_decision_rows_audited": null,
         "collector_decision_rows_audited": null,
-        "raw_episode_dir": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/mappo/attempt_001/collector_runtime/episodes",
+        "raw_episode_dir": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_native_long9000_5ep_20260716/mappo/attempt_002/collector_runtime/episodes",
         "raw_episode_files_audited": 5,
         "raw_agent_rows_audited": 5175,
         "raw_arrived_rows_audited": 5175,
         "raw_travel_time_unit_conversion": "seconds_to_minutes_divide_60",
-        "rejected_newer_attempts": []
+        "rejected_newer_attempts": [],
+        "policy_executor": "masked_categorical",
+        "eval_epsilon": null,
+        "native_decision_rows_audited": 30324,
+        "non_argmax_decision_rows": 288,
+        "non_argmax_rate": 0.009497427779976256,
+        "invalid_selected_rows": 0
       },
-      "note": ""
+      "note": "Training-time executor: masked_categorical."
     },
     {
       "city": "ingolstadt",
@@ -1410,25 +1445,25 @@
       },
       "metrics": {
         "t_all": {
-          "mean": 7.657246376811594,
-          "std": 0.0,
-          "min": 7.657246376811594,
-          "max": 7.657246376811594,
-          "delta_vs_mainline": 3.188872785829308
+          "mean": 7.612041867954912,
+          "std": 0.10225414401421136,
+          "min": 7.489259259259259,
+          "max": 7.7352334943639285,
+          "delta_vs_mainline": 3.143668276972626
         },
         "t_CAV": {
-          "mean": 12.558695652173913,
-          "std": 0.0,
-          "min": 12.558695652173913,
-          "max": 12.558695652173913,
-          "delta_vs_mainline": 8.05962157809984
+          "mean": 12.395780998389693,
+          "std": 0.25199390841919406,
+          "min": 12.084742351046698,
+          "max": 12.701288244766506,
+          "delta_vs_mainline": 7.896706924315619
         },
         "t_HDV": {
-          "mean": 4.389613526570048,
-          "std": 0.0,
-          "min": 4.389613526570048,
-          "max": 4.389613526570048,
-          "delta_vs_mainline": -0.05829307568438136
+          "mean": 4.422882447665057,
+          "std": 0.010012420368222969,
+          "min": 4.403837895866881,
+          "max": 4.433440687063876,
+          "delta_vs_mainline": -0.02502415458937257
         }
       },
       "per_episode": [
@@ -1442,9 +1477,9 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 7.657246376811594,
-          "t_CAV": 12.558695652173913,
-          "t_HDV": 4.389613526570048
+          "t_all": 7.7352334943639285,
+          "t_CAV": 12.701288244766506,
+          "t_HDV": 4.4245303274288785
         },
         {
           "episode": 202,
@@ -1456,9 +1491,9 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 7.657246376811594,
-          "t_CAV": 12.558695652173913,
-          "t_HDV": 4.389613526570048
+          "t_all": 7.731417069243156,
+          "t_CAV": 12.68804347826087,
+          "t_HDV": 4.426999463231348
         },
         {
           "episode": 203,
@@ -1470,9 +1505,9 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 7.657246376811594,
-          "t_CAV": 12.558695652173913,
-          "t_HDV": 4.389613526570048
+          "t_all": 7.56951690821256,
+          "t_CAV": 12.273631239935588,
+          "t_HDV": 4.433440687063876
         },
         {
           "episode": 204,
@@ -1484,9 +1519,9 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 7.657246376811594,
-          "t_CAV": 12.558695652173913,
-          "t_HDV": 4.389613526570048
+          "t_all": 7.489259259259259,
+          "t_CAV": 12.084742351046698,
+          "t_HDV": 4.4256038647343
         },
         {
           "episode": 205,
@@ -1498,29 +1533,35 @@
           "unfinished_all": 0,
           "completion_rate": 1.0,
           "complete": true,
-          "t_all": 7.657246376811594,
-          "t_CAV": 12.558695652173913,
-          "t_HDV": 4.389613526570048
+          "t_all": 7.534782608695652,
+          "t_CAV": 12.231199677938807,
+          "t_HDV": 4.403837895866881
         }
       ],
       "source": {
-        "attempt": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/iql/attempt_001",
-        "episodes_csv": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/iql/attempt_001/dynamic_episodes.csv",
+        "attempt": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_native_long9000_5ep_20260716/iql/attempt_002",
+        "episodes_csv": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_native_long9000_5ep_20260716/iql/attempt_002/dynamic_episodes.csv",
         "audit_kind": "torchrl",
-        "config": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/iql/attempt_001/toy_iql_torchrl_config.json",
-        "summary": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/iql/attempt_001/toy_iql_torchrl_eval_summary.json",
+        "config": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_native_long9000_5ep_20260716/iql/attempt_002/toy_iql_torchrl_config.json",
+        "summary": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_native_long9000_5ep_20260716/iql/attempt_002/toy_iql_torchrl_eval_summary.json",
         "manifest": null,
-        "dynamic_agent_decisions": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/iql/attempt_001/dynamic_agent_decisions.csv",
-        "argmax_decision_rows_audited": 33755,
+        "dynamic_agent_decisions": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_native_long9000_5ep_20260716/iql/attempt_002/dynamic_agent_decisions.csv",
+        "argmax_decision_rows_audited": null,
         "collector_decision_rows_audited": null,
-        "raw_episode_dir": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_detargmax_long9000_5ep_20260713/iql/attempt_001/collector_runtime/episodes",
+        "raw_episode_dir": "results/ingolstadt_custom_actionfix_incident_20260516_185810/eval_torchrl_ep500_native_long9000_5ep_20260716/iql/attempt_002/collector_runtime/episodes",
         "raw_episode_files_audited": 5,
         "raw_agent_rows_audited": 5175,
         "raw_arrived_rows_audited": 5175,
         "raw_travel_time_unit_conversion": "seconds_to_minutes_divide_60",
-        "rejected_newer_attempts": []
+        "rejected_newer_attempts": [],
+        "policy_executor": "valid_mask_epsilon_greedy",
+        "eval_epsilon": 0.05,
+        "native_decision_rows_audited": 33585,
+        "non_argmax_decision_rows": 1258,
+        "non_argmax_rate": 0.03745719815393777,
+        "invalid_selected_rows": 0
       },
-      "note": ""
+      "note": "Training-time executor: valid_mask_epsilon_greedy (epsilon=0.05)."
     },
     {
       "city": "ingolstadt",
@@ -2106,9 +2147,10 @@
         "raw_agent_rows_audited": 10340,
         "raw_arrived_rows_audited": 8898,
         "raw_travel_time_unit_conversion": "seconds_to_minutes_divide_60",
-        "rejected_newer_attempts": []
+        "rejected_newer_attempts": [],
+        "policy_executor": "deterministic_masked_argmax"
       },
-      "note": ""
+      "note": "Legacy deterministic-argmax result; the native training-executor rerun is still in progress."
     },
     {
       "city": "fontenay",
@@ -2253,9 +2295,10 @@
         "raw_agent_rows_audited": 10340,
         "raw_arrived_rows_audited": 8621,
         "raw_travel_time_unit_conversion": "seconds_to_minutes_divide_60",
-        "rejected_newer_attempts": []
+        "rejected_newer_attempts": [],
+        "policy_executor": "deterministic_masked_argmax"
       },
-      "note": ""
+      "note": "Legacy deterministic-argmax result; the native training-executor rerun is still in progress."
     },
     {
       "city": "fontenay",
@@ -2263,7 +2306,7 @@
       "method": "iql",
       "method_name": "IQL",
       "family": "torchrl_baseline",
-      "status": "placeholder_not_in_completed_8",
+      "status": "placeholder_waiting_for_checkpoint_500",
       "n_episodes": 0,
       "episode_ids": [],
       "expected_agents": 2068,
@@ -2299,7 +2342,7 @@
       },
       "per_episode": [],
       "source": null,
-      "note": "占位：Fontenay IQL 尚未包含在已完成的 8 个 TorchRL checkpoint 中。"
+      "note": "占位：Fontenay IQL 500ep checkpoint 尚未完成；训练时执行器评估已排队。"
     },
     {
       "city": "fontenay",
@@ -2595,5 +2638,10 @@
       },
       "note": ""
     }
+  ],
+  "native_torchrl_inputs": 6,
+  "native_torchrl_cities": [
+    "gretz",
+    "ingolstadt"
   ]
 }
