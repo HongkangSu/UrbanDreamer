@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import random
 import sys
@@ -101,11 +102,14 @@ class ToyIqlTorchRLConfig(OnlineNoCfmConfig):
     num_epochs: int = 1
     minibatch_size: int = 32
     memory_size: int = 20_000
+    replay_sample_ratio: float = 0.0
+    fresh_transition_epochs: int = 0
     q_network_depth: int = 3
     q_network_num_cells: int = 64
-    eps_init: float = 1.0
+    eps_init: float = 0.99
     eps_end: float = 0.05
-    exploration_fraction: float = 0.8
+    exploration_fraction: float = 0.4
+    epsilon_scope: str = "per_decision"
     target_update_eps: float = 0.995
     av_execution_mode: str = "dynamic"
 
@@ -113,6 +117,18 @@ class ToyIqlTorchRLConfig(OnlineNoCfmConfig):
         values = asdict(self)
         if int(values["memory_size"]) <= 0:
             raise ValueError("memory_size must be positive")
+        replay_sample_ratio = float(values["replay_sample_ratio"])
+        if not math.isfinite(replay_sample_ratio) or replay_sample_ratio < 0.0:
+            raise ValueError("replay_sample_ratio must be finite and non-negative")
+        if int(values["fresh_transition_epochs"]) < 0:
+            raise ValueError("fresh_transition_epochs must be non-negative")
+        epsilon_scope = str(values["epsilon_scope"]).strip().lower()
+        if epsilon_scope not in {"per_decision", "first_decision_per_vehicle"}:
+            raise ValueError(
+                "epsilon_scope must be 'per_decision' or "
+                "'first_decision_per_vehicle'"
+            )
+        values["epsilon_scope"] = epsilon_scope
         for key in (
             "settings",
             "output_dir",
@@ -152,6 +168,7 @@ class IqlReplayTransition:
     next_obs: np.ndarray
     next_action_mask: np.ndarray
     done: bool
+    steps_to_next_obs: int = 1
 
 
 def _list_collate(samples: Sequence[IqlReplayTransition]) -> List[IqlReplayTransition]:
@@ -188,6 +205,10 @@ class IqlTransitionReplayBuffer:
         if not len(self):
             return []
         return list(self._buffer.storage[:])
+
+    def reset_sampling_cycle(self) -> None:
+        """Start a new permutation after ring-buffer contents may have changed."""
+        self._buffer.set_sampler(SamplerWithoutReplacement(drop_last=False))
 
     def sample_indices(self, *, batch_size: int) -> np.ndarray:
         if not len(self):
@@ -266,6 +287,7 @@ class TorchRLIqlQNetwork(torch.nn.Module):
         self.slot_by_vehicle = {veh_id: idx for idx, veh_id in enumerate(self.machine_ids)}
         self.device_ref = device
         self.epsilon = float(cfg.eps_init)
+        self.epsilon_scope = str(cfg.epsilon_scope)
         self.include_global = bool(cfg.include_global)
         self.include_route_costs = bool(cfg.include_route_costs)
         self.include_fleet_pressure = bool(cfg.include_fleet_pressure)
@@ -376,6 +398,7 @@ class TorchRLIqlQNetwork(torch.nn.Module):
         obs: torch.Tensor,
         active_ids: Sequence[str],
         action_mask: Optional[torch.Tensor] = None,
+        epsilon_by_row: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         obs_t = obs.to(device=self.device_ref, dtype=torch.float32)
         q_values = self.forward_action_values_for_active_ids(obs_t, active_ids)
@@ -392,14 +415,37 @@ class TorchRLIqlQNetwork(torch.nn.Module):
         safe_mask = mask.clone()
         safe_mask[~safe_mask.any(dim=-1), :] = True
         q_values = q_values.masked_fill(~safe_mask, -1.0e9)
-        eps = float(self.epsilon) if self.training else 0.0
+        if not self.training:
+            eps_by_row = torch.zeros(
+                (int(q_values.shape[0]), 1),
+                device=q_values.device,
+                dtype=q_values.dtype,
+            )
+        elif epsilon_by_row is not None:
+            eps_by_row = torch.as_tensor(
+                epsilon_by_row,
+                device=q_values.device,
+                dtype=q_values.dtype,
+            ).reshape(-1, 1)
+            if int(eps_by_row.shape[0]) != int(q_values.shape[0]):
+                raise ValueError(
+                    "epsilon_by_row length does not match active observation rows"
+                )
+            eps_by_row = eps_by_row.clamp(0.0, 1.0)
+        else:
+            eps_by_row = torch.full(
+                (int(q_values.shape[0]), 1),
+                fill_value=float(self.epsilon),
+                device=q_values.device,
+                dtype=q_values.dtype,
+            )
         greedy = torch.argmax(q_values, dim=-1, keepdim=True)
         valid_count = safe_mask.sum(dim=-1, keepdim=True).to(dtype=q_values.dtype).clamp_min(1.0)
-        probs = safe_mask.to(dtype=q_values.dtype) * (eps / valid_count)
+        probs = safe_mask.to(dtype=q_values.dtype) * (eps_by_row / valid_count)
         probs.scatter_add_(
             dim=-1,
             index=greedy,
-            src=torch.full_like(greedy, fill_value=1.0 - eps, dtype=q_values.dtype),
+            src=1.0 - eps_by_row,
         )
         return torch.log(probs.clamp_min(1e-8))
 
@@ -480,10 +526,78 @@ def _build_iql_next_indices(samples: Sequence[OnlineDecisionSample]) -> Tuple[np
     return next_indices, done
 
 
+def _annotate_iql_samples_with_arrival_remaining(
+    samples: Sequence[OnlineDecisionSample],
+    vehicle_travel_times: Dict[str, float],
+) -> None:
+    """Attach the observed post-decision time-to-arrival to each sample."""
+    for sample in samples:
+        travel_time = float(vehicle_travel_times.get(str(sample.veh_id), float("nan")))
+        elapsed = float(getattr(sample, "elapsed_time", float("nan")))
+        if np.isfinite(travel_time) and np.isfinite(elapsed):
+            # TraCI reports the arrival event on the tick after tripinfo's
+            # timestamp. This is the same alignment used by the online-WM path.
+            sample.arrival_remaining_time = float(max(travel_time - elapsed - 1.0, 0.0))
+        else:
+            sample.arrival_remaining_time = float("nan")
+
+
+def _discounted_repeated_reward(
+    base_reward: float,
+    *,
+    gamma: float,
+    full_steps: int,
+    final_fraction: float = 0.0,
+) -> float:
+    """Collapse repeated fixed-interval rewards into one SMDP reward."""
+    value = 0.0
+    discount = 1.0
+    for _ in range(max(int(full_steps), 0)):
+        value += discount * float(base_reward)
+        discount *= float(gamma)
+    fraction = float(np.clip(float(final_fraction), 0.0, 1.0))
+    if fraction > 0.0:
+        value += discount * float(base_reward) * fraction
+    return float(value)
+
+
+def _full_interval_reward(sample: OnlineDecisionSample, cfg: ToyIqlTorchRLConfig) -> float:
+    """Return the configured reward for one complete decision interval."""
+    mode = str(cfg.reward_mode or "").strip().lower()
+    if mode in {"capped_step_cost", "capped_cost", "step_cost", "min_step_remaining"}:
+        mask = np.asarray(sample.valid_mask, dtype=bool).reshape(-1)
+        action = int(sample.action)
+        if action < 0 or action >= int(mask.size) or not bool(mask[action]):
+            return 0.0
+        return float(
+            -float(cfg.reward_weight)
+            * float(cfg.reward_scale)
+            * float(cfg.step_interval)
+            / max(float(cfg.reward_temperature), 1e-6)
+        )
+    # Other reward modes are state dependent. Repeating the observed reward is
+    # the least-assumptive SMDP approximation; the production runs use the
+    # exact capped-step-cost branch above.
+    return float(sample.reward)
+
+
+def _decision_gap_steps(
+    sample: OnlineDecisionSample,
+    next_sample: OnlineDecisionSample,
+    *,
+    step_interval: float,
+) -> int:
+    decision_gap = int(next_sample.decision_idx) - int(sample.decision_idx)
+    sim_gap = float(next_sample.sim_step) - float(sample.sim_step)
+    sim_gap_steps = int(round(sim_gap / max(float(step_interval), 1e-6)))
+    return max(1, decision_gap, sim_gap_steps)
+
+
 def _materialize_iql_replay_transitions(
     samples: Sequence[OnlineDecisionSample],
     *,
     n_routes: int,
+    cfg: Optional[ToyIqlTorchRLConfig] = None,
 ) -> List[IqlReplayTransition]:
     if not samples:
         return []
@@ -500,11 +614,44 @@ def _materialize_iql_replay_transitions(
             action_mask[:] = True
 
         done = bool(done_flags[sample_idx])
+        steps_to_next_obs = 1
+        reward = float(sample.reward)
         if done:
+            if cfg is not None:
+                arrival_remaining = float(
+                    getattr(sample, "arrival_remaining_time", float("nan"))
+                )
+                if not np.isfinite(arrival_remaining):
+                    # A censored tail has neither a successor state nor a
+                    # trustworthy terminal return. Excluding it avoids the old
+                    # optimistic one-step pseudo-terminal target.
+                    continue
+                interval = max(float(cfg.step_interval), 1e-6)
+                full_steps = int(math.floor(max(arrival_remaining, 0.0) / interval))
+                remainder = max(arrival_remaining - full_steps * interval, 0.0)
+                final_fraction = remainder / interval
+                steps_to_next_obs = max(full_steps + int(final_fraction > 1e-9), 1)
+                reward = _discounted_repeated_reward(
+                    _full_interval_reward(sample, cfg),
+                    gamma=float(cfg.gamma),
+                    full_steps=full_steps,
+                    final_fraction=final_fraction,
+                )
             next_obs = np.zeros_like(obs)
             next_action_mask = np.ones((int(n_routes),), dtype=bool)
         else:
             next_sample = samples[int(next_indices[sample_idx])]
+            if cfg is not None:
+                steps_to_next_obs = _decision_gap_steps(
+                    sample,
+                    next_sample,
+                    step_interval=float(cfg.step_interval),
+                )
+                reward = _discounted_repeated_reward(
+                    _full_interval_reward(sample, cfg),
+                    gamma=float(cfg.gamma),
+                    full_steps=steps_to_next_obs,
+                )
             next_obs = np.asarray(next_sample.obs, dtype=np.float32).reshape(-1).copy()
             next_action_mask = np.zeros((int(n_routes),), dtype=bool)
             raw_next_mask = np.asarray(next_sample.valid_mask, dtype=bool).reshape(-1)
@@ -522,10 +669,11 @@ def _materialize_iql_replay_transitions(
                 obs=obs,
                 action=int(sample.action),
                 action_mask=action_mask,
-                reward=float(sample.reward),
+                reward=float(reward),
                 next_obs=next_obs,
                 next_action_mask=next_action_mask,
                 done=done,
+                steps_to_next_obs=int(steps_to_next_obs),
             )
         )
     return transitions
@@ -551,6 +699,7 @@ def _build_iql_minibatch_td(
     rewards = torch.zeros((n, n_agents, 1), device=device, dtype=torch.float32)
     done = torch.ones((n, n_agents, 1), device=device, dtype=torch.bool)
     terminated = torch.ones((n, n_agents, 1), device=device, dtype=torch.bool)
+    steps_to_next_obs = torch.ones((n, n_agents, 1), device=device, dtype=torch.long)
 
     for row, raw_idx in enumerate(indices):
         transition = transitions[int(raw_idx)]
@@ -574,6 +723,7 @@ def _build_iql_minibatch_td(
         )
         active_mask[row, slot] = True
         rewards[row, slot, 0] = float(transition.reward)
+        steps_to_next_obs[row, slot, 0] = max(int(transition.steps_to_next_obs), 1)
         if not bool(transition.done):
             done[row, slot, 0] = False
             terminated[row, slot, 0] = False
@@ -584,6 +734,7 @@ def _build_iql_minibatch_td(
             ("agents", "action"): action,
             ("agents", "action_mask"): action_mask,
             ("agents", "active_mask"): active_mask,
+            "steps_to_next_obs": steps_to_next_obs,
             ("agents", "reward"): rewards,
             ("next", "agents", "observation"): next_obs,
             ("next", "agents", "action_mask"): next_action_mask,
@@ -657,6 +808,7 @@ def build_torchrl_iql_batch(
     samples: Sequence[OnlineDecisionSample],
     q_network: TorchRLIqlQNetwork,
     device: torch.device,
+    cfg: Optional[ToyIqlTorchRLConfig] = None,
 ) -> TensorDict:
     n = int(len(samples))
     if n <= 0:
@@ -664,10 +816,13 @@ def build_torchrl_iql_batch(
     transitions = _materialize_iql_replay_transitions(
         samples,
         n_routes=int(q_network.n_routes),
+        cfg=cfg,
     )
+    if not transitions:
+        raise ValueError("cannot build an IQL TorchRL batch with no usable transitions")
     return _build_iql_minibatch_td(
         transitions=transitions,
-        indices=np.arange(n, dtype=np.int64),
+        indices=np.arange(len(transitions), dtype=np.int64),
         q_network=q_network,
         device=device,
     )
@@ -689,6 +844,23 @@ def build_torchrl_iql_loss(
     )
     loss_module.make_value_estimator(ValueEstimators.TD0, gamma=float(cfg.gamma))
     return loss_module
+
+
+def _online_target_relative_l2(loss_module: DQNLoss) -> float:
+    """Measure target lag without flattening the multi-agent parameter tensors."""
+    gap_sq = 0.0
+    online_sq = 0.0
+    with torch.no_grad():
+        online_params = loss_module.value_network_params
+        target_params = loss_module.target_value_network_params
+        for key in online_params.keys(True, True):
+            online = online_params.get(key)
+            target = target_params.get(key)
+            if not torch.is_tensor(online) or not online.is_floating_point():
+                continue
+            gap_sq += float(torch.sum((online - target) ** 2).detach().cpu().item())
+            online_sq += float(torch.sum(online**2).detach().cpu().item())
+    return float(math.sqrt(gap_sq / max(online_sq, 1e-24)))
 
 
 class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
@@ -749,17 +921,44 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
         epsilon: float,
         replay_size: int = 0,
         replay_episodes: int = 0,
+        replay_sample_ratio: float = 0.0,
+        fresh_transition_epochs: int = 0,
     ) -> Dict[str, float]:
         return {
             "loss": 0.0,
             "q_loss": 0.0,
             "n_samples": float(n_samples),
             "new_samples": float(n_samples),
+            "new_transitions": float(n_samples),
             "replay_size": float(replay_size),
             "sampled_transitions": 0.0,
+            "unique_sampled_transitions": 0.0,
+            "sampled_to_new_ratio": 0.0,
+            "fresh_sampled_transitions": 0.0,
+            "fresh_unique_transitions": 0.0,
+            "fresh_coverage": 0.0,
+            "replay_sampled_transitions": 0.0,
+            "replay_sample_ratio": float(replay_sample_ratio),
+            "fresh_transition_epochs": float(fresh_transition_epochs),
+            "sample_budget_per_epoch": 0.0,
+            "fresh_sample_budget_per_epoch": 0.0,
+            "replay_sample_budget_per_epoch": 0.0,
+            "target_sampled_transitions": 0.0,
+            "fresh_retained_transitions": 0.0,
+            "fresh_evicted_before_update": 0.0,
+            "optimizer_steps": 0.0,
+            "target_update_steps": 0.0,
+            "target_old_weight_after_update": 1.0,
+            "online_target_relative_l2": 0.0,
+            "censored_tail_dropped": 0.0,
+            "mean_steps_to_next_obs": 0.0,
+            "multi_step_transition_frac": 0.0,
+            "sampler_resets": 0.0,
             "replay_episodes": float(replay_episodes),
             "pending_episodes": float(pending_episodes),
             "update_epochs": 0.0,
+            "replay_update_epochs": 0.0,
+            "combined_update_epochs": 0.0,
             "updates_per_epoch": 0.0,
             "frames_per_batch": 0.0,
             "reward_mean": 0.0,
@@ -795,32 +994,93 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
             self.loss_module.load_state_dict(loss_state)
         optimizer_state = state.get("optimizer")
         if optimizer_state is not None:
-            self.optimizer.load_state_dict(optimizer_state)
+            if self._optimizer_state_shapes_match(optimizer_state):
+                self.optimizer.load_state_dict(optimizer_state)
+            else:
+                print(
+                    "[toy-iql-torchrl] resume optimizer state shape mismatch; "
+                    "continuing with a fresh optimizer",
+                    flush=True,
+                )
         episode = int(state.get("episode", 0) or 0)
         print(f"[toy-iql-torchrl] resumed q-network from {path} at episode {episode}", flush=True)
         return episode
+
+    def _optimizer_state_shapes_match(self, optimizer_state: Dict[str, Any]) -> bool:
+        state_by_param = optimizer_state.get("state", {})
+        saved_groups = optimizer_state.get("param_groups", [])
+        current_groups = self.optimizer.param_groups
+        if not isinstance(state_by_param, dict) or len(saved_groups) != len(current_groups):
+            return False
+        for saved_group, current_group in zip(saved_groups, current_groups):
+            saved_params = list(saved_group.get("params", []))
+            current_params = list(current_group.get("params", []))
+            if len(saved_params) != len(current_params):
+                return False
+            for saved_param_id, current_param in zip(saved_params, current_params):
+                saved_state = state_by_param.get(saved_param_id, {})
+                if not isinstance(saved_state, dict):
+                    continue
+                current_shape = tuple(current_param.shape)
+                for value in saved_state.values():
+                    if torch.is_tensor(value) and value.ndim > 0 and tuple(value.shape) != current_shape:
+                        return False
+        return True
 
     def update_from_replay(self, episode_batches: Sequence[Sequence[OnlineDecisionSample]]) -> Dict[str, float]:
         new_samples = [sample for batch in episode_batches for sample in batch]
         new_transitions = _materialize_iql_replay_transitions(
             new_samples,
             n_routes=int(self.actor.n_routes),
+            cfg=self.cfg,
         )
         replay_buffer = self._ensure_replay_buffer()
         replay_buffer.extend(new_transitions)
         replay_transitions = replay_buffer.snapshot()
         epsilon = float(getattr(self.actor, "epsilon", 0.0))
+        fresh_count = int(len(new_transitions))
+        replay_sample_ratio = float(self.cfg.replay_sample_ratio)
+        fresh_transition_epochs = int(self.cfg.fresh_transition_epochs)
+        fresh_retained = min(fresh_count, int(replay_buffer.memory_size))
+        fresh_evicted = max(fresh_count - int(replay_buffer.memory_size), 0)
         if len(new_samples) < int(self.cfg.min_samples_per_update) or not replay_transitions:
             return {
                 "loss": 0.0,
                 "q_loss": 0.0,
                 "n_samples": float(len(new_samples)),
                 "new_samples": float(len(new_samples)),
+                "new_transitions": float(fresh_count),
                 "replay_size": float(len(replay_transitions)),
                 "sampled_transitions": 0.0,
+                "unique_sampled_transitions": 0.0,
+                "sampled_to_new_ratio": 0.0,
+                "fresh_sampled_transitions": 0.0,
+                "fresh_unique_transitions": 0.0,
+                "fresh_coverage": 0.0,
+                "replay_sampled_transitions": 0.0,
+                "replay_sample_ratio": replay_sample_ratio,
+                "fresh_transition_epochs": float(fresh_transition_epochs),
+                "sample_budget_per_epoch": 0.0,
+                "fresh_sample_budget_per_epoch": 0.0,
+                "replay_sample_budget_per_epoch": 0.0,
+                "target_sampled_transitions": 0.0,
+                "fresh_retained_transitions": float(fresh_retained),
+                "fresh_evicted_before_update": float(fresh_evicted),
+                "optimizer_steps": 0.0,
+                "target_update_steps": 0.0,
+                "target_old_weight_after_update": 1.0,
+                "online_target_relative_l2": _online_target_relative_l2(
+                    self.loss_module
+                ),
+                "censored_tail_dropped": float(max(len(new_samples) - fresh_count, 0)),
+                "mean_steps_to_next_obs": 0.0,
+                "multi_step_transition_frac": 0.0,
+                "sampler_resets": 0.0,
                 "replay_episodes": float(len({transition.episode for transition in replay_transitions})),
                 "pending_episodes": 0.0,
                 "update_epochs": 0.0,
+                "replay_update_epochs": 0.0,
+                "combined_update_epochs": 0.0,
                 "updates_per_epoch": 0.0,
                 "frames_per_batch": 0.0,
                 "epsilon": epsilon,
@@ -828,44 +1088,145 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
             }
 
         minibatch_size = max(int(self.cfg.minibatch_size), 1)
-        frames_per_batch = max(
-            int(self.actor.n_agents) * max(int(self.cfg.agent_frames_per_batch), 1),
-            1,
-        )
-        updates_per_epoch = frames_per_batch // minibatch_size
+        ratio_budget = replay_sample_ratio > 0.0
         update_epochs = max(int(self.cfg.num_epochs), 1)
+        fresh_coverage_mode = fresh_transition_epochs > 0
+        replay_sample_budget = (
+            int(math.ceil(float(fresh_count) * replay_sample_ratio)) if ratio_budget else 0
+        )
+        if fresh_coverage_mode:
+            legacy_updates_per_epoch = 0
+            replay_update_epochs = update_epochs if ratio_budget else 0
+            combined_update_epochs = max(fresh_transition_epochs, replay_update_epochs)
+            fresh_sample_budget = fresh_count
+            frames_per_batch = fresh_sample_budget + replay_sample_budget
+            target_sampled_transitions = (
+                fresh_sample_budget * fresh_transition_epochs
+                + replay_sample_budget * replay_update_epochs
+            )
+        else:
+            fresh_sample_budget = 0
+            replay_update_epochs = update_epochs
+            combined_update_epochs = update_epochs
+            if ratio_budget:
+                frames_per_batch = replay_sample_budget
+                legacy_updates_per_epoch = 0
+                target_sampled_transitions = replay_sample_budget * update_epochs
+            else:
+                frames_per_batch = max(
+                    int(self.actor.n_agents) * max(int(self.cfg.agent_frames_per_batch), 1),
+                    1,
+                )
+                legacy_updates_per_epoch = frames_per_batch // minibatch_size
+                target_sampled_transitions = (
+                    legacy_updates_per_epoch * minibatch_size * update_epochs
+                )
         self.actor.train()
         self.loss_module.train()
 
         loss_values: List[float] = []
-        sampled_transitions = 0
-        for _epoch in range(update_epochs):
-            for _batch in range(updates_per_epoch):
-                batch_indices = replay_buffer.sample_indices(batch_size=minibatch_size)
-                if not batch_indices.size:
-                    continue
-                subdata = _build_iql_minibatch_td(
-                    transitions=replay_transitions,
-                    indices=batch_indices,
-                    q_network=self.actor,
-                    device=self.device,
-                )
-                active = subdata.get(("agents", "active_mask")).to(device=self.device, dtype=torch.bool)
-                if not bool(active.any().detach().cpu().item()):
-                    continue
-                loss_vals = self.loss_module(subdata)
-                q_loss = _loss_matrix(loss_vals.get("loss"), active.to(dtype=torch.float32))
-                loss = _masked_mean(q_loss, active)
-                self.optimizer.zero_grad(set_to_none=True)
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.loss_module.parameters(), float(self.cfg.max_grad_norm))
-                self.optimizer.step()
-                loss_values.append(float(loss.detach().cpu().item()))
-                sampled_transitions += int(len(batch_indices))
-            self.target_net_updater.step()
+        fresh_sampled_transitions = 0
+        fresh_unique_indices: set[int] = set()
+        replay_sampled_transitions = 0
+        replay_unique_sampled_transitions = 0
+        sampler_resets = 0
+        optimizer_steps_per_epoch: List[int] = []
 
-        active_rewards = np.asarray([float(sample.reward) for sample in new_samples], dtype=np.float32)
+        target_update_steps = 0
+
+        def optimize_batch(
+            transitions: Sequence[IqlReplayTransition],
+            batch_indices: Sequence[int],
+        ) -> bool:
+            nonlocal target_update_steps
+            subdata = _build_iql_minibatch_td(
+                transitions=transitions,
+                indices=batch_indices,
+                q_network=self.actor,
+                device=self.device,
+            )
+            active = subdata.get(("agents", "active_mask")).to(
+                device=self.device,
+                dtype=torch.bool,
+            )
+            if not bool(active.any().detach().cpu().item()):
+                return False
+            loss_vals = self.loss_module(subdata)
+            q_loss = _loss_matrix(loss_vals.get("loss"), active.to(dtype=torch.float32))
+            loss = _masked_mean(q_loss, active)
+            self.optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(
+                self.loss_module.parameters(),
+                float(self.cfg.max_grad_norm),
+            )
+            self.optimizer.step()
+            self.target_net_updater.step()
+            target_update_steps += 1
+            loss_values.append(float(loss.detach().cpu().item()))
+            return True
+
+        for epoch in range(combined_update_epochs):
+            optimizer_steps_this_epoch = 0
+            if fresh_coverage_mode and epoch < fresh_transition_epochs:
+                fresh_permutation = torch.randperm(fresh_count).detach().cpu().numpy()
+                for start in range(0, fresh_count, minibatch_size):
+                    batch_indices = fresh_permutation[start : start + minibatch_size]
+                    if optimize_batch(new_transitions, batch_indices):
+                        fresh_sampled_transitions += int(len(batch_indices))
+                        fresh_unique_indices.update(int(idx) for idx in batch_indices)
+                        optimizer_steps_this_epoch += 1
+
+            should_sample_replay = (
+                (fresh_coverage_mode and ratio_budget and epoch < replay_update_epochs)
+                or (not fresh_coverage_mode)
+            )
+            if should_sample_replay:
+                if ratio_budget:
+                    replay_buffer.reset_sampling_cycle()
+                    sampler_resets += 1
+                remaining_samples = (
+                    int(replay_sample_budget) if ratio_budget else int(frames_per_batch)
+                )
+                scheduled_batches = 0
+                epoch_replay_indices: set[int] = set()
+                while True:
+                    if ratio_budget:
+                        if remaining_samples <= 0:
+                            break
+                        request_size = min(minibatch_size, remaining_samples)
+                    else:
+                        if scheduled_batches >= legacy_updates_per_epoch:
+                            break
+                        request_size = minibatch_size
+                    batch_indices = replay_buffer.sample_indices(batch_size=request_size)
+                    scheduled_batches += 1
+                    if not batch_indices.size:
+                        break
+                    if ratio_budget:
+                        remaining_samples -= int(len(batch_indices))
+                    if optimize_batch(replay_transitions, batch_indices):
+                        epoch_replay_indices.update(int(idx) for idx in batch_indices)
+                        replay_sampled_transitions += int(len(batch_indices))
+                        optimizer_steps_this_epoch += 1
+                replay_unique_sampled_transitions += int(len(epoch_replay_indices))
+
+            optimizer_steps_per_epoch.append(int(optimizer_steps_this_epoch))
+
+        sampled_transitions = fresh_sampled_transitions + replay_sampled_transitions
+        unique_sampled_transitions = (
+            len(fresh_unique_indices) + replay_unique_sampled_transitions
+        )
+
+        active_rewards = np.asarray(
+            [float(transition.reward) for transition in new_transitions],
+            dtype=np.float32,
+        )
         active_done = np.asarray([float(transition.done) for transition in new_transitions], dtype=np.float32)
+        transition_steps = np.asarray(
+            [float(transition.steps_to_next_obs) for transition in new_transitions],
+            dtype=np.float32,
+        )
         active_q = _chosen_q_for_samples(
             samples=new_samples,
             q_network=self.actor,
@@ -881,12 +1242,49 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
             "q_loss": mean(loss_values),
             "n_samples": float(len(new_samples)),
             "new_samples": float(len(new_samples)),
+            "new_transitions": float(fresh_count),
             "replay_size": float(len(replay_transitions)),
             "sampled_transitions": float(sampled_transitions),
+            "unique_sampled_transitions": float(unique_sampled_transitions),
+            "sampled_to_new_ratio": float(sampled_transitions / fresh_count) if fresh_count else 0.0,
+            "fresh_sampled_transitions": float(fresh_sampled_transitions),
+            "fresh_unique_transitions": float(len(fresh_unique_indices)),
+            "fresh_coverage": (
+                float(len(fresh_unique_indices) / fresh_count) if fresh_count else 0.0
+            ),
+            "replay_sampled_transitions": float(replay_sampled_transitions),
+            "replay_sample_ratio": replay_sample_ratio,
+            "fresh_transition_epochs": float(fresh_transition_epochs),
+            "sample_budget_per_epoch": float(frames_per_batch),
+            "fresh_sample_budget_per_epoch": float(fresh_sample_budget),
+            "replay_sample_budget_per_epoch": float(replay_sample_budget),
+            "target_sampled_transitions": float(target_sampled_transitions),
+            "fresh_retained_transitions": float(fresh_retained),
+            "fresh_evicted_before_update": float(fresh_evicted),
+            "optimizer_steps": float(sum(optimizer_steps_per_epoch)),
+            "target_update_steps": float(target_update_steps),
+            "target_old_weight_after_update": float(
+                float(self.cfg.target_update_eps) ** int(target_update_steps)
+            ),
+            "online_target_relative_l2": _online_target_relative_l2(self.loss_module),
+            "censored_tail_dropped": float(max(len(new_samples) - fresh_count, 0)),
+            "mean_steps_to_next_obs": (
+                float(np.mean(transition_steps)) if transition_steps.size else 0.0
+            ),
+            "multi_step_transition_frac": (
+                float(np.mean(transition_steps > 1.0)) if transition_steps.size else 0.0
+            ),
+            "sampler_resets": float(sampler_resets),
             "replay_episodes": float(len({transition.episode for transition in replay_transitions})),
             "pending_episodes": 0.0,
             "update_epochs": float(update_epochs),
-            "updates_per_epoch": float(updates_per_epoch),
+            "replay_update_epochs": float(replay_update_epochs),
+            "combined_update_epochs": float(combined_update_epochs),
+            "updates_per_epoch": (
+                mean(optimizer_steps_per_epoch)
+                if fresh_coverage_mode or ratio_budget
+                else float(legacy_updates_per_epoch)
+            ),
             "frames_per_batch": float(frames_per_batch),
             "reward_mean": float(np.mean(active_rewards)) if active_rewards.size else 0.0,
             "reward_std": float(np.std(active_rewards)) if active_rewards.size > 1 else 0.0,
@@ -935,6 +1333,11 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
                 self.actor.train()
                 self.actor.set_epsilon(epsilon)
                 samples, row = collector.run_train_episode(ep, int(self.rollout_max_steps))
+                row.update(collector.episode_epsilon_scope_stats())
+                _annotate_iql_samples_with_arrival_remaining(
+                    samples,
+                    dict(getattr(collector, "_last_ep_vehicle_tt", {}) or {}),
+                )
                 pending_batches.append(list(samples))
                 is_last_episode = int(ep) >= int(self.cfg.train_episodes)
                 should_update = (
@@ -955,6 +1358,8 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
                         epsilon=epsilon,
                         replay_size=len(replay_transitions),
                         replay_episodes=len({transition.episode for transition in replay_transitions}),
+                        replay_sample_ratio=float(self.cfg.replay_sample_ratio),
+                        fresh_transition_epochs=int(self.cfg.fresh_transition_epochs),
                     )
                 row.update({f"update_{k}": v for k, v in update.items()})
                 train_rows.append(row)
@@ -964,6 +1369,7 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
                     f"samples={len(samples)} reward_mean={row.get('reward_mean', float('nan')):.4f} "
                     f"loss={update['loss']:.4f} q={update.get('chosen_q_mean', 0.0):.4f} "
                     f"eps={update.get('epsilon', epsilon):.3f} "
+                    f"effective_eps={row.get('effective_epsilon_mean', 0.0):.4f} "
                     f"t_all={row.get('t_all', float('nan')):.3f} "
                     f"t_CAV={row.get('t_CAV', float('nan')):.3f} t_HDV={row.get('t_HDV', float('nan')):.3f} "
                     f"completion={row.get('completion_rate', float('nan')):.6f} "
@@ -971,7 +1377,18 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
                     f"new={update.get('new_samples', 0.0):.0f} "
                     f"replay={update.get('replay_size', 0.0):.0f}/{int(self.cfg.memory_size)} "
                     f"sampled={update.get('sampled_transitions', 0.0):.0f} "
-                    f"pending={int(update.get('pending_batch', 0.0))}",
+                    f"fresh={update.get('fresh_sampled_transitions', 0.0):.0f} "
+                    f"fresh_coverage={update.get('fresh_coverage', 0.0):.3f} "
+                    f"replay_sampled={update.get('replay_sampled_transitions', 0.0):.0f} "
+                    f"pending={int(update.get('pending_batch', 0.0))} "
+                    f"target={update.get('target_sampled_transitions', 0.0):.0f} "
+                    f"sample_ratio={update.get('sampled_to_new_ratio', 0.0):.3f} "
+                    f"evicted={update.get('fresh_evicted_before_update', 0.0):.0f} "
+                    f"steps={update.get('optimizer_steps', 0.0):.0f} "
+                    f"target_updates={update.get('target_update_steps', 0.0):.0f} "
+                    f"target_gap={update.get('online_target_relative_l2', 0.0):.4f} "
+                    f"duration={update.get('mean_steps_to_next_obs', 0.0):.3f} "
+                    f"censored={update.get('censored_tail_dropped', 0.0):.0f}",
                     flush=True,
                 )
                 if ep in ckpt_eps:
@@ -1006,11 +1423,33 @@ class ToyIqlTorchRLTrainer(ToyOnlineAcTrainer):
                 "target_update": "SoftUpdate",
                 "agent_frames_per_batch": int(self.cfg.agent_frames_per_batch),
                 "memory_size": int(self.cfg.memory_size),
+                "replay_sample_ratio": float(self.cfg.replay_sample_ratio),
+                "fresh_transition_epochs": int(self.cfg.fresh_transition_epochs),
+                "update_budget_mode": (
+                    "fresh_full_coverage_plus_replay"
+                    if int(self.cfg.fresh_transition_epochs) > 0
+                    and float(self.cfg.replay_sample_ratio) > 0.0
+                    else "fresh_full_coverage"
+                    if int(self.cfg.fresh_transition_epochs) > 0
+                    else "fresh_transition_ratio"
+                    if float(self.cfg.replay_sample_ratio) > 0.0
+                    else "legacy_agent_frames"
+                ),
+                "fresh_transition_sampling": (
+                    "random_without_replacement"
+                    if int(self.cfg.fresh_transition_epochs) > 0
+                    else "disabled"
+                ),
+                "target_update_cadence": (
+                    "once_per_optimizer_step"
+                ),
                 "replay_sampler": "SamplerWithoutReplacement",
+                "replay_sampler_reset_each_epoch": float(self.cfg.replay_sample_ratio) > 0.0,
                 "gamma": float(self.cfg.gamma),
                 "eps_init": float(self.cfg.eps_init),
                 "eps_end": float(self.cfg.eps_end),
                 "exploration_fraction": float(self.cfg.exploration_fraction),
+                "epsilon_scope": str(self.cfg.epsilon_scope),
                 "target_update_eps": float(self.cfg.target_update_eps),
             },
             "fixed_roles": {
@@ -1179,14 +1618,23 @@ def build_config(args: argparse.Namespace) -> ToyIqlTorchRLConfig:
         num_epochs=int(args.num_epochs),
         minibatch_size=int(args.minibatch_size),
         memory_size=int(args.memory_size),
+        replay_sample_ratio=float(args.replay_sample_ratio),
+        fresh_transition_epochs=int(args.fresh_transition_epochs),
         q_network_depth=int(args.q_network_depth),
         q_network_num_cells=int(args.q_network_num_cells),
         eps_init=float(args.eps_init),
         eps_end=float(args.eps_end),
         exploration_fraction=float(args.exploration_fraction),
+        epsilon_scope=str(args.epsilon_scope),
         target_update_eps=float(args.target_update_eps),
         av_execution_mode=str(args.av_execution_mode),
     )
+    if int(args.train_sim_buffer_after_last_depart) < 0:
+        raise ValueError("train_sim_buffer_after_last_depart must be non-negative")
+    if not bool(args.eval_only) and int(args.train_sim_buffer_after_last_depart) > 0:
+        overrides["sim_buffer_after_last_depart"] = int(
+            args.train_sim_buffer_after_last_depart
+        )
     if bool(args.eval_only) and int(args.eval_sim_buffer_after_last_depart) > 0:
         overrides["sim_buffer_after_last_depart"] = int(args.eval_sim_buffer_after_last_depart)
     if has_settings:
@@ -1231,6 +1679,15 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--episode-steps", type=int, default=60)
     parser.add_argument("--sim-buffer-after-last-depart", type=int, default=3000)
     parser.add_argument(
+        "--train-sim-buffer-after-last-depart",
+        type=int,
+        default=0,
+        help=(
+            "Training-only override applied after --settings is loaded. "
+            "Use this when the settings drain is too short to observe actual arrivals."
+        ),
+    )
+    parser.add_argument(
         "--eval-sim-buffer-after-last-depart",
         type=int,
         default=0,
@@ -1259,12 +1716,40 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         default=20_000,
         help="Transition replay capacity, matching the official URB IQL TensorDictReplayBuffer.",
     )
+    parser.add_argument(
+        "--replay-sample-ratio",
+        type=float,
+        default=0.0,
+        help=(
+            "Replay transitions sampled per fresh transition per epoch. "
+            "Values >0 use the measured fresh-transition budget; 0 preserves "
+            "the original n_agents*agent_frames_per_batch budget."
+        ),
+    )
+    parser.add_argument(
+        "--fresh-transition-epochs",
+        type=int,
+        default=0,
+        help=(
+            "Number of random-without-replacement passes over every transition "
+            "collected for the current update. 0 preserves the legacy replay-only budget."
+        ),
+    )
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--q-network-depth", type=int, default=3)
     parser.add_argument("--q-network-num-cells", type=int, default=64)
-    parser.add_argument("--eps-init", type=float, default=1.0)
+    parser.add_argument("--eps-init", type=float, default=0.99)
     parser.add_argument("--eps-end", type=float, default=0.05)
-    parser.add_argument("--exploration-fraction", type=float, default=0.8)
+    parser.add_argument("--exploration-fraction", type=float, default=0.4)
+    parser.add_argument(
+        "--epsilon-scope",
+        choices=["per_decision", "first_decision_per_vehicle"],
+        default="per_decision",
+        help=(
+            "Apply epsilon at every dynamic decision, or at most once per vehicle "
+            "and episode to preserve the original one-decision URB exploration scale."
+        ),
+    )
     parser.add_argument("--target-update-eps", type=float, default=0.995)
     parser.add_argument("--hdv-gawron-mode", default="routerl")
     parser.add_argument("--hdv-gawron-alpha-zero", type=float, default=0.2)
@@ -1299,6 +1784,7 @@ def build_plan(cfg: ToyIqlTorchRLConfig) -> Dict[str, Any]:
             "reward_temperature": cfg.reward_temperature,
             "ratio_machines": cfg.ratio_machines,
             "episode_steps": cfg.episode_steps,
+            "sim_buffer_after_last_depart": cfg.sim_buffer_after_last_depart,
             "av_execution_mode": str(cfg.av_execution_mode),
             "av_candidate_source": str(cfg.av_candidate_source),
             "route_generator": str(cfg.route_generator),
@@ -1324,7 +1810,26 @@ def build_plan(cfg: ToyIqlTorchRLConfig) -> Dict[str, Any]:
             "num_epochs": int(cfg.num_epochs),
             "minibatch_size": int(cfg.minibatch_size),
             "memory_size": int(cfg.memory_size),
+            "replay_sample_ratio": float(cfg.replay_sample_ratio),
+            "fresh_transition_epochs": int(cfg.fresh_transition_epochs),
+            "update_budget_mode": (
+                "fresh_full_coverage_plus_replay"
+                if int(cfg.fresh_transition_epochs) > 0
+                and float(cfg.replay_sample_ratio) > 0.0
+                else "fresh_full_coverage"
+                if int(cfg.fresh_transition_epochs) > 0
+                else "fresh_transition_ratio"
+                if float(cfg.replay_sample_ratio) > 0.0
+                else "legacy_agent_frames"
+            ),
+            "fresh_transition_sampling": (
+                "random_without_replacement"
+                if int(cfg.fresh_transition_epochs) > 0
+                else "disabled"
+            ),
+            "target_update_cadence": "once_per_optimizer_step",
             "replay_sampler": "SamplerWithoutReplacement",
+            "replay_sampler_reset_each_epoch": float(cfg.replay_sample_ratio) > 0.0,
             "lr": float(cfg.lr),
             "max_grad_norm": float(cfg.max_grad_norm),
             "gamma": float(cfg.gamma),
@@ -1333,6 +1838,7 @@ def build_plan(cfg: ToyIqlTorchRLConfig) -> Dict[str, Any]:
             "eps_init": float(cfg.eps_init),
             "eps_end": float(cfg.eps_end),
             "exploration_fraction": float(cfg.exploration_fraction),
+            "epsilon_scope": str(cfg.epsilon_scope),
             "target_update_eps": float(cfg.target_update_eps),
         },
         "paths": {

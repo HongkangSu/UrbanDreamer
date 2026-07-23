@@ -301,3 +301,16 @@ def test_post_mutation_state_roundtrip(tmp_path):
         expected_should_humans_adapt=False,
         state=state,
     )
+
+    # Counterfactual pre-CAV references legitimately contain no machines.
+    state["ratio_machines"] = 0.0
+    state["machine_agent_ids"] = []
+    state["human_agent_ids"] = ["0", "1"]
+    verify_post_mutation_state(
+        results_dir=results_dir,
+        expected_network="toy_net",
+        expected_ratio_machines=0.0,
+        expected_human_model="gawron",
+        expected_should_humans_adapt=False,
+        state=state,
+    )

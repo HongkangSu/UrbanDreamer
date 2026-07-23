@@ -680,23 +680,26 @@ def main() -> int:
     all_departs: List[Any] = []
     all_contexts: List[Any] = []
 
-    if post_mutation_state is None and warmup_episodes > 0:
-        print(f"\n=== Phase 1: Human adaptation ({warmup_episodes} episodes) ===")
-        collector.av_fraction = 0.0
-        for ep in range(int(warmup_episodes)):
-            (
-                _ep_ids,
-                _ep_av_edge_acts,
-                _ep_hdv_edge_acts,
-                _ep_joint_edge_acts,
-                _ep_rews,
-                ep_frames,
-                _ep_departs,
-                _ep_contexts,
-            ) = collector._collect_single_episode(episode_id=ep, max_steps=int(args.max_steps))
-            _update_hdv_after_episode(collector, ep_frames)
-            loaded_hdv_state = _refresh_loaded_hdv_state(collector, loaded_hdv_state)
-            print(f"  warmup {ep+1:3d}/{warmup_episodes:3d} | {_log_tt_message(collector)}", flush=True)
+    if post_mutation_state is None:
+        if warmup_episodes > 0:
+            print(f"\n=== Phase 1: Human adaptation ({warmup_episodes} episodes) ===")
+            collector.av_fraction = 0.0
+            for ep in range(int(warmup_episodes)):
+                (
+                    _ep_ids,
+                    _ep_av_edge_acts,
+                    _ep_hdv_edge_acts,
+                    _ep_joint_edge_acts,
+                    _ep_rews,
+                    ep_frames,
+                    _ep_departs,
+                    _ep_contexts,
+                ) = collector._collect_single_episode(episode_id=ep, max_steps=int(args.max_steps))
+                _update_hdv_after_episode(collector, ep_frames)
+                loaded_hdv_state = _refresh_loaded_hdv_state(collector, loaded_hdv_state)
+                print(f"  warmup {ep+1:3d}/{warmup_episodes:3d} | {_log_tt_message(collector)}", flush=True)
+        else:
+            print("\n=== Phase 1: Human adaptation skipped ===")
 
         if post_mutation_hdv_state_out_path is not None:
             _save_hdv_learning_state(post_mutation_hdv_state_out_path, loaded_hdv_state)

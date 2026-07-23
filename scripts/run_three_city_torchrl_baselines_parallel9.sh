@@ -10,6 +10,9 @@ set -uo pipefail
 # Select a subset of cities and/or use CPU workers when GPUs are unavailable:
 #   CITIES=gretz,ingolstadt TRAIN_DEVICE=cpu \
 #     scripts/run_three_city_torchrl_baselines_parallel9.sh
+# Resume selected jobs into an explicitly existing output tree:
+#   ALLOW_EXISTING_OUTPUT=1 RESUME_EPISODE_GRETZ_IPPO=100 \
+#     scripts/run_three_city_torchrl_baselines_parallel9.sh
 # This script trains nine checkpoints. Run the unified long-horizon evaluator
 # separately after training so evaluation uses its own 9000/7200 protocol.
 
@@ -22,6 +25,11 @@ AGENT_FRAMES_PER_BATCH="${AGENT_FRAMES_PER_BATCH:-10}"
 NUM_EPOCHS="${NUM_EPOCHS:-1}"
 MINIBATCH_SIZE="${MINIBATCH_SIZE:-32}"
 IQL_MEMORY_SIZE="${IQL_MEMORY_SIZE:-20000}"
+IQL_AGENT_FRAMES_PER_BATCH="${IQL_AGENT_FRAMES_PER_BATCH:-1}"
+IQL_MINIBATCH_SIZE="${IQL_MINIBATCH_SIZE:-128}"
+IQL_FRESH_TRANSITION_EPOCHS="${IQL_FRESH_TRANSITION_EPOCHS:-1}"
+IQL_REPLAY_SAMPLE_RATIO="${IQL_REPLAY_SAMPLE_RATIO:-0.25}"
+IQL_SIM_BUFFER_AFTER_LAST_DEPART="${IQL_SIM_BUFFER_AFTER_LAST_DEPART:-3000}"
 SEED="${SEED:-42}"
 STAMP="${STAMP:-$(date '+%Y%m%d_%H%M%S')}"
 GPU_LIST="${GPU_LIST:-}"
@@ -30,6 +38,8 @@ CITIES="${CITIES-gretz,ingolstadt,fontenay}"
 TRAIN_DEVICE="${TRAIN_DEVICE:-cuda}"
 CPU_THREADS_PER_JOB="${CPU_THREADS_PER_JOB:-}"
 DRY_RUN="${DRY_RUN:-0}"
+ALLOW_EXISTING_OUTPUT="${ALLOW_EXISTING_OUTPUT:-0}"
+LAUNCH_STAGGER_SECONDS="${LAUNCH_STAGGER_SECONDS:-0}"
 
 if [[ "${TRAIN_DEVICE}" != "cuda" && "${TRAIN_DEVICE}" != "cpu" ]]; then
   echo "TRAIN_DEVICE must be either cuda or cpu, got: ${TRAIN_DEVICE}" >&2
@@ -41,6 +51,29 @@ if [[ "${ALLOW_GPU_OVERSUBSCRIBE}" != "0" && "${ALLOW_GPU_OVERSUBSCRIBE}" != "1"
 fi
 if [[ "${DRY_RUN}" != "0" && "${DRY_RUN}" != "1" ]]; then
   echo "DRY_RUN must be 0 or 1, got: ${DRY_RUN}" >&2
+  exit 2
+fi
+if [[ "${ALLOW_EXISTING_OUTPUT}" != "0" && "${ALLOW_EXISTING_OUTPUT}" != "1" ]]; then
+  echo "ALLOW_EXISTING_OUTPUT must be 0 or 1, got: ${ALLOW_EXISTING_OUTPUT}" >&2
+  exit 2
+fi
+if [[ ! "${LAUNCH_STAGGER_SECONDS}" =~ ^[0-9]+$ ]]; then
+  echo "LAUNCH_STAGGER_SECONDS must be a non-negative integer, got: ${LAUNCH_STAGGER_SECONDS}" >&2
+  exit 2
+fi
+LAUNCH_STAGGER_SECONDS="$((10#${LAUNCH_STAGGER_SECONDS}))"
+for integer_setting in \
+  IQL_MEMORY_SIZE \
+  IQL_AGENT_FRAMES_PER_BATCH \
+  IQL_MINIBATCH_SIZE \
+  IQL_SIM_BUFFER_AFTER_LAST_DEPART; do
+  if [[ ! "${!integer_setting}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "${integer_setting} must be a positive integer, got: ${!integer_setting}" >&2
+    exit 2
+  fi
+done
+if [[ ! "${IQL_FRESH_TRANSITION_EPOCHS}" =~ ^[0-9]+$ ]]; then
+  echo "IQL_FRESH_TRANSITION_EPOCHS must be a non-negative integer, got: ${IQL_FRESH_TRANSITION_EPOCHS}" >&2
   exit 2
 fi
 if [[ -z "${CITIES}" || "${CITIES}" == ,* || "${CITIES}" == *, || "${CITIES}" == *,,* ]]; then
@@ -196,6 +229,60 @@ for city in "${SELECTED_CITIES[@]}"; do
   )
 done
 
+resume_episode_for() {
+  local city="$1"
+  local algorithm="$2"
+  local variable="RESUME_EPISODE_${city^^}_${algorithm^^}"
+  local value="${!variable-}"
+  if [[ -z "${value}" ]]; then
+    value=0
+  fi
+  if [[ ! "${value}" =~ ^[0-9]+$ ]]; then
+    echo "${variable} must be a non-negative integer, got: ${value}" >&2
+    return 1
+  fi
+  value="$((10#${value}))"
+  if (( value >= TRAIN_EPISODES && value != 0 )); then
+    echo "${variable}=${value} must be smaller than TRAIN_EPISODES=${TRAIN_EPISODES}." >&2
+    return 1
+  fi
+  printf '%s\n' "${value}"
+}
+
+resume_checkpoint_for() {
+  local out_dir="$1"
+  local episode="$2"
+  printf '%s/checkpoints/checkpoint_ep%05d.pt\n' "${out_dir}" "${episode}"
+}
+
+validate_resume_checkpoint() {
+  local checkpoint="$1"
+  local expected_episode="$2"
+  local algorithm="$3"
+  if [[ ! -s "${checkpoint}" ]]; then
+    echo "Missing or empty resume checkpoint: ${checkpoint}" >&2
+    return 1
+  fi
+  "${PY}" -c '
+import sys
+import torch
+
+path, expected_episode, algorithm = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+state = torch.load(path, map_location="cpu")
+actual_episode = int(state.get("episode", -1))
+expected_family = f"{algorithm}_torchrl"
+actual_family = str(state.get("model_family", ""))
+if actual_episode != expected_episode:
+    raise SystemExit(
+        f"{path}: checkpoint episode={actual_episode}, expected {expected_episode}"
+    )
+if actual_family != expected_family:
+    raise SystemExit(
+        f"{path}: model_family={actual_family!r}, expected {expected_family!r}"
+    )
+' "${checkpoint}" "${expected_episode}" "${algorithm}"
+}
+
 if [[ "${TRAIN_DEVICE}" == "cuda" ]]; then
   if ! command -v nvidia-smi >/dev/null 2>&1; then
     echo "nvidia-smi is required to validate CUDA GPU ids." >&2
@@ -239,6 +326,25 @@ if [[ "${TRAIN_DEVICE}" == "cuda" ]]; then
       exit 2
     fi
     SEEN_GPUS["${gpu}"]=1
+  done
+  declare -A CUDA_PREFLIGHTED_GPUS=()
+  for gpu in "${GPUS[@]}"; do
+    if [[ -n "${CUDA_PREFLIGHTED_GPUS[${gpu}]+x}" ]]; then
+      continue
+    fi
+    if ! CUDA_VISIBLE_DEVICES="${gpu}" "${PY}" -c '
+import torch
+
+if not torch.cuda.is_available():
+    raise SystemExit("torch.cuda.is_available() is false")
+probe = torch.empty(1, device="cuda")
+torch.cuda.synchronize()
+print(f"CUDA preflight ok: {torch.cuda.get_device_name(0)}")
+'; then
+      echo "PyTorch CUDA preflight failed for physical GPU ${gpu}." >&2
+      exit 2
+    fi
+    CUDA_PREFLIGHTED_GPUS["${gpu}"]=1
   done
   if [[ "${#GPUS[@]}" -lt "${#TASKS[@]}" && "${ALLOW_GPU_OVERSUBSCRIBE}" != "1" ]]; then
     echo "Found ${#GPUS[@]} GPU slots for ${#TASKS[@]} simultaneous jobs." >&2
@@ -314,8 +420,24 @@ for task in "${TASKS[@]}"; do
   require_file "${post_state}" || preflight_failed=1
   require_file "${hdv_state}" || preflight_failed=1
   out_dir="results/${tag}/baselines_torchrl_corrected_${TRAIN_EPISODES}ep_${STAMP}/${algorithm}"
-  if [[ -e "${out_dir}" && "${ALLOW_EXISTING_OUTPUT:-0}" != "1" ]]; then
+  if ! resume_episode="$(resume_episode_for "${city}" "${algorithm}")"; then
+    preflight_failed=1
+    resume_episode=0
+  fi
+  if [[ -e "${out_dir}" && "${ALLOW_EXISTING_OUTPUT}" != "1" ]]; then
     echo "Output already exists: ${out_dir}" >&2
+    preflight_failed=1
+  fi
+  if (( resume_episode > 0 )); then
+    if [[ "${ALLOW_EXISTING_OUTPUT}" != "1" ]]; then
+      echo "Resume requested for ${city}/${algorithm}, but ALLOW_EXISTING_OUTPUT is not 1." >&2
+      preflight_failed=1
+    fi
+    resume_checkpoint="$(resume_checkpoint_for "${out_dir}" "${resume_episode}")"
+    validate_resume_checkpoint "${resume_checkpoint}" "${resume_episode}" "${algorithm}" \
+      || preflight_failed=1
+  elif [[ -e "${out_dir}" && "${ALLOW_EXISTING_OUTPUT}" == "1" ]]; then
+    echo "Existing output for ${city}/${algorithm} requires RESUME_EPISODE_${city^^}_${algorithm^^}." >&2
     preflight_failed=1
   fi
 done
@@ -458,7 +580,15 @@ run_one() {
   local sumo_extra="$9"
   local gpu="${10}"
   local out_dir="results/${tag}/baselines_torchrl_corrected_${TRAIN_EPISODES}ep_${STAMP}/${algorithm}"
+  local resume_episode resume_checkpoint resume_label
+  if ! resume_episode="$(resume_episode_for "${city}" "${algorithm}")"; then
+    exit 125
+  fi
   local log_file="${out_dir}/train.log"
+  if (( resume_episode > 0 )); then
+    printf -v resume_label '%05d' "${resume_episode}"
+    log_file="${out_dir}/train_resume_ep${resume_label}_${TRAIN_DEVICE}.log"
+  fi
   local mpl_dir="${MPLCONFIG_ROOT}/${city}_${algorithm}"
   local rc=0
   local child_pgid=""
@@ -519,7 +649,24 @@ run_one() {
     cmd+=(--max-steps-per-episode "${max_steps}")
   fi
   if [[ "${algorithm}" == "iql" ]]; then
-    cmd+=(--memory-size "${IQL_MEMORY_SIZE}")
+    cmd+=(
+      --memory-size "${IQL_MEMORY_SIZE}"
+      --agent-frames-per-batch "${IQL_AGENT_FRAMES_PER_BATCH}"
+      --num-epochs 1
+      --minibatch-size "${IQL_MINIBATCH_SIZE}"
+      --fresh-transition-epochs "${IQL_FRESH_TRANSITION_EPOCHS}"
+      --replay-sample-ratio "${IQL_REPLAY_SAMPLE_RATIO}"
+      --train-sim-buffer-after-last-depart "${IQL_SIM_BUFFER_AFTER_LAST_DEPART}"
+      --eps-init 0.99
+      --eps-end 0.05
+      --exploration-fraction 0.4
+      --epsilon-scope first_decision_per_vehicle
+      --target-update-eps 0.995
+    )
+  fi
+  if (( resume_episode > 0 )); then
+    resume_checkpoint="$(resume_checkpoint_for "${out_dir}" "${resume_episode}")"
+    cmd+=(--resume-checkpoint "${resume_checkpoint}" --resume-start-episode "${resume_episode}")
   fi
   if [[ -n "${sumo_extra}" ]]; then
     cmd+=(--sumo-extra-args "${sumo_extra}")
@@ -591,11 +738,23 @@ if ! {
   echo "num_epochs=${NUM_EPOCHS}"
   echo "minibatch_size=${MINIBATCH_SIZE}"
   echo "iql_memory_size=${IQL_MEMORY_SIZE}"
+  echo "iql_agent_frames_per_batch=${IQL_AGENT_FRAMES_PER_BATCH}"
+  echo "iql_minibatch_size=${IQL_MINIBATCH_SIZE}"
+  echo "iql_fresh_transition_epochs=${IQL_FRESH_TRANSITION_EPOCHS}"
+  echo "iql_replay_sample_ratio=${IQL_REPLAY_SAMPLE_RATIO}"
+  echo "iql_sim_buffer_after_last_depart=${IQL_SIM_BUFFER_AFTER_LAST_DEPART}"
+  echo "iql_epsilon_scope=first_decision_per_vehicle"
+  echo "allow_existing_output=${ALLOW_EXISTING_OUTPUT}"
+  echo "launch_stagger_seconds=${LAUNCH_STAGGER_SECONDS}"
   echo "seed=${SEED}"
   echo "sumo_time_to_teleport=-1"
   echo "fontenay_sumo_extra_args=${FONT_BLOCKER60_SUMO_EXTRA}"
   echo "ppo_gradient_coverage=all_actual_samples_once_per_epoch"
-  echo "iql_update_semantics=persistent_transition_replay_without_replacement"
+  echo "iql_update_semantics=persistent_transition_replay_without_replacement,fresh_full_coverage,smdp_arrival_tail,per_optimizer_target_update"
+  for task in "${TASKS[@]}"; do
+    IFS='|' read -r city algorithm _entrypoint _tag _settings _post_state _hdv_state _max_steps _sumo_extra <<< "${task}"
+    echo "resume_episode_${city}_${algorithm}=$(resume_episode_for "${city}" "${algorithm}")"
+  done
 } > "${MANIFEST}"; then
   echo "Failed to initialize manifest: ${MANIFEST}" >&2
   exit 2
@@ -618,11 +777,12 @@ if [[ "${DRY_RUN}" == "1" ]]; then
     IFS='|' read -r city algorithm entrypoint tag settings post_state hdv_state max_steps sumo_extra <<< "${TASKS[$idx]}"
     gpu="${GPUS[$((idx % ${#GPUS[@]}))]}"
     memory_size="-"
+    resume_episode="$(resume_episode_for "${city}" "${algorithm}")"
     if [[ "${algorithm}" == "iql" ]]; then
       memory_size="${IQL_MEMORY_SIZE}"
     fi
-    printf "%s\t%s\tDEVICE=%s\tSLOT=%s\tTELEPORT=-1\tMEMORY_SIZE=%s\tSUMO_EXTRA_ARGS=%q\tresults/%s/baselines_torchrl_corrected_%sep_%s/%s\n" \
-      "${city}" "${algorithm}" "${TRAIN_DEVICE}" "${gpu}" "${memory_size}" "${sumo_extra}" "${tag}" \
+    printf "%s\t%s\tDEVICE=%s\tSLOT=%s\tTELEPORT=-1\tMEMORY_SIZE=%s\tRESUME_EPISODE=%s\tSUMO_EXTRA_ARGS=%q\tresults/%s/baselines_torchrl_corrected_%sep_%s/%s\n" \
+      "${city}" "${algorithm}" "${TRAIN_DEVICE}" "${gpu}" "${memory_size}" "${resume_episode}" "${sumo_extra}" "${tag}" \
       "${TRAIN_EPISODES}" "${STAMP}" "${algorithm}"
   done
   exit 0
@@ -728,6 +888,9 @@ for idx in "${!TASKS[@]}"; do
   PARENT_REGISTERING=0
   if [[ -n "${PARENT_PENDING_SIGNAL_NAME}" ]]; then
     parent_signal "${PARENT_PENDING_SIGNAL_NAME}" "${PARENT_PENDING_SIGNAL_RC}"
+  fi
+  if (( LAUNCH_STAGGER_SECONDS > 0 && idx + 1 < ${#TASKS[@]} )); then
+    sleep "${LAUNCH_STAGGER_SECONDS}"
   fi
 done
 

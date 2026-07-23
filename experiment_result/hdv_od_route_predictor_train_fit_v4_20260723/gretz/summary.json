@@ -1,0 +1,837 @@
+{
+  "artifacts": {
+    "per_episode_metrics": "/home/wangwenrui/shk/UrbanDreamer/experiment_result/hdv_od_route_predictor_train_fit_v4_20260723/gretz/per_episode_metrics.csv",
+    "persistence_anchored_od_route_checkpoint": "/home/wangwenrui/shk/UrbanDreamer/experiment_result/hdv_od_route_predictor_train_fit_v4_20260723/gretz/persistence_anchored_od_route_predictor.pt",
+    "residual_edge_checkpoint": ""
+  },
+  "candidates": {
+    "configured_gawron_od_route": {
+      "active_od_route_ce": 0.06730711215015174,
+      "active_od_route_top1": 0.9973899564488503,
+      "active_od_route_tv": 0.002720517691535036,
+      "edge_ce_mean": 6.720480675856283,
+      "edge_kl_mean": 0.001090176569944165,
+      "edge_tv_delta_vs_persistence_ci95": [
+        -0.000668467496733705,
+        4.765308307014812e-05
+      ],
+      "edge_tv_delta_vs_persistence_mean": -0.00018778368313739568,
+      "edge_tv_mean": 0.003983468906605937,
+      "observed_response_tv_mean": 0.00417125258974333,
+      "pairs": 150,
+      "persistence_active_od_route_tv": 0.00033792291684253407,
+      "persistence_edge_tv_mean": 0.004171252589743332,
+      "predicted_response_tv_mean": 0.0004888675080928108,
+      "response_direction_cosine_mean": 0.06025287187234464,
+      "response_magnitude_abs_error_mean": 0.0037677180690422235,
+      "route_tie_fraction_vs_persistence": 0.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0020971581570961313,
+        0.0026208589301945765
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.002382594774692501,
+      "route_win_fraction_vs_persistence": 0.013333333333333334,
+      "tie_fraction_vs_persistence": 0.02,
+      "training_active_od_route_tv": 0.002678846995860998,
+      "training_edge_tv": 0.003895201375031821,
+      "validation_acceptance": {
+        "accepted": false,
+        "allowed_edge_delta": 6.216203260114758e-05,
+        "edge_delta": 2.14058515131438e-05,
+        "required_route_gain": 5e-05,
+        "required_route_win_fraction": 0.52,
+        "route_gain": -0.0024909165718027043,
+        "route_win_fraction": 0.0
+      },
+      "validation_active_od_route_tv": 0.0024909165718027043,
+      "validation_edge_tv": 0.0031295074815705227,
+      "win_fraction_vs_persistence": 0.26
+    },
+    "deployed_legacy_absolute_mlp": {
+      "edge_ce_mean": 6.7248549242739895,
+      "edge_kl_mean": 0.00546442498764917,
+      "edge_tv_delta_vs_persistence_ci95": [
+        0.002818092918367422,
+        0.010001676367289006
+      ],
+      "edge_tv_delta_vs_persistence_mean": 0.006333966067727929,
+      "edge_tv_mean": 0.010505218657471262,
+      "observed_response_tv_mean": 0.00417125258974333,
+      "pairs": 150,
+      "persistence_edge_tv_mean": 0.004171252589743332,
+      "predicted_response_tv_mean": 0.01040364817295263,
+      "response_direction_cosine_mean": 0.3725172229823973,
+      "response_magnitude_abs_error_mean": 0.007159501603099267,
+      "tie_fraction_vs_persistence": 0.0,
+      "validation_edge_tv": 0.0019608050059915635,
+      "win_fraction_vs_persistence": 0.23333333333333334
+    },
+    "gawron_od_route": {
+      "active_od_route_ce": 0.06730711215015174,
+      "active_od_route_top1": 0.9973899564488503,
+      "active_od_route_tv": 0.002720517691535036,
+      "edge_ce_mean": 6.720480675856283,
+      "edge_kl_mean": 0.001090176569944165,
+      "edge_tv_delta_vs_persistence_ci95": [
+        -0.0006217336660475418,
+        4.854982091592908e-05
+      ],
+      "edge_tv_delta_vs_persistence_mean": -0.00018778368313739568,
+      "edge_tv_mean": 0.003983468906605937,
+      "observed_response_tv_mean": 0.00417125258974333,
+      "pairs": 150,
+      "persistence_active_od_route_tv": 0.00033792291684253407,
+      "persistence_edge_tv_mean": 0.004171252589743332,
+      "predicted_response_tv_mean": 0.0004888675080928108,
+      "response_direction_cosine_mean": 0.06025287187234464,
+      "response_magnitude_abs_error_mean": 0.0037677180690422235,
+      "route_tie_fraction_vs_persistence": 0.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.002086568575932591,
+        0.0026201667722214076
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.002382594774692501,
+      "route_win_fraction_vs_persistence": 0.013333333333333334,
+      "tie_fraction_vs_persistence": 0.02,
+      "training_active_od_route_tv": 0.002678846995860998,
+      "training_edge_tv": 0.003895201375031821,
+      "validation_acceptance": {
+        "accepted": false,
+        "allowed_edge_delta": 6.216203260114758e-05,
+        "edge_delta": 2.14058515131438e-05,
+        "required_route_gain": 5e-05,
+        "required_route_win_fraction": 0.52,
+        "route_gain": -0.0024909165718027043,
+        "route_win_fraction": 0.0
+      },
+      "validation_active_od_route_tv": 0.0024909165718027043,
+      "validation_edge_tv": 0.0031295074815705227,
+      "win_fraction_vs_persistence": 0.26
+    },
+    "gawron_residual_od_route": {
+      "active_od_route_ce": 0.01762213632865694,
+      "active_od_route_top1": 0.9991838219851763,
+      "active_od_route_tv": 0.0008935937598524091,
+      "edge_ce_mean": 6.720497508094078,
+      "edge_kl_mean": 0.0011070088077387889,
+      "edge_tv_delta_vs_persistence_ci95": [
+        -0.0006510343925822987,
+        3.834704983079334e-05
+      ],
+      "edge_tv_delta_vs_persistence_mean": -0.00019492466766896148,
+      "edge_tv_mean": 0.003976327922074372,
+      "observed_response_tv_mean": 0.00417125258974333,
+      "pairs": 150,
+      "persistence_active_od_route_tv": 0.00033792291684253407,
+      "persistence_edge_tv_mean": 0.004171252589743332,
+      "predicted_response_tv_mean": 0.0004950017174276645,
+      "response_direction_cosine_mean": 0.04249952591501169,
+      "response_magnitude_abs_error_mean": 0.003751478476444471,
+      "route_tie_fraction_vs_persistence": 0.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.00018857549538021327,
+        0.0007921137404837147
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.000555670843009875,
+      "route_win_fraction_vs_persistence": 0.04666666666666667,
+      "tie_fraction_vs_persistence": 0.013333333333333334,
+      "training_active_od_route_tv": 0.0012173148799143956,
+      "training_edge_tv": 0.0039456721036707125,
+      "validation_acceptance": {
+        "accepted": false,
+        "allowed_edge_delta": 6.216203260114758e-05,
+        "edge_delta": 1.6050049532205686e-06,
+        "required_route_gain": 5e-05,
+        "required_route_win_fraction": 0.52,
+        "route_gain": -0.0006729550404255094,
+        "route_win_fraction": 0.0
+      },
+      "validation_active_od_route_tv": 0.0006729550404255094,
+      "validation_edge_tv": 0.0031097066350105995,
+      "win_fraction_vs_persistence": 0.2866666666666667
+    },
+    "persistence": {
+      "active_od_route_ce": 0.009337155250832226,
+      "active_od_route_top1": 0.9996620770831574,
+      "active_od_route_tv": 0.00033792291684253407,
+      "edge_ce_mean": 6.720999936494679,
+      "edge_kl_mean": 0.0016094372083401668,
+      "edge_tv_delta_vs_persistence_ci95": [
+        -3.492576598299971e-18,
+        9.658072952500865e-19
+      ],
+      "edge_tv_delta_vs_persistence_mean": -1.2143064331837649e-18,
+      "edge_tv_mean": 0.004171252589743332,
+      "observed_response_tv_mean": 0.00417125258974333,
+      "pairs": 150,
+      "persistence_active_od_route_tv": 0.00033792291684253407,
+      "persistence_edge_tv_mean": 0.004171252589743332,
+      "predicted_response_tv_mean": 4.7661527502462776e-18,
+      "response_direction_cosine_mean": NaN,
+      "response_magnitude_abs_error_mean": 0.004171252589743325,
+      "route_tie_fraction_vs_persistence": 1.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0,
+        0.0
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0,
+      "route_win_fraction_vs_persistence": 0.0,
+      "tie_fraction_vs_persistence": 1.0,
+      "training_active_od_route_tv": 0.00021551729715797794,
+      "training_edge_tv": 0.003935295606195989,
+      "validation_active_od_route_tv": 0.0,
+      "validation_edge_tv": 0.003108101630057379,
+      "win_fraction_vs_persistence": 0.03333333333333333
+    },
+    "persistence_anchored_residual_od_route": {
+      "active_od_route_ce": 0.007473946214048565,
+      "active_od_route_top1": 0.9995733300382403,
+      "active_od_route_tv": 0.0004223453021062888,
+      "edge_ce_mean": 6.721026772683481,
+      "edge_kl_mean": 0.0016362733971411695,
+      "edge_tv_delta_vs_persistence_ci95": [
+        -8.003886684142565e-05,
+        0.0002757884010759591
+      ],
+      "edge_tv_delta_vs_persistence_mean": 5.783226982900593e-05,
+      "edge_tv_mean": 0.004229084859572339,
+      "observed_response_tv_mean": 0.00417125258974333,
+      "pairs": 150,
+      "persistence_active_od_route_tv": 0.00033792291684253407,
+      "persistence_edge_tv_mean": 0.004171252589743332,
+      "predicted_response_tv_mean": 0.00041255957892378294,
+      "response_direction_cosine_mean": 0.07860346548132932,
+      "response_magnitude_abs_error_mean": 0.003913604773888415,
+      "route_tie_fraction_vs_persistence": 0.5333333333333333,
+      "route_tv_delta_vs_persistence_ci95": [
+        -3.2498209117110936e-05,
+        0.00028961846040269205
+      ],
+      "route_tv_delta_vs_persistence_mean": 8.442238526375476e-05,
+      "route_win_fraction_vs_persistence": 0.02,
+      "tie_fraction_vs_persistence": 0.72,
+      "training_active_od_route_tv": 0.0001162416032356853,
+      "training_edge_tv": 0.0038338492213749213,
+      "validation_acceptance": {
+        "accepted": false,
+        "allowed_edge_delta": 6.216203260114758e-05,
+        "edge_delta": 0.0,
+        "required_route_gain": 5e-05,
+        "required_route_win_fraction": 0.52,
+        "route_gain": 0.0,
+        "route_win_fraction": 0.0
+      },
+      "validation_active_od_route_tv": 0.0,
+      "validation_edge_tv": 0.003108101630057379,
+      "win_fraction_vs_persistence": 0.22
+    },
+    "selected_od_route_predictor": {
+      "active_od_route_ce": 0.007473946214048565,
+      "active_od_route_top1": 0.9995733300382403,
+      "active_od_route_tv": 0.0004223453021062888,
+      "edge_ce_mean": 6.721026772683481,
+      "edge_kl_mean": 0.0016362733971411695,
+      "edge_tv_delta_vs_persistence_ci95": [
+        -7.194755712627962e-05,
+        0.0002786572495018263
+      ],
+      "edge_tv_delta_vs_persistence_mean": 5.783226982900593e-05,
+      "edge_tv_mean": 0.004229084859572339,
+      "observed_response_tv_mean": 0.00417125258974333,
+      "pairs": 150,
+      "persistence_active_od_route_tv": 0.00033792291684253407,
+      "persistence_edge_tv_mean": 0.004171252589743332,
+      "predicted_response_tv_mean": 0.00041255957892378294,
+      "response_direction_cosine_mean": 0.07860346548132932,
+      "response_magnitude_abs_error_mean": 0.003913604773888415,
+      "route_tie_fraction_vs_persistence": 0.5333333333333333,
+      "route_tv_delta_vs_persistence_ci95": [
+        -3.267035021656066e-05,
+        0.00028937641169204844
+      ],
+      "route_tv_delta_vs_persistence_mean": 8.442238526375476e-05,
+      "route_win_fraction_vs_persistence": 0.02,
+      "tie_fraction_vs_persistence": 0.72,
+      "training_active_od_route_tv": 0.0001162416032356853,
+      "training_edge_tv": 0.0038338492213749213,
+      "validation_acceptance": {
+        "accepted": true,
+        "selected_source": "persistence_anchored_residual_od_route"
+      },
+      "validation_active_od_route_tv": 0.0,
+      "validation_edge_tv": 0.003108101630057379,
+      "win_fraction_vs_persistence": 0.22
+    }
+  },
+  "causal_protocol": "target episode e uses only episode e-1 information; real seen HDV hdv_action values form the OD-route target, seen AV policy_action and HDV hdv_action travel times drive the exact Gawron proposal, and a per-OD causal last-observed histogram is the persistence anchor. Predictor checkpoint selection uses the train split; validation and test remain separately reported and are not used for gradient fitting",
+  "deployment": {
+    "candidate": "selected_od_route_predictor",
+    "persistence_gate_validation_gate_passed": false,
+    "policy": "training route TV selects a non-zero learned route response for online fine-tuning; validation and test are diagnostic only",
+    "route_checkpoint_gate_scale": 4.0,
+    "route_checkpoint_response_scale": 4.0,
+    "route_residual_validation_gate_passed": false,
+    "selected_source": "persistence_anchored_residual_od_route",
+    "selection_split": "train"
+  },
+  "dimensions": {
+    "n_edges": 4485,
+    "n_od": 629,
+    "n_routes": 4
+  },
+  "edge_registry": "/home/wangwenrui/shk/UrbanDreamer/networks/gretz_armainvilliers/edge_registry.json",
+  "episodes": {
+    "available": 300,
+    "max": 450,
+    "min": 151,
+    "test_pairs": 150,
+    "test_start": 301,
+    "train_end": 250,
+    "train_pairs": 99,
+    "validation_end": 300,
+    "validation_pairs": 50
+  },
+  "episodes_dir": "/home/wangwenrui/shk/UrbanDreamer/results/gretz_armainvilliers_online_wm_mainline_reuse8k_cachemerge_b4_450ep_resume150_20260718/online_wm_mainline/collector_runtime/episodes",
+  "format": "hdv_response_offline_comparison_v2",
+  "gawron": {
+    "alpha_calibration": [
+      {
+        "alpha_zero": 0.01,
+        "validation_edge_tv": 0.0038168733911947772,
+        "validation_route_tv": 0.004127669950446444
+      },
+      {
+        "alpha_zero": 0.025,
+        "validation_edge_tv": 0.003184772553511612,
+        "validation_route_tv": 0.002653369580600511
+      },
+      {
+        "alpha_zero": 0.05,
+        "validation_edge_tv": 0.003109634669388315,
+        "validation_route_tv": 0.002461970036193283
+      },
+      {
+        "alpha_zero": 0.1,
+        "validation_edge_tv": 0.0031156844366297363,
+        "validation_route_tv": 0.002465839018276582
+      },
+      {
+        "alpha_zero": 0.2,
+        "validation_edge_tv": 0.0031295074815705227,
+        "validation_route_tv": 0.0024909165718027043
+      }
+    ],
+    "configured": {
+      "alpha_zero": 0.2,
+      "beta": -1.5,
+      "lr": 0.1,
+      "min_prob": 0.0,
+      "mode": "routerl",
+      "update_mode": "expected"
+    },
+    "selected": {
+      "alpha_zero": 0.2,
+      "beta": -1.5,
+      "lr": 0.1,
+      "min_prob": 0.0,
+      "mode": "routerl",
+      "update_mode": "expected"
+    }
+  },
+  "hyperparameters": {
+    "bootstrap_block_size": 10,
+    "bootstrap_samples": 2000,
+    "epochs": 400,
+    "gate_penalty": 0.0,
+    "gawron_alpha_grid": [
+      0.01,
+      0.025,
+      0.05,
+      0.1,
+      0.2
+    ],
+    "lr": 0.002,
+    "patience": 150,
+    "progress_denominator": 450,
+    "residual_penalty": 0.001,
+    "residual_scales": [
+      0.0,
+      0.25,
+      0.5,
+      1.0,
+      2.0,
+      4.0
+    ],
+    "route_epochs": 300,
+    "route_lr": 0.01,
+    "route_response_model": "residual",
+    "route_selection_split": "train",
+    "seed": 42,
+    "train_edge_baselines": false,
+    "validation_max_edge_degradation": 5e-05,
+    "validation_max_relative_edge_degradation": 0.02,
+    "validation_min_improvement": 5e-05,
+    "validation_min_relative_improvement": 0.02,
+    "validation_min_route_win_fraction": 0.52,
+    "weight_decay": 0.0
+  },
+  "initial_hdv_state": "/home/wangwenrui/shk/UrbanDreamer/results/gretz_armainvilliers_online_wm_mainline_reuse8k_cachemerge_b4_150ep_20260717/online_wm_mainline/hdv_learning_state_after_online_wm_train.json",
+  "legacy_checkpoint": "/home/wangwenrui/shk/UrbanDreamer/results/gretz_armainvilliers_online_wm_mainline_reuse8k_cachemerge_b4_450ep_resume150_20260718/online_wm_mainline/checkpoints/checkpoint_ep00300.pt",
+  "primary_metric": "population-weighted OD-route total-variation distance versus causal last-observed persistence",
+  "route_xml": "/home/wangwenrui/shk/UrbanDreamer/results/gretz_armainvilliers_online_wm_mainline_reuse8k_cachemerge_b4_450ep_resume150_20260718/online_wm_mainline/collector_runtime/route.rou.xml",
+  "run_dir": "/home/wangwenrui/shk/UrbanDreamer/results/gretz_armainvilliers_online_wm_mainline_reuse8k_cachemerge_b4_450ep_resume150_20260718/online_wm_mainline",
+  "secondary_metric": "edge total-variation distance after route-response delta projection",
+  "selected_by_route_selection": "persistence_anchored_residual_od_route",
+  "selected_by_validation": "persistence",
+  "target": "seen and successfully route-matched HDV choices from exact hdv_action, with predicted route response applied to the exact previous edge context",
+  "target_alignment": {
+    "strict_route_projection_edge_tv_max": 2.3400120457112925e-07,
+    "strict_route_projection_edge_tv_mean": 1.8515769027818366e-07,
+    "tolerance": 1e-05
+  },
+  "target_scope_limitation": "hdv_action is conditioned on successful collector registration and route matching; it is not the full scheduled-population initial_route_action target",
+  "target_source": "static_edge_demand",
+  "training": {
+    "gawron_residual_od_route": {
+      "best_epoch": 60,
+      "best_validation_edge_tv": 0.0031097081333940806,
+      "epochs_ran": 210,
+      "features": [
+        "previous_av_route",
+        "previous_hdv_route_probability",
+        "previous_hdv_route_cost_memory",
+        "previous_route_travel_time",
+        "previous_route_travel_time_observed",
+        "previous_hdv_od_weight",
+        "episode_progress"
+      ],
+      "history_tail": [
+        {
+          "epoch": 201.0,
+          "residual_scale": 4.0,
+          "train_loss": 0.001500768936239183,
+          "validation_edge_tv": 0.003118603064135085
+        },
+        {
+          "epoch": 202.0,
+          "residual_scale": 4.0,
+          "train_loss": 0.0015048477798700333,
+          "validation_edge_tv": 0.003118603629459526
+        },
+        {
+          "epoch": 203.0,
+          "residual_scale": 4.0,
+          "train_loss": 0.0015143724158406258,
+          "validation_edge_tv": 0.0031186244378760474
+        },
+        {
+          "epoch": 204.0,
+          "residual_scale": 4.0,
+          "train_loss": 0.0015132916159927845,
+          "validation_edge_tv": 0.0031186018271183447
+        },
+        {
+          "epoch": 205.0,
+          "residual_scale": 4.0,
+          "train_loss": 0.0015145184006541967,
+          "validation_edge_tv": 0.0031186371838307593
+        },
+        {
+          "epoch": 206.0,
+          "residual_scale": 4.0,
+          "train_loss": 0.0015053702518343925,
+          "validation_edge_tv": 0.0031186414413123076
+        },
+        {
+          "epoch": 207.0,
+          "residual_scale": 4.0,
+          "train_loss": 0.001501814927905798,
+          "validation_edge_tv": 0.0031186626234773044
+        },
+        {
+          "epoch": 208.0,
+          "residual_scale": 4.0,
+          "train_loss": 0.0014972424833104014,
+          "validation_edge_tv": 0.003118649863516478
+        },
+        {
+          "epoch": 209.0,
+          "residual_scale": 4.0,
+          "train_loss": 0.001496906508691609,
+          "validation_edge_tv": 0.0031186764204316863
+        },
+        {
+          "epoch": 210.0,
+          "residual_scale": 4.0,
+          "train_loss": 0.0014976731035858393,
+          "validation_edge_tv": 0.003118673728336518
+        }
+      ],
+      "parameterization": "gawron_anchored_od_route_residual_logit",
+      "selected_residual_scale": 4.0,
+      "validation_gawron_edge_tv": 0.0031295082290476333,
+      "validation_persistence_edge_tv": 0.003108101630057379
+    },
+    "offline_absolute_edge_mlp": null,
+    "persistence_anchored_residual_od_route": {
+      "anchor_floor": 0.001,
+      "best_epoch": 276,
+      "best_selection_edge_tv": 0.0038338492213749213,
+      "best_selection_route_tv": 0.0001162416032356853,
+      "best_validation_edge_tv": 0.003108101630057379,
+      "best_validation_route_tv": 0.0,
+      "epochs_ran": 300,
+      "features": [
+        "previous_causal_last_observed_hdv_route",
+        "previous_latent_hdv_route",
+        "gawron_next_route",
+        "gawron_route_delta",
+        "previous_route_cost_gap",
+        "previous_route_travel_time",
+        "previous_route_travel_time_observed",
+        "previous_hdv_route_sample_counts",
+        "previous_route_travel_time_sample_counts",
+        "empirical_gawron_disagreement",
+        "gawron_response_magnitude",
+        "empirical_route_entropy",
+        "previous_hdv_od_sample_count",
+        "previous_travel_time_sample_count",
+        "previous_hdv_od_weight",
+        "episode_progress"
+      ],
+      "history_tail": [
+        {
+          "epoch": 291.0,
+          "gate_scale": 2.0,
+          "mean_raw_response": -1.605651705539016,
+          "selection_edge_tv": 0.0038390122480223827,
+          "selection_route_tv": 0.00012351745883450922,
+          "train_edge_tv": 0.0038390122480223827,
+          "train_loss": 0.00013456257875077426,
+          "train_route_tv": 0.00012351745883450922
+        },
+        {
+          "epoch": 292.0,
+          "gate_scale": 2.0,
+          "mean_raw_response": -1.6072549070652897,
+          "selection_edge_tv": 0.0038381102308702865,
+          "selection_route_tv": 0.00012232658421875315,
+          "train_edge_tv": 0.0038381102308702865,
+          "train_loss": 0.00013449972902890295,
+          "train_route_tv": 0.00012232658421875315
+        },
+        {
+          "epoch": 293.0,
+          "gate_scale": 2.0,
+          "mean_raw_response": -1.6089169955940987,
+          "selection_edge_tv": 0.003837289187681385,
+          "selection_route_tv": 0.00012121931324744757,
+          "train_edge_tv": 0.003837289187681385,
+          "train_loss": 0.0001344229094684124,
+          "train_route_tv": 0.00012121931324744757
+        },
+        {
+          "epoch": 294.0,
+          "gate_scale": 2.0,
+          "mean_raw_response": -1.6106697783943125,
+          "selection_edge_tv": 0.0038366468410121054,
+          "selection_route_tv": 0.00012031683825369801,
+          "train_edge_tv": 0.0038366468410121054,
+          "train_loss": 0.00013432794366963208,
+          "train_route_tv": 0.00012031683825369801
+        },
+        {
+          "epoch": 295.0,
+          "gate_scale": 2.0,
+          "mean_raw_response": -1.612556996214602,
+          "selection_edge_tv": 0.0038362547434084805,
+          "selection_route_tv": 0.00011975220424324681,
+          "train_edge_tv": 0.0038362547434084805,
+          "train_loss": 0.0001342095638392493,
+          "train_route_tv": 0.00011975220424324681
+        },
+        {
+          "epoch": 296.0,
+          "gate_scale": 2.0,
+          "mean_raw_response": -1.614470752958305,
+          "selection_edge_tv": 0.003836248852811825,
+          "selection_route_tv": 0.00011966057115874734,
+          "train_edge_tv": 0.003836248852811825,
+          "train_loss": 0.00013406189100351185,
+          "train_route_tv": 0.00011966057115874734
+        },
+        {
+          "epoch": 297.0,
+          "gate_scale": 2.0,
+          "mean_raw_response": -1.6164792499669949,
+          "selection_edge_tv": 0.003836628329319017,
+          "selection_route_tv": 0.00012009574342176121,
+          "train_edge_tv": 0.003836628329319017,
+          "train_loss": 0.00013387923536356539,
+          "train_route_tv": 0.00012009574342176121
+        },
+        {
+          "epoch": 298.0,
+          "gate_scale": 2.0,
+          "mean_raw_response": -1.6186446091904751,
+          "selection_edge_tv": 0.003837341908789082,
+          "selection_route_tv": 0.00012100872825299884,
+          "train_edge_tv": 0.003837341908789082,
+          "train_loss": 0.00013364835467655212,
+          "train_route_tv": 0.00012100872825299884
+        },
+        {
+          "epoch": 299.0,
+          "gate_scale": 2.0,
+          "mean_raw_response": -1.6210833545764247,
+          "selection_edge_tv": 0.003838305267613396,
+          "selection_route_tv": 0.0001222717054820926,
+          "train_edge_tv": 0.003838305267613396,
+          "train_loss": 0.00013335472613107413,
+          "train_route_tv": 0.0001222717054820926
+        },
+        {
+          "epoch": 300.0,
+          "gate_scale": 2.0,
+          "mean_raw_response": -1.6235588059786885,
+          "selection_edge_tv": 0.0038394372609459153,
+          "selection_route_tv": 0.00012377144369720648,
+          "train_edge_tv": 0.0038394372609459153,
+          "train_loss": 0.00013298029080033302,
+          "train_route_tv": 0.00012377144369720648
+        }
+      ],
+      "parameterization": "empirical_persistence_anchored_route_residual",
+      "response_mode": "residual",
+      "selected_gate_scale": 4.0,
+      "selected_residual_scale": 4.0,
+      "selection_persistence_edge_tv": 0.003935295606195993,
+      "selection_persistence_route_tv": 0.00021551729715797794,
+      "selection_split": "train",
+      "train_edge_tv": 0.0038338492213749213,
+      "train_mean_raw_response": -1.5858605899896978,
+      "train_persistence_edge_tv": 0.003935295606195993,
+      "train_persistence_route_tv": 0.00021551729715797794,
+      "train_route_tv": 0.0001162416032356853,
+      "validation_mean_raw_response": -1.6021257084936669,
+      "validation_persistence_edge_tv": 0.003108101630057379,
+      "validation_persistence_route_tv": 0.0
+    },
+    "residual_edge_mlp": null
+  },
+  "training_edge_tv": {
+    "configured_gawron_od_route": 0.003895201375031821,
+    "gawron_od_route": 0.003895201375031821,
+    "gawron_residual_od_route": 0.0039456721036707125,
+    "persistence": 0.003935295606195989,
+    "persistence_anchored_residual_od_route": 0.0038338492213749213,
+    "selected_od_route_predictor": 0.0038338492213749213
+  },
+  "training_route_metrics": {
+    "configured_gawron_od_route": {
+      "active_od_route_ce": 0.06698791882306514,
+      "active_od_route_top1": 0.997525302424652,
+      "active_od_route_tv": 0.002678846995860998,
+      "persistence_active_od_route_tv": 0.00021551729715797794,
+      "route_tie_fraction_vs_persistence": 0.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0026020400080661484,
+        0.0026020400080661484
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0024633296987030206,
+      "route_win_fraction_vs_persistence": 0.030303030303030304
+    },
+    "gawron_od_route": {
+      "active_od_route_ce": 0.06698791882306514,
+      "active_od_route_top1": 0.997525302424652,
+      "active_od_route_tv": 0.002678846995860998,
+      "persistence_active_od_route_tv": 0.00021551729715797794,
+      "route_tie_fraction_vs_persistence": 0.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0023103310907916508,
+        0.0023103310907916508
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0024633296987030206,
+      "route_win_fraction_vs_persistence": 0.030303030303030304
+    },
+    "gawron_residual_od_route": {
+      "active_od_route_ce": 0.026961954187234554,
+      "active_od_route_top1": 0.9988709678737103,
+      "active_od_route_tv": 0.0012173148799143956,
+      "persistence_active_od_route_tv": 0.00021551729715797794,
+      "route_tie_fraction_vs_persistence": 0.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0009843084467312082,
+        0.0009843084467312082
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0010017975827564174,
+      "route_win_fraction_vs_persistence": 0.030303030303030304
+    },
+    "persistence": {
+      "active_od_route_ce": 0.005954259617371753,
+      "active_od_route_top1": 0.9997845091150233,
+      "active_od_route_tv": 0.00021551729715797794,
+      "persistence_active_od_route_tv": 0.00021551729715797794,
+      "route_tie_fraction_vs_persistence": 1.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0,
+        0.0
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0,
+      "route_win_fraction_vs_persistence": 0.0
+    },
+    "persistence_anchored_residual_od_route": {
+      "active_od_route_ce": 0.002988204494624167,
+      "active_od_route_top1": 0.9998921834877006,
+      "active_od_route_tv": 0.0001162416032356853,
+      "persistence_active_od_route_tv": 0.00021551729715797794,
+      "route_tie_fraction_vs_persistence": 0.9292929292929293,
+      "route_tv_delta_vs_persistence_ci95": [
+        -0.00014871718089307367,
+        -0.00014871718089307367
+      ],
+      "route_tv_delta_vs_persistence_mean": -9.927569392229267e-05,
+      "route_win_fraction_vs_persistence": 0.06060606060606061
+    },
+    "selected_od_route_predictor": {
+      "active_od_route_ce": 0.002988204494624167,
+      "active_od_route_top1": 0.9998921834877006,
+      "active_od_route_tv": 0.0001162416032356853,
+      "persistence_active_od_route_tv": 0.00021551729715797794,
+      "route_tie_fraction_vs_persistence": 0.9292929292929293,
+      "route_tv_delta_vs_persistence_ci95": [
+        -0.00014871718089307367,
+        -0.00014871718089307367
+      ],
+      "route_tv_delta_vs_persistence_mean": -9.927569392229267e-05,
+      "route_win_fraction_vs_persistence": 0.06060606060606061
+    }
+  },
+  "validation_acceptance": {
+    "configured_gawron_od_route": {
+      "accepted": false,
+      "allowed_edge_delta": 6.216203260114758e-05,
+      "edge_delta": 2.14058515131438e-05,
+      "required_route_gain": 5e-05,
+      "required_route_win_fraction": 0.52,
+      "route_gain": -0.0024909165718027043,
+      "route_win_fraction": 0.0
+    },
+    "gawron_od_route": {
+      "accepted": false,
+      "allowed_edge_delta": 6.216203260114758e-05,
+      "edge_delta": 2.14058515131438e-05,
+      "required_route_gain": 5e-05,
+      "required_route_win_fraction": 0.52,
+      "route_gain": -0.0024909165718027043,
+      "route_win_fraction": 0.0
+    },
+    "gawron_residual_od_route": {
+      "accepted": false,
+      "allowed_edge_delta": 6.216203260114758e-05,
+      "edge_delta": 1.6050049532205686e-06,
+      "required_route_gain": 5e-05,
+      "required_route_win_fraction": 0.52,
+      "route_gain": -0.0006729550404255094,
+      "route_win_fraction": 0.0
+    },
+    "persistence_anchored_residual_od_route": {
+      "accepted": false,
+      "allowed_edge_delta": 6.216203260114758e-05,
+      "edge_delta": 0.0,
+      "required_route_gain": 5e-05,
+      "required_route_win_fraction": 0.52,
+      "route_gain": 0.0,
+      "route_win_fraction": 0.0
+    }
+  },
+  "validation_edge_tv": {
+    "configured_gawron_od_route": 0.0031295074815705227,
+    "deployed_legacy_absolute_mlp": 0.0019608050059915635,
+    "gawron_od_route": 0.0031295074815705227,
+    "gawron_residual_od_route": 0.0031097066350105995,
+    "persistence": 0.003108101630057379,
+    "persistence_anchored_residual_od_route": 0.003108101630057379,
+    "selected_od_route_predictor": 0.003108101630057379
+  },
+  "validation_route_metrics": {
+    "configured_gawron_od_route": {
+      "active_od_route_ce": 0.06630949836878833,
+      "active_od_route_top1": 0.9976042364342621,
+      "active_od_route_tv": 0.0024909165718027043,
+      "persistence_active_od_route_tv": 0.0,
+      "route_tie_fraction_vs_persistence": 0.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.002563759938734294,
+        0.002563759938734294
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0024909165718027043,
+      "route_win_fraction_vs_persistence": 0.0
+    },
+    "gawron_od_route": {
+      "active_od_route_ce": 0.06630949836878833,
+      "active_od_route_top1": 0.9976042364342621,
+      "active_od_route_tv": 0.0024909165718027043,
+      "persistence_active_od_route_tv": 0.0,
+      "route_tie_fraction_vs_persistence": 0.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0025042070448910857,
+        0.0025042070448910857
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0024909165718027043,
+      "route_win_fraction_vs_persistence": 0.0
+    },
+    "gawron_residual_od_route": {
+      "active_od_route_ce": 0.0176641357558882,
+      "active_od_route_top1": 0.9993619790491199,
+      "active_od_route_tv": 0.0006729550404255094,
+      "persistence_active_od_route_tv": 0.0,
+      "route_tie_fraction_vs_persistence": 0.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0007254940907119394,
+        0.0007254940907119394
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0006729550404255094,
+      "route_win_fraction_vs_persistence": 0.0
+    },
+    "persistence": {
+      "active_od_route_ce": 0.0,
+      "active_od_route_top1": 1.0,
+      "active_od_route_tv": 0.0,
+      "persistence_active_od_route_tv": 0.0,
+      "route_tie_fraction_vs_persistence": 1.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0,
+        0.0
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0,
+      "route_win_fraction_vs_persistence": 0.0
+    },
+    "persistence_anchored_residual_od_route": {
+      "active_od_route_ce": 0.0,
+      "active_od_route_top1": 1.0,
+      "active_od_route_tv": 0.0,
+      "persistence_active_od_route_tv": 0.0,
+      "route_tie_fraction_vs_persistence": 1.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0,
+        0.0
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0,
+      "route_win_fraction_vs_persistence": 0.0
+    },
+    "selected_od_route_predictor": {
+      "active_od_route_ce": 0.0,
+      "active_od_route_top1": 1.0,
+      "active_od_route_tv": 0.0,
+      "persistence_active_od_route_tv": 0.0,
+      "route_tie_fraction_vs_persistence": 1.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0,
+        0.0
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0,
+      "route_win_fraction_vs_persistence": 0.0
+    }
+  }
+}

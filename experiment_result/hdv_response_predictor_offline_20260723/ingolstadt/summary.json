@@ -1,0 +1,387 @@
+{
+  "artifacts": {
+    "per_episode_metrics": "/home/wangwenrui/shk/UrbanDreamer/experiment_result/hdv_response_predictor_offline_20260723/ingolstadt/per_episode_metrics.csv",
+    "residual_edge_checkpoint": "/home/wangwenrui/shk/UrbanDreamer/experiment_result/hdv_response_predictor_offline_20260723/ingolstadt/residual_edge_predictor.pt",
+    "residual_od_route_checkpoint": "/home/wangwenrui/shk/UrbanDreamer/experiment_result/hdv_response_predictor_offline_20260723/ingolstadt/residual_od_route_predictor.pt"
+  },
+  "candidates": {
+    "deployed_legacy_absolute_mlp": {
+      "edge_ce_mean": 5.64668863260255,
+      "edge_kl_mean": 0.00017608658044167077,
+      "edge_tv_delta_vs_persistence_ci95": [
+        0.0014949148594689315,
+        0.002605017507073136
+      ],
+      "edge_tv_delta_vs_persistence_mean": 0.0020396763763466217,
+      "edge_tv_mean": 0.002222856102539269,
+      "observed_response_tv_mean": 0.00018317972619264687,
+      "pairs": 150,
+      "persistence_edge_tv_mean": 0.00018317972619264687,
+      "predicted_response_tv_mean": 0.0022037721894108027,
+      "response_direction_cosine_mean": 0.12458499262497116,
+      "response_magnitude_abs_error_mean": 0.002046234677455049,
+      "tie_fraction_vs_persistence": 0.0,
+      "validation_edge_tv": 0.00032606792301061724,
+      "win_fraction_vs_persistence": 0.0
+    },
+    "offline_absolute_edge_mlp": {
+      "edge_ce_mean": 5.647233201132872,
+      "edge_kl_mean": 0.0007206551107641109,
+      "edge_tv_delta_vs_persistence_ci95": [
+        0.005809928082486683,
+        0.007602762992588882
+      ],
+      "edge_tv_delta_vs_persistence_mean": 0.006711439690390503,
+      "edge_tv_mean": 0.00689461941658315,
+      "observed_response_tv_mean": 0.00018317972619264687,
+      "pairs": 150,
+      "persistence_edge_tv_mean": 0.00018317972619264687,
+      "predicted_response_tv_mean": 0.006880184455005569,
+      "response_direction_cosine_mean": 0.07915131012579221,
+      "response_magnitude_abs_error_mean": 0.006697004728812921,
+      "tie_fraction_vs_persistence": 0.0,
+      "validation_edge_tv": 0.002840788533535602,
+      "win_fraction_vs_persistence": 0.0
+    },
+    "persistence": {
+      "edge_ce_mean": 5.646521740541891,
+      "edge_kl_mean": 9.194519782583418e-06,
+      "edge_tv_delta_vs_persistence_ci95": [
+        0.0,
+        0.0
+      ],
+      "edge_tv_delta_vs_persistence_mean": 0.0,
+      "edge_tv_mean": 0.00018317972619264687,
+      "observed_response_tv_mean": 0.00018317972619264687,
+      "pairs": 150,
+      "persistence_edge_tv_mean": 0.00018317972619264687,
+      "predicted_response_tv_mean": 0.0,
+      "response_direction_cosine_mean": NaN,
+      "response_magnitude_abs_error_mean": 0.00018317972619264687,
+      "tie_fraction_vs_persistence": 1.0,
+      "validation_edge_tv": 5.53327123237905e-05,
+      "win_fraction_vs_persistence": 0.0
+    },
+    "residual_edge_mlp": {
+      "edge_ce_mean": 5.646521740540373,
+      "edge_kl_mean": 9.194518266356274e-06,
+      "edge_tv_delta_vs_persistence_ci95": [
+        2.5675502139082934e-09,
+        5.565986323159096e-09
+      ],
+      "edge_tv_delta_vs_persistence_mean": 4.019334920344567e-09,
+      "edge_tv_mean": 0.00018318374552756724,
+      "observed_response_tv_mean": 0.00018317972619264687,
+      "pairs": 150,
+      "persistence_edge_tv_mean": 0.00018317972619264687,
+      "predicted_response_tv_mean": 5.692352700949242e-09,
+      "response_direction_cosine_mean": NaN,
+      "response_magnitude_abs_error_mean": 0.00018318215642492577,
+      "tie_fraction_vs_persistence": 1.0,
+      "validation_edge_tv": 5.53327123237905e-05,
+      "win_fraction_vs_persistence": 0.12
+    },
+    "residual_od_route_mlp": {
+      "active_od_route_ce": 0.0012335478538379847,
+      "active_od_route_top1": 0.9999785292538919,
+      "active_od_route_tv": 7.514761137949544e-05,
+      "edge_ce_mean": 5.646521740541891,
+      "edge_kl_mean": 9.194519782583418e-06,
+      "edge_tv_delta_vs_persistence_ci95": [
+        0.0,
+        0.0
+      ],
+      "edge_tv_delta_vs_persistence_mean": 0.0,
+      "edge_tv_mean": 0.00018317972619264687,
+      "observed_response_tv_mean": 0.00018317972619264687,
+      "pairs": 150,
+      "persistence_edge_tv_mean": 0.00018317972619264687,
+      "predicted_response_tv_mean": 0.0,
+      "response_direction_cosine_mean": NaN,
+      "response_magnitude_abs_error_mean": 0.00018317972619264687,
+      "tie_fraction_vs_persistence": 1.0,
+      "validation_edge_tv": 5.53327123237905e-05,
+      "win_fraction_vs_persistence": 0.0
+    }
+  },
+  "causal_protocol": "target episode e uses only episode e-1 features; chronological validation selects epochs and residual scale; final test is untouched until scoring",
+  "deployment": {
+    "candidate": "residual_edge_mlp",
+    "offline_gate_passed": false,
+    "policy": "load learned residual only when the paired test CI is below zero; otherwise checkpoint residual_scale remains validation-selected and the online system should retain prev_hdv fallback"
+  },
+  "dimensions": {
+    "n_edges": 853,
+    "n_od": 306,
+    "n_routes": 4
+  },
+  "edge_registry": "/home/wangwenrui/shk/UrbanDreamer/networks/ingolstadt_custom/edge_registry.json",
+  "episodes": {
+    "available": 300,
+    "max": 450,
+    "min": 151,
+    "test_pairs": 150,
+    "test_start": 301,
+    "train_end": 270,
+    "train_pairs": 119,
+    "validation_end": 300,
+    "validation_pairs": 30
+  },
+  "episodes_dir": "/home/wangwenrui/shk/UrbanDreamer/results/ingolstadt_custom_online_wm_mainline_reuse8k_cachemerge_b4_450ep_resume150_20260718/online_wm_mainline/collector_runtime/episodes",
+  "format": "hdv_response_offline_comparison_v1",
+  "hyperparameters": {
+    "bootstrap_block_size": 10,
+    "bootstrap_samples": 5000,
+    "epochs": 200,
+    "lr": 0.002,
+    "patience": 40,
+    "progress_denominator": 450,
+    "residual_penalty": 0.001,
+    "residual_scales": [
+      0.0,
+      0.0625,
+      0.125,
+      0.25,
+      0.5,
+      1.0
+    ],
+    "route_epochs": 200,
+    "route_lr": 0.001,
+    "seed": 42,
+    "weight_decay": 0.001
+  },
+  "legacy_checkpoint": "/home/wangwenrui/shk/UrbanDreamer/results/ingolstadt_custom_online_wm_mainline_reuse8k_cachemerge_b4_450ep_resume150_20260718/online_wm_mainline/checkpoints/checkpoint_ep00300.pt",
+  "primary_metric": "edge total-variation distance versus persistence",
+  "route_xml": "/home/wangwenrui/shk/UrbanDreamer/results/ingolstadt_custom_online_wm_mainline_reuse8k_cachemerge_b4_450ep_resume150_20260718/online_wm_mainline/collector_runtime/route.rou.xml",
+  "run_dir": "/home/wangwenrui/shk/UrbanDreamer/results/ingolstadt_custom_online_wm_mainline_reuse8k_cachemerge_b4_450ep_resume150_20260718/online_wm_mainline",
+  "selected_by_validation": "persistence",
+  "target": "episode-start static HDV route choices projected to edge demand",
+  "target_source": "static_edge_demand",
+  "training": {
+    "offline_absolute_edge_mlp": {
+      "best_epoch": 200,
+      "best_validation_edge_tv": 0.002840788533535602,
+      "epochs_ran": 200,
+      "history_tail": [
+        {
+          "epoch": 191.0,
+          "residual_scale": 1.0,
+          "train_loss": 5.646691799163818,
+          "validation_edge_tv": 0.0029230810212612095
+        },
+        {
+          "epoch": 192.0,
+          "residual_scale": 1.0,
+          "train_loss": 5.646688938140869,
+          "validation_edge_tv": 0.00291520538236261
+        },
+        {
+          "epoch": 193.0,
+          "residual_scale": 1.0,
+          "train_loss": 5.646685600280762,
+          "validation_edge_tv": 0.0029063467872748705
+        },
+        {
+          "epoch": 194.0,
+          "residual_scale": 1.0,
+          "train_loss": 5.6466827392578125,
+          "validation_edge_tv": 0.0028950786850774155
+        },
+        {
+          "epoch": 195.0,
+          "residual_scale": 1.0,
+          "train_loss": 5.6466803550720215,
+          "validation_edge_tv": 0.002886847603556324
+        },
+        {
+          "epoch": 196.0,
+          "residual_scale": 1.0,
+          "train_loss": 5.6466779708862305,
+          "validation_edge_tv": 0.002878062201435901
+        },
+        {
+          "epoch": 197.0,
+          "residual_scale": 1.0,
+          "train_loss": 5.646675109863281,
+          "validation_edge_tv": 0.0028665819101462544
+        },
+        {
+          "epoch": 198.0,
+          "residual_scale": 1.0,
+          "train_loss": 5.646672248840332,
+          "validation_edge_tv": 0.0028581910438494245
+        },
+        {
+          "epoch": 199.0,
+          "residual_scale": 1.0,
+          "train_loss": 5.646669864654541,
+          "validation_edge_tv": 0.0028507879700739617
+        },
+        {
+          "epoch": 200.0,
+          "residual_scale": 1.0,
+          "train_loss": 5.64666748046875,
+          "validation_edge_tv": 0.002840788533535602
+        }
+      ],
+      "parameterization": "absolute_logits",
+      "selected_residual_scale": 1.0,
+      "validation_persistence_edge_tv": 5.53327123237905e-05
+    },
+    "residual_edge_mlp": {
+      "best_epoch": 0,
+      "best_validation_edge_tv": 5.53327123237905e-05,
+      "epochs_ran": 40,
+      "history_tail": [
+        {
+          "epoch": 31.0,
+          "residual_scale": 0.0,
+          "train_loss": 5.646169662475586,
+          "validation_edge_tv": 5.53327123237905e-05
+        },
+        {
+          "epoch": 32.0,
+          "residual_scale": 0.0,
+          "train_loss": 5.646154403686523,
+          "validation_edge_tv": 5.53327123237905e-05
+        },
+        {
+          "epoch": 33.0,
+          "residual_scale": 0.0,
+          "train_loss": 5.646149635314941,
+          "validation_edge_tv": 5.53327123237905e-05
+        },
+        {
+          "epoch": 34.0,
+          "residual_scale": 0.0,
+          "train_loss": 5.646152973175049,
+          "validation_edge_tv": 5.53327123237905e-05
+        },
+        {
+          "epoch": 35.0,
+          "residual_scale": 0.0,
+          "train_loss": 5.646156311035156,
+          "validation_edge_tv": 5.53327123237905e-05
+        },
+        {
+          "epoch": 36.0,
+          "residual_scale": 0.0,
+          "train_loss": 5.646153450012207,
+          "validation_edge_tv": 5.53327123237905e-05
+        },
+        {
+          "epoch": 37.0,
+          "residual_scale": 0.0,
+          "train_loss": 5.646149158477783,
+          "validation_edge_tv": 5.53327123237905e-05
+        },
+        {
+          "epoch": 38.0,
+          "residual_scale": 0.0,
+          "train_loss": 5.646145820617676,
+          "validation_edge_tv": 5.53327123237905e-05
+        },
+        {
+          "epoch": 39.0,
+          "residual_scale": 0.0,
+          "train_loss": 5.646142959594727,
+          "validation_edge_tv": 5.53327123237905e-05
+        },
+        {
+          "epoch": 40.0,
+          "residual_scale": 0.0,
+          "train_loss": 5.646142959594727,
+          "validation_edge_tv": 5.53327123237905e-05
+        }
+      ],
+      "parameterization": "residual_logit",
+      "selected_residual_scale": 0.0,
+      "validation_persistence_edge_tv": 5.53327123237905e-05
+    },
+    "residual_od_route_mlp": {
+      "best_epoch": 0,
+      "best_validation_edge_tv": 5.53327123237905e-05,
+      "epochs_ran": 40,
+      "features": [
+        "previous_av_route",
+        "previous_hdv_route",
+        "previous_route_travel_time",
+        "previous_route_travel_time_observed",
+        "previous_hdv_od_weight",
+        "episode_progress"
+      ],
+      "history_tail": [
+        {
+          "epoch": 31.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.0011053780326619744,
+          "validation_edge_tv": 5.533271355919029e-05
+        },
+        {
+          "epoch": 32.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.001105103874579072,
+          "validation_edge_tv": 5.533271355919029e-05
+        },
+        {
+          "epoch": 33.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.0011048445012420416,
+          "validation_edge_tv": 5.533271355919029e-05
+        },
+        {
+          "epoch": 34.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.0011045524151995778,
+          "validation_edge_tv": 5.533271355919029e-05
+        },
+        {
+          "epoch": 35.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.0011042780242860317,
+          "validation_edge_tv": 5.533271355919029e-05
+        },
+        {
+          "epoch": 36.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.0011039802338927984,
+          "validation_edge_tv": 5.533271355919029e-05
+        },
+        {
+          "epoch": 37.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.0011036669602617621,
+          "validation_edge_tv": 5.533271355919029e-05
+        },
+        {
+          "epoch": 38.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.001103373127989471,
+          "validation_edge_tv": 5.533271355919029e-05
+        },
+        {
+          "epoch": 39.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.001103063696064055,
+          "validation_edge_tv": 5.533271355919029e-05
+        },
+        {
+          "epoch": 40.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.0011027519358322024,
+          "validation_edge_tv": 5.533271355919029e-05
+        }
+      ],
+      "parameterization": "shared_od_route_residual_logit",
+      "selected_residual_scale": 0.0,
+      "validation_persistence_edge_tv": 5.53327123237905e-05
+    }
+  },
+  "validation_edge_tv": {
+    "deployed_legacy_absolute_mlp": 0.00032606792301061724,
+    "offline_absolute_edge_mlp": 0.002840788533535602,
+    "persistence": 5.53327123237905e-05,
+    "residual_edge_mlp": 5.53327123237905e-05,
+    "residual_od_route_mlp": 5.53327123237905e-05
+  }
+}

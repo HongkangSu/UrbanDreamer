@@ -125,6 +125,12 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--wm-lr", type=float, default=1e-5)
     parser.add_argument("--wm-grad-clip", type=float, default=10.0)
     parser.add_argument("--wm-transition-decoded-supervision-weight", type=float, default=1.0)
+    parser.add_argument(
+        "--wm-t-all-supervision-weight",
+        type=float,
+        default=0.2,
+        help="Online supervision weight for the completed-vehicle episode t_all head.",
+    )
     parser.add_argument("--wm-hdv-policy-weight", type=float, default=0.05)
     parser.add_argument(
         "--wm-hdv-target-source",
@@ -166,7 +172,10 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         dest="hdv_response_predictor_enabled",
         action="store_true",
         default=False,
-        help="Train the causal static-HDV-demand response predictor online.",
+        help=(
+            "Use a causal episode-level HDV response predictor. OD-route v3 "
+            "checkpoints can be fine-tuned with the separate online-update flag."
+        ),
     )
     hdv_response_group.add_argument(
         "--disable-hdv-response-predictor",
@@ -180,16 +189,65 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--hdv-response-predictor-depth", type=int, default=2)
     parser.add_argument("--hdv-response-predictor-update-epochs", type=int, default=64)
     parser.add_argument("--hdv-response-predictor-min-pairs", type=int, default=2)
+    hdv_online_group = parser.add_mutually_exclusive_group()
+    hdv_online_group.add_argument(
+        "--enable-hdv-response-online-update",
+        dest="hdv_response_predictor_online_update_enabled",
+        action="store_true",
+        default=False,
+        help=(
+            "Fine-tune a loaded OD-route v3 predictor after each target episode. "
+            "The update affects only subsequent episodes."
+        ),
+    )
+    hdv_online_group.add_argument(
+        "--disable-hdv-response-online-update",
+        dest="hdv_response_predictor_online_update_enabled",
+        action="store_false",
+    )
+    parser.add_argument(
+        "--hdv-response-predictor-online-lr",
+        type=float,
+        default=1e-4,
+    )
+    parser.add_argument(
+        "--hdv-response-predictor-online-update-epochs",
+        type=int,
+        default=2,
+    )
+    parser.add_argument(
+        "--hdv-response-predictor-online-buffer-episodes",
+        type=int,
+        default=16,
+    )
     parser.add_argument(
         "--hdv-response-predictor-ckpt",
         default="",
-        help="Optional pretrained causal HDV response predictor checkpoint from warmup data.",
+        help=(
+            "Optional pretrained causal HDV response checkpoint. The online-WM "
+            "mainline accepts validation-selected OD-route v3 checkpoints here."
+        ),
     )
     parser.add_argument(
         "--hdv-response-predictor-progress-denominator",
         type=int,
         default=0,
         help="Episode-progress denominator for the response predictor. 0 uses train_episodes or checkpoint metadata.",
+    )
+    parser.add_argument(
+        "--hdv-response-predictor-parameterization",
+        choices=["residual_logit", "absolute_logits"],
+        default="absolute_logits",
+        help=(
+            "Legacy edge predictor parameterization. The repaired HDV response "
+            "path is evaluated separately in OD-route space."
+        ),
+    )
+    parser.add_argument(
+        "--hdv-response-predictor-residual-scale",
+        type=float,
+        default=1.0,
+        help="Multiplier on the learned residual logits; offline validation may select 0 for persistence.",
     )
     parser.add_argument(
         "--hdv-response-predictor-fallback",
@@ -222,8 +280,17 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--global-advantage-weight",
         type=float,
+        default=0.0,
+        help=(
+            "Weight of the state-only global-value lambda advantage in every vehicle actor sample. "
+            "Default 0 keeps the term disabled until the t_all readout passes held-out calibration."
+        ),
+    )
+    parser.add_argument(
+        "--global-reward-scale",
+        type=float,
         default=1.0,
-        help="Weight of the existing global critic lambda-return advantage in every vehicle actor sample.",
+        help="Scale applied to the objective-aligned t_all potential difference.",
     )
     parser.add_argument("--lr", type=float, default=2e-4, help="Vehicle actor learning rate.")
     parser.add_argument("--critic-lr", type=float, default=3e-4, help="Vehicle critic learning rate.")
@@ -397,6 +464,7 @@ def build_config(args: argparse.Namespace) -> OnlineWmDreamerConfig:
         "wm_lr": float(args.wm_lr),
         "wm_grad_clip": float(args.wm_grad_clip),
         "wm_transition_decoded_supervision_weight": float(args.wm_transition_decoded_supervision_weight),
+        "wm_t_all_supervision_weight": float(args.wm_t_all_supervision_weight),
         "wm_hdv_policy_weight": float(args.wm_hdv_policy_weight),
         "wm_hdv_target_source": str(args.wm_hdv_target_source),
         "wm_hdv_policy_target_mode": str(args.wm_hdv_policy_target_mode),
@@ -415,8 +483,26 @@ def build_config(args: argparse.Namespace) -> OnlineWmDreamerConfig:
         "hdv_response_predictor_depth": int(args.hdv_response_predictor_depth),
         "hdv_response_predictor_update_epochs": int(args.hdv_response_predictor_update_epochs),
         "hdv_response_predictor_min_pairs": int(args.hdv_response_predictor_min_pairs),
+        "hdv_response_predictor_online_update_enabled": bool(
+            args.hdv_response_predictor_online_update_enabled
+        ),
+        "hdv_response_predictor_online_lr": float(
+            args.hdv_response_predictor_online_lr
+        ),
+        "hdv_response_predictor_online_update_epochs": int(
+            args.hdv_response_predictor_online_update_epochs
+        ),
+        "hdv_response_predictor_online_buffer_episodes": int(
+            args.hdv_response_predictor_online_buffer_episodes
+        ),
         "hdv_response_predictor_ckpt": str(args.hdv_response_predictor_ckpt),
         "hdv_response_predictor_progress_denominator": int(args.hdv_response_predictor_progress_denominator),
+        "hdv_response_predictor_parameterization": str(
+            args.hdv_response_predictor_parameterization
+        ),
+        "hdv_response_predictor_residual_scale": float(
+            args.hdv_response_predictor_residual_scale
+        ),
         "hdv_response_predictor_fallback": str(args.hdv_response_predictor_fallback),
         "imag_horizon": int(args.imag_horizon),
         "imagined_updates_per_episode": int(args.imagined_updates_per_episode),
@@ -426,6 +512,7 @@ def build_config(args: argparse.Namespace) -> OnlineWmDreamerConfig:
         "min_replay_episodes_before_actor": int(args.min_replay_episodes_before_actor),
         "ac_lambda": float(args.ac_lambda),
         "ac_global_advantage_weight": float(args.global_advantage_weight),
+        "global_reward_scale": float(args.global_reward_scale),
         "lr": float(args.lr),
         "critic_lr": float(args.critic_lr),
         "value_coef": float(args.value_coef),

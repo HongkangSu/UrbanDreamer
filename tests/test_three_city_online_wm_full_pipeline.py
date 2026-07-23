@@ -96,6 +96,9 @@ def _write_fake_city_inputs(root: Path, city: str) -> None:
         'edge_registry.json',
     ):
         (network / name).write_text('{}\n', encoding='utf-8')
+    predictor = root / spec.hdv_response_predictor_ckpt_rel
+    predictor.parent.mkdir(parents=True, exist_ok=True)
+    predictor.write_bytes(b'fake train-fit HDV OD-route predictor')
 
 
 def _write_fake_existing_warmup(root: Path, city: str) -> None:
@@ -155,6 +158,12 @@ def test_three_city_specs_use_network_local_post_mutation_bundles():
     )
     for spec in CITY_SPECS.values():
         assert not spec.post_bundle_rel.startswith('results/')
+        assert spec.hdv_response_predictor_ckpt_rel.startswith(
+            'experiment_result/hdv_od_route_predictor_train_fit_v4_20260723/'
+        )
+        assert spec.hdv_response_predictor_ckpt_rel.endswith(
+            '/persistence_anchored_od_route_predictor.pt'
+        )
     assert CITY_SPECS['fontenay_en_parisis'].sumo_extra_args == (
         '--collision.action warn --ignore-junction-blocker 60 '
         '--tripinfo-output.write-unfinished'
@@ -533,8 +542,15 @@ def test_prepare_city_inputs_rewrites_settings_and_post_state_for_new_root(tmp_p
         'agents_csv': str((paths.source_bundle / 'agents.csv').resolve()),
         'routes_csv': str((paths.source_bundle / 'routes.csv').resolve()),
         'route_rou_xml': str((paths.source_bundle / 'route.rou.xml').resolve()),
+        'hdv_response_predictor_ckpt': str(
+            (tmp_path / spec.hdv_response_predictor_ckpt_rel).resolve()
+        ),
     }
     provenance = json.loads(paths.provenance_json.read_text(encoding='utf-8'))
+    assert provenance['hdv_response_predictor_checkpoint'] == str(
+        (tmp_path / spec.hdv_response_predictor_ckpt_rel).resolve()
+    )
+    assert len(provenance['hdv_response_predictor_checkpoint_sha256']) == 64
     assert provenance['protocol']['warmup_epsilon'] == 0.4
     assert provenance['protocol']['eval_action'] == 'masked_policy_sample'
     assert provenance['protocol']['eval_hdv_variants']['original'] == {
@@ -592,7 +608,9 @@ def test_pipeline_commands_lock_current_online_wm_protocol(tmp_path):
     assert _value_after(online, '--train-episodes') == '150'
     assert _value_after(online, '--checkpoint-episodes') == '25,50,75,100,125,150'
     assert _value_after(online, '--sim-buffer-after-last-depart') == '2000'
-    assert _value_after(online, '--global-advantage-weight') == '1.0'
+    assert _value_after(online, '--global-advantage-weight') == '0.0'
+    assert _value_after(online, '--global-reward-scale') == '1.0'
+    assert _value_after(online, '--wm-t-all-supervision-weight') == '0.20'
     assert _value_after(online, '--imagined-update-passes-per-collect') == '16'
     assert _value_after(online, '--imagined-rollouts-per-update') == '8'
     assert _value_after(online, '--imagined-rollout-batch-size') == '4'
@@ -604,6 +622,19 @@ def test_pipeline_commands_lock_current_online_wm_protocol(tmp_path):
     assert _value_after(online, '--wm-time-attention-batch-chunk-size') == '32768'
     assert _value_after(online, '--imagined-hdv-context-source') == 'causal_response_predictor'
     assert '--enable-hdv-response-predictor' in online
+    assert _value_after(online, '--hdv-response-predictor-ckpt') == str(
+        tmp_path / spec.hdv_response_predictor_ckpt_rel
+    )
+    assert '--enable-hdv-response-online-update' in online
+    assert _value_after(online, '--hdv-response-predictor-online-lr') == '0.0001'
+    assert _value_after(
+        online,
+        '--hdv-response-predictor-online-update-epochs',
+    ) == '2'
+    assert _value_after(
+        online,
+        '--hdv-response-predictor-online-buffer-episodes',
+    ) == '16'
     assert '--keep-human-learning-after-mutation' in online
     assert '--skip-eval' in online
 

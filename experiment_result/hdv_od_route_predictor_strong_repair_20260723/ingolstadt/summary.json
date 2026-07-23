@@ -1,0 +1,709 @@
+{
+  "artifacts": {
+    "per_episode_metrics": "/home/wangwenrui/shk/UrbanDreamer/experiment_result/hdv_od_route_predictor_strong_repair_20260723/ingolstadt/per_episode_metrics.csv",
+    "persistence_anchored_od_route_checkpoint": "/home/wangwenrui/shk/UrbanDreamer/experiment_result/hdv_od_route_predictor_strong_repair_20260723/ingolstadt/persistence_anchored_od_route_predictor.pt",
+    "residual_edge_checkpoint": ""
+  },
+  "candidates": {
+    "configured_gawron_od_route": {
+      "active_od_route_ce": 0.044794299670480354,
+      "active_od_route_top1": 0.9983679808841098,
+      "active_od_route_tv": 0.001713604643612469,
+      "edge_ce_mean": 5.646520769498393,
+      "edge_kl_mean": 8.223476284724048e-06,
+      "edge_tv_delta_vs_persistence_ci95": [
+        -5.769835558705955e-05,
+        1.8931478228101585e-05
+      ],
+      "edge_tv_delta_vs_persistence_mean": -1.115572054638891e-05,
+      "edge_tv_mean": 0.00017202400564625793,
+      "observed_response_tv_mean": 0.00018317972619264687,
+      "pairs": 150,
+      "persistence_active_od_route_tv": 7.516492649732482e-05,
+      "persistence_edge_tv_mean": 0.00018317972619264687,
+      "predicted_response_tv_mean": 4.1520414298842244e-05,
+      "response_direction_cosine_mean": 0.15343021466587956,
+      "response_magnitude_abs_error_mean": 0.00016561560464917684,
+      "route_tie_fraction_vs_persistence": 0.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0015946287196174592,
+        0.001678498911452277
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0016384397171151444,
+      "route_win_fraction_vs_persistence": 0.0,
+      "tie_fraction_vs_persistence": 0.0,
+      "validation_acceptance": {
+        "accepted": false,
+        "allowed_edge_delta": 5e-05,
+        "edge_delta": 7.803002255405626e-06,
+        "required_route_gain": 5e-05,
+        "required_route_win_fraction": 0.52,
+        "route_gain": -0.0016835497749747924,
+        "route_win_fraction": 0.0
+      },
+      "validation_active_od_route_tv": 0.0016835497749747924,
+      "validation_edge_tv": 0.00016266691620459177,
+      "win_fraction_vs_persistence": 0.05333333333333334
+    },
+    "deployed_legacy_absolute_mlp": {
+      "edge_ce_mean": 5.646688632594655,
+      "edge_kl_mean": 0.0001760865725480265,
+      "edge_tv_delta_vs_persistence_ci95": [
+        0.0015063499707940531,
+        0.002614240696788888
+      ],
+      "edge_tv_delta_vs_persistence_mean": 0.0020396766705153336,
+      "edge_tv_mean": 0.0022228563967079803,
+      "observed_response_tv_mean": 0.00018317972619264687,
+      "pairs": 150,
+      "persistence_edge_tv_mean": 0.00018317972619264687,
+      "predicted_response_tv_mean": 0.0022037723486867953,
+      "response_direction_cosine_mean": 0.1245849716868355,
+      "response_magnitude_abs_error_mean": 0.0020462349528573374,
+      "tie_fraction_vs_persistence": 0.0,
+      "validation_edge_tv": 0.00037425323783951,
+      "win_fraction_vs_persistence": 0.0
+    },
+    "gawron_od_route": {
+      "active_od_route_ce": 0.044794299670480354,
+      "active_od_route_top1": 0.9983679808841098,
+      "active_od_route_tv": 0.001713604643612469,
+      "edge_ce_mean": 5.646520769498393,
+      "edge_kl_mean": 8.223476284724048e-06,
+      "edge_tv_delta_vs_persistence_ci95": [
+        -6.001967617700953e-05,
+        1.922951746926014e-05
+      ],
+      "edge_tv_delta_vs_persistence_mean": -1.115572054638891e-05,
+      "edge_tv_mean": 0.00017202400564625793,
+      "observed_response_tv_mean": 0.00018317972619264687,
+      "pairs": 150,
+      "persistence_active_od_route_tv": 7.516492649732482e-05,
+      "persistence_edge_tv_mean": 0.00018317972619264687,
+      "predicted_response_tv_mean": 4.1520414298842244e-05,
+      "response_direction_cosine_mean": 0.15343021466587956,
+      "response_magnitude_abs_error_mean": 0.00016561560464917684,
+      "route_tie_fraction_vs_persistence": 0.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0015956756000803248,
+        0.0016776527479000997
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0016384397171151444,
+      "route_win_fraction_vs_persistence": 0.0,
+      "tie_fraction_vs_persistence": 0.0,
+      "validation_acceptance": {
+        "accepted": false,
+        "allowed_edge_delta": 5e-05,
+        "edge_delta": 7.803002255405626e-06,
+        "required_route_gain": 5e-05,
+        "required_route_win_fraction": 0.52,
+        "route_gain": -0.0016835497749747924,
+        "route_win_fraction": 0.0
+      },
+      "validation_active_od_route_tv": 0.0016835497749747924,
+      "validation_edge_tv": 0.00016266691620459177,
+      "win_fraction_vs_persistence": 0.05333333333333334
+    },
+    "gawron_residual_od_route": {
+      "active_od_route_ce": 0.044773793406325264,
+      "active_od_route_top1": 0.9983894516302182,
+      "active_od_route_tv": 0.001711564360128226,
+      "edge_ce_mean": 5.646520724118694,
+      "edge_kl_mean": 8.178096585200004e-06,
+      "edge_tv_delta_vs_persistence_ci95": [
+        -5.7265162393379554e-05,
+        2.03580240125813e-05
+      ],
+      "edge_tv_delta_vs_persistence_mean": -1.0895395144827862e-05,
+      "edge_tv_mean": 0.00017228433104781902,
+      "observed_response_tv_mean": 0.00018317972619264687,
+      "pairs": 150,
+      "persistence_active_od_route_tv": 7.516492649732482e-05,
+      "persistence_edge_tv_mean": 0.00018317972619264687,
+      "predicted_response_tv_mean": 4.177145023755913e-05,
+      "response_direction_cosine_mean": 0.15255874008540912,
+      "response_magnitude_abs_error_mean": 0.00016534812420759322,
+      "route_tie_fraction_vs_persistence": 0.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0015911553737185543,
+        0.0016734361408351785
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.001636399433630901,
+      "route_win_fraction_vs_persistence": 0.0,
+      "tie_fraction_vs_persistence": 0.0,
+      "validation_acceptance": {
+        "accepted": false,
+        "allowed_edge_delta": 5e-05,
+        "edge_delta": 7.45008644440184e-06,
+        "required_route_gain": 5e-05,
+        "required_route_win_fraction": 0.52,
+        "route_gain": -0.0016802612726808139,
+        "route_win_fraction": 0.0
+      },
+      "validation_active_od_route_tv": 0.0016802612726808139,
+      "validation_edge_tv": 0.00016231400039358799,
+      "win_fraction_vs_persistence": 0.05333333333333334
+    },
+    "persistence": {
+      "active_od_route_ce": 0.0012340262882243529,
+      "active_od_route_top1": 0.9999785292538915,
+      "active_od_route_tv": 7.516492649732482e-05,
+      "edge_ce_mean": 5.646521740541891,
+      "edge_kl_mean": 9.194519782583418e-06,
+      "edge_tv_delta_vs_persistence_ci95": [
+        0.0,
+        0.0
+      ],
+      "edge_tv_delta_vs_persistence_mean": 0.0,
+      "edge_tv_mean": 0.00018317972619264687,
+      "observed_response_tv_mean": 0.00018317972619264687,
+      "pairs": 150,
+      "persistence_active_od_route_tv": 7.516492649732482e-05,
+      "persistence_edge_tv_mean": 0.00018317972619264687,
+      "predicted_response_tv_mean": 0.0,
+      "response_direction_cosine_mean": NaN,
+      "response_magnitude_abs_error_mean": 0.00018317972619264687,
+      "route_tie_fraction_vs_persistence": 1.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0,
+        0.0
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0,
+      "route_win_fraction_vs_persistence": 0.0,
+      "tie_fraction_vs_persistence": 1.0,
+      "validation_active_od_route_tv": 0.0,
+      "validation_edge_tv": 0.00015486391394918615,
+      "win_fraction_vs_persistence": 0.0
+    },
+    "persistence_anchored_gate_od_route": {
+      "active_od_route_ce": 0.0012340262882243529,
+      "active_od_route_top1": 0.9999785292538915,
+      "active_od_route_tv": 7.516492649732482e-05,
+      "edge_ce_mean": 5.646521740541891,
+      "edge_kl_mean": 9.194519782583418e-06,
+      "edge_tv_delta_vs_persistence_ci95": [
+        0.0,
+        0.0
+      ],
+      "edge_tv_delta_vs_persistence_mean": 0.0,
+      "edge_tv_mean": 0.00018317972619264687,
+      "observed_response_tv_mean": 0.00018317972619264687,
+      "pairs": 150,
+      "persistence_active_od_route_tv": 7.516492649732482e-05,
+      "persistence_edge_tv_mean": 0.00018317972619264687,
+      "predicted_response_tv_mean": 0.0,
+      "response_direction_cosine_mean": NaN,
+      "response_magnitude_abs_error_mean": 0.00018317972619264687,
+      "route_tie_fraction_vs_persistence": 1.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0,
+        0.0
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0,
+      "route_win_fraction_vs_persistence": 0.0,
+      "tie_fraction_vs_persistence": 1.0,
+      "validation_acceptance": {
+        "accepted": false,
+        "allowed_edge_delta": 5e-05,
+        "edge_delta": 0.0,
+        "required_route_gain": 5e-05,
+        "required_route_win_fraction": 0.52,
+        "route_gain": 0.0,
+        "route_win_fraction": 0.0
+      },
+      "validation_active_od_route_tv": 0.0,
+      "validation_edge_tv": 0.00015486391394918615,
+      "win_fraction_vs_persistence": 0.0
+    },
+    "selected_od_route_predictor": {
+      "active_od_route_ce": 0.0012340262882243529,
+      "active_od_route_top1": 0.9999785292538915,
+      "active_od_route_tv": 7.516492649732482e-05,
+      "edge_ce_mean": 5.646521740541891,
+      "edge_kl_mean": 9.194519782583418e-06,
+      "edge_tv_delta_vs_persistence_ci95": [
+        0.0,
+        0.0
+      ],
+      "edge_tv_delta_vs_persistence_mean": 0.0,
+      "edge_tv_mean": 0.00018317972619264687,
+      "observed_response_tv_mean": 0.00018317972619264687,
+      "pairs": 150,
+      "persistence_active_od_route_tv": 7.516492649732482e-05,
+      "persistence_edge_tv_mean": 0.00018317972619264687,
+      "predicted_response_tv_mean": 0.0,
+      "response_direction_cosine_mean": NaN,
+      "response_magnitude_abs_error_mean": 0.00018317972619264687,
+      "route_tie_fraction_vs_persistence": 1.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0,
+        0.0
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0,
+      "route_win_fraction_vs_persistence": 0.0,
+      "tie_fraction_vs_persistence": 1.0,
+      "validation_acceptance": {
+        "accepted": false,
+        "selected_source": "persistence"
+      },
+      "validation_active_od_route_tv": 0.0,
+      "validation_edge_tv": 0.00015486391394918615,
+      "win_fraction_vs_persistence": 0.0
+    }
+  },
+  "causal_protocol": "target episode e uses only episode e-1 information; real seen HDV hdv_action values form the OD-route target, seen AV policy_action and HDV hdv_action travel times drive the exact Gawron proposal, and a per-OD causal last-observed histogram is the persistence anchor. Chronological validation selects the predictor family and the final test block is untouched until reporting",
+  "deployment": {
+    "candidate": "selected_od_route_predictor",
+    "persistence_gate_validation_gate_passed": false,
+    "policy": "route TV is primary; a non-persistence candidate is deployable only when chronological validation clears the pre-registered route-gain, route-win, and edge-degradation guards",
+    "route_checkpoint_gate_scale": 0.0,
+    "route_residual_validation_gate_passed": false,
+    "selected_source": "persistence"
+  },
+  "dimensions": {
+    "n_edges": 853,
+    "n_od": 306,
+    "n_routes": 4
+  },
+  "edge_registry": "/home/wangwenrui/shk/UrbanDreamer/networks/ingolstadt_custom/edge_registry.json",
+  "episodes": {
+    "available": 300,
+    "max": 450,
+    "min": 151,
+    "test_pairs": 150,
+    "test_start": 301,
+    "train_end": 250,
+    "train_pairs": 99,
+    "validation_end": 300,
+    "validation_pairs": 50
+  },
+  "episodes_dir": "/home/wangwenrui/shk/UrbanDreamer/results/ingolstadt_custom_online_wm_mainline_reuse8k_cachemerge_b4_450ep_resume150_20260718/online_wm_mainline/collector_runtime/episodes",
+  "format": "hdv_response_offline_comparison_v2",
+  "gawron": {
+    "alpha_calibration": [
+      {
+        "alpha_zero": 0.01,
+        "validation_edge_tv": 0.00015879335972971383,
+        "validation_route_tv": 0.001655091497066778
+      },
+      {
+        "alpha_zero": 0.025,
+        "validation_edge_tv": 0.0001611251365366761,
+        "validation_route_tv": 0.0016537833394947544
+      },
+      {
+        "alpha_zero": 0.05,
+        "validation_edge_tv": 0.00017735754722425108,
+        "validation_route_tv": 0.001673697762385652
+      },
+      {
+        "alpha_zero": 0.1,
+        "validation_edge_tv": 0.0001753695957443387,
+        "validation_route_tv": 0.0016801747947021697
+      },
+      {
+        "alpha_zero": 0.2,
+        "validation_edge_tv": 0.00016266691620459177,
+        "validation_route_tv": 0.0016835497749747924
+      }
+    ],
+    "configured": {
+      "alpha_zero": 0.2,
+      "beta": -1.5,
+      "lr": 0.1,
+      "min_prob": 0.0,
+      "mode": "routerl",
+      "update_mode": "expected"
+    },
+    "selected": {
+      "alpha_zero": 0.2,
+      "beta": -1.5,
+      "lr": 0.1,
+      "min_prob": 0.0,
+      "mode": "routerl",
+      "update_mode": "expected"
+    }
+  },
+  "hyperparameters": {
+    "bootstrap_block_size": 10,
+    "bootstrap_samples": 2000,
+    "epochs": 400,
+    "gate_penalty": 0.0001,
+    "gawron_alpha_grid": [
+      0.01,
+      0.025,
+      0.05,
+      0.1,
+      0.2
+    ],
+    "lr": 0.002,
+    "patience": 20,
+    "progress_denominator": 450,
+    "residual_penalty": 0.001,
+    "residual_scales": [
+      0.0,
+      0.0625,
+      0.125,
+      0.25,
+      0.5,
+      1.0
+    ],
+    "route_epochs": 80,
+    "route_lr": 0.001,
+    "seed": 42,
+    "train_edge_baselines": false,
+    "validation_max_edge_degradation": 5e-05,
+    "validation_max_relative_edge_degradation": 0.02,
+    "validation_min_improvement": 5e-05,
+    "validation_min_relative_improvement": 0.02,
+    "validation_min_route_win_fraction": 0.52,
+    "weight_decay": 0.001
+  },
+  "initial_hdv_state": "/home/wangwenrui/shk/UrbanDreamer/results/ingolstadt_custom_online_wm_mainline_reuse8k_cachemerge_b4_150ep_20260717/online_wm_mainline/hdv_learning_state_after_online_wm_train.json",
+  "legacy_checkpoint": "/home/wangwenrui/shk/UrbanDreamer/results/ingolstadt_custom_online_wm_mainline_reuse8k_cachemerge_b4_450ep_resume150_20260718/online_wm_mainline/checkpoints/checkpoint_ep00300.pt",
+  "primary_metric": "population-weighted OD-route total-variation distance versus causal last-observed persistence",
+  "route_xml": "/home/wangwenrui/shk/UrbanDreamer/results/ingolstadt_custom_online_wm_mainline_reuse8k_cachemerge_b4_450ep_resume150_20260718/online_wm_mainline/collector_runtime/route.rou.xml",
+  "run_dir": "/home/wangwenrui/shk/UrbanDreamer/results/ingolstadt_custom_online_wm_mainline_reuse8k_cachemerge_b4_450ep_resume150_20260718/online_wm_mainline",
+  "secondary_metric": "edge total-variation distance after route-response delta projection",
+  "selected_by_validation": "persistence",
+  "target": "seen and successfully route-matched HDV choices from exact hdv_action, with predicted route response applied to the exact previous edge context",
+  "target_alignment": {
+    "strict_route_projection_edge_tv_max": 2.5346053841607697e-07,
+    "strict_route_projection_edge_tv_mean": 1.5308935317023804e-07,
+    "tolerance": 1e-05
+  },
+  "target_scope_limitation": "hdv_action is conditioned on successful collector registration and route matching; it is not the full scheduled-population initial_route_action target",
+  "target_source": "static_edge_demand",
+  "training": {
+    "gawron_residual_od_route": {
+      "best_epoch": 1,
+      "best_validation_edge_tv": 0.0001623227180291869,
+      "epochs_ran": 21,
+      "features": [
+        "previous_av_route",
+        "previous_hdv_route_probability",
+        "previous_hdv_route_cost_memory",
+        "previous_route_travel_time",
+        "previous_route_travel_time_observed",
+        "previous_hdv_od_weight",
+        "episode_progress"
+      ],
+      "history_tail": [
+        {
+          "epoch": 12.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.043205853551626205,
+          "validation_edge_tv": 0.0001626751616203426
+        },
+        {
+          "epoch": 13.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.043027378618717194,
+          "validation_edge_tv": 0.0001626751616203426
+        },
+        {
+          "epoch": 14.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.04285048693418503,
+          "validation_edge_tv": 0.0001626751616203426
+        },
+        {
+          "epoch": 15.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.04267219454050064,
+          "validation_edge_tv": 0.0001626751616203426
+        },
+        {
+          "epoch": 16.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.04248901829123497,
+          "validation_edge_tv": 0.0001626751616203426
+        },
+        {
+          "epoch": 17.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.04229877144098282,
+          "validation_edge_tv": 0.0001626751616203426
+        },
+        {
+          "epoch": 18.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.04210131987929344,
+          "validation_edge_tv": 0.0001626751616203426
+        },
+        {
+          "epoch": 19.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.04189730063080788,
+          "validation_edge_tv": 0.0001626751616203426
+        },
+        {
+          "epoch": 20.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.04168684408068657,
+          "validation_edge_tv": 0.0001626751616203426
+        },
+        {
+          "epoch": 21.0,
+          "residual_scale": 0.0,
+          "train_loss": 0.041470304131507874,
+          "validation_edge_tv": 0.0001626751616203426
+        }
+      ],
+      "parameterization": "gawron_anchored_od_route_residual_logit",
+      "selected_residual_scale": 1.0,
+      "validation_gawron_edge_tv": 0.00016267516098899593,
+      "validation_persistence_edge_tv": 0.00015486391394918615
+    },
+    "offline_absolute_edge_mlp": null,
+    "persistence_anchored_gate_od_route": {
+      "best_epoch": 1,
+      "best_validation_edge_tv": 0.00015486391394918615,
+      "best_validation_route_tv": 0.0,
+      "epochs_ran": 21,
+      "features": [
+        "previous_causal_last_observed_hdv_route",
+        "previous_latent_hdv_route",
+        "gawron_next_route",
+        "gawron_route_delta",
+        "previous_route_cost_gap",
+        "previous_route_travel_time",
+        "previous_route_travel_time_observed",
+        "previous_hdv_route_sample_counts",
+        "previous_route_travel_time_sample_counts",
+        "empirical_gawron_disagreement",
+        "gawron_response_magnitude",
+        "empirical_route_entropy",
+        "previous_hdv_od_sample_count",
+        "previous_travel_time_sample_count",
+        "previous_hdv_od_weight",
+        "episode_progress"
+      ],
+      "history_tail": [
+        {
+          "epoch": 12.0,
+          "gate_scale": 0.0,
+          "mean_raw_gate": 0.009742559454117726,
+          "train_loss": 6.587441748706624e-05,
+          "train_route_tv": 6.473957910202444e-05,
+          "validation_edge_tv": 0.00015486391394918615,
+          "validation_route_tv": 0.0
+        },
+        {
+          "epoch": 13.0,
+          "gate_scale": 0.0,
+          "mean_raw_gate": 0.009198032905061554,
+          "train_loss": 6.486804340966046e-05,
+          "train_route_tv": 6.379700062097982e-05,
+          "validation_edge_tv": 0.00015486391394918615,
+          "validation_route_tv": 0.0
+        },
+        {
+          "epoch": 14.0,
+          "gate_scale": 0.0,
+          "mean_raw_gate": 0.008678129100715559,
+          "train_loss": 6.392938666976988e-05,
+          "train_route_tv": 6.292088801274076e-05,
+          "validation_edge_tv": 0.00015486391394918615,
+          "validation_route_tv": 0.0
+        },
+        {
+          "epoch": 15.0,
+          "gate_scale": 0.0,
+          "mean_raw_gate": 0.008182614776366726,
+          "train_loss": 6.304624548647553e-05,
+          "train_route_tv": 6.209849379956722e-05,
+          "validation_edge_tv": 0.00015486391394918615,
+          "validation_route_tv": 0.0
+        },
+        {
+          "epoch": 16.0,
+          "gate_scale": 0.0,
+          "mean_raw_gate": 0.007712183653383084,
+          "train_loss": 6.221315561560914e-05,
+          "train_route_tv": 6.132384442025796e-05,
+          "validation_edge_tv": 0.00015486391394918615,
+          "validation_route_tv": 0.0
+        },
+        {
+          "epoch": 17.0,
+          "gate_scale": 0.0,
+          "mean_raw_gate": 0.0072677656510857,
+          "train_loss": 6.142930214991793e-05,
+          "train_route_tv": 6.059567385818809e-05,
+          "validation_edge_tv": 0.00015486391394918615,
+          "validation_route_tv": 0.0
+        },
+        {
+          "epoch": 18.0,
+          "gate_scale": 0.0,
+          "mean_raw_gate": 0.0068499114624608086,
+          "train_loss": 6.0695230786222965e-05,
+          "train_route_tv": 5.9914182202192023e-05,
+          "validation_edge_tv": 0.00015486391394918615,
+          "validation_route_tv": 0.0
+        },
+        {
+          "epoch": 19.0,
+          "gate_scale": 0.0,
+          "mean_raw_gate": 0.006458501440679862,
+          "train_loss": 6.001094516250305e-05,
+          "train_route_tv": 5.9279158449498937e-05,
+          "validation_edge_tv": 0.00015486391394918615,
+          "validation_route_tv": 0.0
+        },
+        {
+          "epoch": 20.0,
+          "gate_scale": 0.0,
+          "mean_raw_gate": 0.0060927876652967115,
+          "train_loss": 5.937442256254144e-05,
+          "train_route_tv": 5.868849257240072e-05,
+          "validation_edge_tv": 0.00015486391394918615,
+          "validation_route_tv": 0.0
+        },
+        {
+          "epoch": 21.0,
+          "gate_scale": 0.0,
+          "mean_raw_gate": 0.005751666351574552,
+          "train_loss": 5.878212323295884e-05,
+          "train_route_tv": 5.8138677559327334e-05,
+          "validation_edge_tv": 0.00015486391394918615,
+          "validation_route_tv": 0.0
+        }
+      ],
+      "parameterization": "empirical_persistence_anchored_gawron_gate",
+      "selected_gate_scale": 0.0,
+      "validation_mean_raw_gate": 0.01734218692565276,
+      "validation_persistence_edge_tv": 0.00015486391394918615,
+      "validation_persistence_route_tv": 0.0
+    },
+    "residual_edge_mlp": null
+  },
+  "validation_acceptance": {
+    "configured_gawron_od_route": {
+      "accepted": false,
+      "allowed_edge_delta": 5e-05,
+      "edge_delta": 7.803002255405626e-06,
+      "required_route_gain": 5e-05,
+      "required_route_win_fraction": 0.52,
+      "route_gain": -0.0016835497749747924,
+      "route_win_fraction": 0.0
+    },
+    "gawron_od_route": {
+      "accepted": false,
+      "allowed_edge_delta": 5e-05,
+      "edge_delta": 7.803002255405626e-06,
+      "required_route_gain": 5e-05,
+      "required_route_win_fraction": 0.52,
+      "route_gain": -0.0016835497749747924,
+      "route_win_fraction": 0.0
+    },
+    "gawron_residual_od_route": {
+      "accepted": false,
+      "allowed_edge_delta": 5e-05,
+      "edge_delta": 7.45008644440184e-06,
+      "required_route_gain": 5e-05,
+      "required_route_win_fraction": 0.52,
+      "route_gain": -0.0016802612726808139,
+      "route_win_fraction": 0.0
+    },
+    "persistence_anchored_gate_od_route": {
+      "accepted": false,
+      "allowed_edge_delta": 5e-05,
+      "edge_delta": 0.0,
+      "required_route_gain": 5e-05,
+      "required_route_win_fraction": 0.52,
+      "route_gain": 0.0,
+      "route_win_fraction": 0.0
+    }
+  },
+  "validation_edge_tv": {
+    "configured_gawron_od_route": 0.00016266691620459177,
+    "deployed_legacy_absolute_mlp": 0.00037425323783951,
+    "gawron_od_route": 0.00016266691620459177,
+    "gawron_residual_od_route": 0.00016231400039358799,
+    "persistence": 0.00015486391394918615,
+    "persistence_anchored_gate_od_route": 0.00015486391394918615,
+    "selected_od_route_predictor": 0.00015486391394918615
+  },
+  "validation_route_metrics": {
+    "configured_gawron_od_route": {
+      "active_od_route_ce": 0.044573711296638736,
+      "active_od_route_top1": 0.9983894862604541,
+      "active_od_route_tv": 0.0016835497749747924,
+      "persistence_active_od_route_tv": 0.0,
+      "route_tie_fraction_vs_persistence": 0.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0016709193484750634,
+        0.0016709193484750634
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0016835497749747924,
+      "route_win_fraction_vs_persistence": 0.0
+    },
+    "gawron_od_route": {
+      "active_od_route_ce": 0.044573711296638736,
+      "active_od_route_top1": 0.9983894862604541,
+      "active_od_route_tv": 0.0016835497749747924,
+      "persistence_active_od_route_tv": 0.0,
+      "route_tie_fraction_vs_persistence": 0.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0016778937642542182,
+        0.0016778937642542182
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0016835497749747924,
+      "route_win_fraction_vs_persistence": 0.0
+    },
+    "gawron_residual_od_route": {
+      "active_od_route_ce": 0.04455049724859981,
+      "active_od_route_top1": 0.9983894862604541,
+      "active_od_route_tv": 0.0016802612726808139,
+      "persistence_active_od_route_tv": 0.0,
+      "route_tie_fraction_vs_persistence": 0.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0016963430677324398,
+        0.0016963430677324398
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0016802612726808139,
+      "route_win_fraction_vs_persistence": 0.0
+    },
+    "persistence": {
+      "active_od_route_ce": 0.0,
+      "active_od_route_top1": 1.0,
+      "active_od_route_tv": 0.0,
+      "persistence_active_od_route_tv": 0.0,
+      "route_tie_fraction_vs_persistence": 1.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0,
+        0.0
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0,
+      "route_win_fraction_vs_persistence": 0.0
+    },
+    "persistence_anchored_gate_od_route": {
+      "active_od_route_ce": 0.0,
+      "active_od_route_top1": 1.0,
+      "active_od_route_tv": 0.0,
+      "persistence_active_od_route_tv": 0.0,
+      "route_tie_fraction_vs_persistence": 1.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0,
+        0.0
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0,
+      "route_win_fraction_vs_persistence": 0.0
+    },
+    "selected_od_route_predictor": {
+      "active_od_route_ce": 0.0,
+      "active_od_route_top1": 1.0,
+      "active_od_route_tv": 0.0,
+      "persistence_active_od_route_tv": 0.0,
+      "route_tie_fraction_vs_persistence": 1.0,
+      "route_tv_delta_vs_persistence_ci95": [
+        0.0,
+        0.0
+      ],
+      "route_tv_delta_vs_persistence_mean": 0.0,
+      "route_win_fraction_vs_persistence": 0.0
+    }
+  }
+}

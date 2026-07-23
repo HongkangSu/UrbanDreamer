@@ -10,7 +10,7 @@ import random
 import sys
 import sysconfig
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -105,10 +105,17 @@ class ToyMappoTorchRLConfig(OnlineNoCfmConfig):
     policy_network_num_cells: int = 64
     critic_network_depth: int = 3
     critic_network_num_cells: int = 64
+    centralized_state_mode: str = "auto"
     av_execution_mode: str = "dynamic"
 
     def resolve(self) -> "ToyMappoTorchRLConfig":
         values = asdict(self)
+        mode = str(values.get("centralized_state_mode", "auto") or "auto").strip().lower()
+        if mode not in {"auto", "focal", "joint_frame"}:
+            raise ValueError(
+                "centralized_state_mode must be one of auto, focal, joint_frame"
+            )
+        values["centralized_state_mode"] = mode
         for key in (
             "settings",
             "output_dir",
@@ -136,11 +143,96 @@ class ToyMappoTorchRLConfig(OnlineNoCfmConfig):
         return cls(**values).resolve()
 
 
+class JointStateValueCritic(torch.nn.Module):
+    """Scalable joint-state critic with a distinct value for every fixed slot."""
+
+    def __init__(
+        self,
+        *,
+        obs_dim: int,
+        n_agents: int,
+        depth: int,
+        num_cells: int,
+        device: torch.device,
+    ) -> None:
+        super().__init__()
+        self.obs_dim = int(obs_dim)
+        self.n_agents = int(n_agents)
+        hidden = max(int(num_cells), 1)
+        input_dim = int(self.n_agents) * (int(self.obs_dim) + 1)
+        layers: List[torch.nn.Module] = [
+            torch.nn.Linear(input_dim, hidden, device=device),
+            torch.nn.Tanh(),
+        ]
+        for _ in range(max(int(depth) - 1, 0)):
+            layers.extend(
+                [
+                    torch.nn.Linear(hidden, hidden, device=device),
+                    torch.nn.Tanh(),
+                ]
+            )
+        layers.append(torch.nn.Linear(hidden, int(self.n_agents), device=device))
+        self.net = torch.nn.Sequential(*layers)
+        for module in self.modules():
+            if isinstance(module, torch.nn.Linear):
+                torch.nn.init.orthogonal_(module.weight, gain=np.sqrt(2.0))
+                torch.nn.init.zeros_(module.bias)
+        output = self.net[-1]
+        assert isinstance(output, torch.nn.Linear)
+        torch.nn.init.orthogonal_(output.weight, gain=1.0)
+
+    def forward(
+        self,
+        observation: torch.Tensor,
+        active_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        if observation.dim() != 3:
+            raise ValueError(
+                f"joint critic expects observation [B,A,D], got {tuple(observation.shape)}"
+            )
+        expected = (int(self.n_agents), int(self.obs_dim))
+        if tuple(observation.shape[-2:]) != expected:
+            raise ValueError(
+                f"joint critic expects trailing observation shape {expected}, "
+                f"got {tuple(observation.shape[-2:])}"
+            )
+        if tuple(active_mask.shape) != tuple(observation.shape[:2]):
+            raise ValueError(
+                f"active_mask shape {tuple(active_mask.shape)} must match "
+                f"observation batch/agent shape {tuple(observation.shape[:2])}"
+            )
+        presence = active_mask.to(device=observation.device, dtype=observation.dtype).unsqueeze(-1)
+        joint = torch.cat([observation * presence, presence], dim=-1)
+        values = self.net(joint.flatten(start_dim=-2))
+        return values.unsqueeze(-1)
+
+
 def _jsonable_config(cfg: ToyMappoTorchRLConfig) -> Dict[str, Any]:
     values = asdict(cfg)
     values["checkpoint_episodes"] = list(cfg.checkpoint_episodes)
     values["extra_eval_args"] = list(cfg.extra_eval_args)
     return values
+
+
+def _resolve_mappo_state_mode(cfg: ToyMappoTorchRLConfig) -> str:
+    requested = str(cfg.centralized_state_mode or "auto").strip().lower()
+    if requested != "auto":
+        return requested
+    checkpoint = str(getattr(cfg, "resume_checkpoint", "") or "").strip()
+    if not checkpoint:
+        return "joint_frame"
+    path = _resolve_path(checkpoint)
+    if not path.exists():
+        raise FileNotFoundError(f"resume_checkpoint does not exist: {path}")
+    state = torch.load(path, map_location="cpu")
+    stored_cfg = state.get("cfg") if isinstance(state, dict) else None
+    stored_mode = state.get("mappo_layout") if isinstance(state, dict) else None
+    if not stored_mode and isinstance(stored_cfg, dict):
+        stored_mode = stored_cfg.get("centralized_state_mode")
+    resolved = str(stored_mode or "focal").strip().lower()
+    if resolved not in {"focal", "joint_frame"}:
+        raise ValueError(f"unsupported MAPPO layout {resolved!r} in checkpoint {path}")
+    return resolved
 
 
 def _resolve_fixed_roles_for_config(
@@ -202,6 +294,8 @@ class TorchRLMappoActorCritic(torch.nn.Module):
         self.include_global = bool(cfg.include_global)
         self.include_route_costs = bool(cfg.include_route_costs)
         self.include_fleet_pressure = bool(cfg.include_fleet_pressure)
+        mode = str(cfg.centralized_state_mode or "auto").strip().lower()
+        self.centralized_state_mode = "joint_frame" if mode == "auto" else mode
 
         self.policy_net = torch.nn.Sequential(
             MultiAgentMLP(
@@ -244,22 +338,39 @@ class TorchRLMappoActorCritic(torch.nn.Module):
             log_prob_key=("agents", "sample_log_prob"),
         )
 
-        self.critic_net = MultiAgentMLP(
-            n_agent_inputs=int(obs_dim),
-            n_agent_outputs=1,
-            n_agents=int(self.n_agents),
-            centralized=True,
-            share_params=True,
-            device=device,
-            depth=int(cfg.critic_network_depth),
-            num_cells=int(cfg.critic_network_num_cells),
-            activation_class=torch.nn.ReLU,
-        )
-        self.critic = TensorDictModule(
-            self.critic_net,
-            in_keys=[("agents", "observation")],
-            out_keys=[("agents", "state_value")],
-        )
+        if self.centralized_state_mode == "joint_frame":
+            self.critic_net = JointStateValueCritic(
+                obs_dim=int(obs_dim),
+                n_agents=int(self.n_agents),
+                depth=int(cfg.critic_network_depth),
+                num_cells=int(cfg.critic_network_num_cells),
+                device=device,
+            )
+            self.critic = TensorDictModule(
+                self.critic_net,
+                in_keys=[
+                    ("agents", "observation"),
+                    ("agents", "active_mask"),
+                ],
+                out_keys=[("agents", "state_value")],
+            )
+        else:
+            self.critic_net = MultiAgentMLP(
+                n_agent_inputs=int(obs_dim),
+                n_agent_outputs=1,
+                n_agents=int(self.n_agents),
+                centralized=True,
+                share_params=True,
+                device=device,
+                depth=int(cfg.critic_network_depth),
+                num_cells=int(cfg.critic_network_num_cells),
+                activation_class=torch.nn.ReLU,
+            )
+            self.critic = TensorDictModule(
+                self.critic_net,
+                in_keys=[("agents", "observation")],
+                out_keys=[("agents", "state_value")],
+            )
         self.to(device)
 
     def slot_for_vehicle(self, veh_id: str) -> int:
@@ -353,6 +464,34 @@ def _masked_mean(value: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     return (value * ref).sum() / denom
 
 
+def _active_policy_diagnostics(
+    *,
+    actor_critic: TorchRLMappoActorCritic,
+    data: TensorDict,
+    clip_epsilon: float,
+) -> Tuple[float, float]:
+    """Return entropy and PPO clip fraction over active agent entries only."""
+    with torch.no_grad():
+        observation = data.get(("agents", "observation"))
+        logits = actor_critic.policy_net(observation)
+        action_mask = data.get(("agents", "action_mask")).to(dtype=torch.bool)
+        safe_mask = action_mask.clone()
+        safe_mask[~safe_mask.any(dim=-1), 0] = True
+        masked_logits = logits.masked_fill(~safe_mask, -1.0e9)
+        distribution = torch.distributions.Categorical(logits=masked_logits)
+        action = data.get(("agents", "action")).to(dtype=torch.long)
+        new_log_prob = distribution.log_prob(action)
+        old_log_prob = data.get(("agents", "sample_log_prob")).to(dtype=new_log_prob.dtype)
+        active = data.get(("agents", "active_mask")).to(dtype=torch.bool)
+        active = active & torch.isfinite(new_log_prob) & torch.isfinite(old_log_prob)
+        if not bool(active.any().detach().cpu().item()):
+            return 0.0, 0.0
+        entropy = distribution.entropy()[active].mean()
+        ratio = (new_log_prob[active] - old_log_prob[active]).exp()
+        clipped = ((ratio - 1.0).abs() > float(clip_epsilon)).to(dtype=torch.float32).mean()
+        return float(entropy.detach().cpu().item()), float(clipped.detach().cpu().item())
+
+
 def _sample_action_mask(sample: OnlineDecisionSample, *, n_routes: int, device: torch.device) -> torch.Tensor:
     mask = torch.zeros((int(n_routes),), device=device, dtype=torch.bool)
     mask_np = np.asarray(sample.valid_mask, dtype=bool).reshape(-1)
@@ -372,69 +511,122 @@ def _sample_observation(sample: OnlineDecisionSample, *, obs_dim: int) -> np.nda
     return obs
 
 
-def _dense_observation_and_slots(
+def _group_mappo_frame_indices(
+    samples: Sequence[OnlineDecisionSample],
+    *,
+    mode: str,
+) -> List[List[int]]:
+    resolved_mode = str(mode or "focal").strip().lower()
+    if resolved_mode == "auto":
+        resolved_mode = "focal"
+    if resolved_mode == "focal":
+        return [[index] for index in range(len(samples))]
+    if resolved_mode != "joint_frame":
+        raise ValueError(f"unsupported MAPPO centralized_state_mode: {mode!r}")
+
+    groups: Dict[Tuple[int, int], List[int]] = {}
+    sim_step_by_group: Dict[Tuple[int, int], int] = {}
+    vehicles_by_group: Dict[Tuple[int, int], set[str]] = {}
+    for index, sample in enumerate(samples):
+        key = (int(sample.episode), int(sample.decision_idx))
+        sim_step = int(sample.sim_step)
+        prior_step = sim_step_by_group.setdefault(key, sim_step)
+        if prior_step != sim_step:
+            raise ValueError(
+                "inconsistent sim_step for MAPPO joint frame "
+                f"episode={key[0]} decision_idx={key[1]}: {prior_step} != {sim_step}"
+            )
+        vehicle = str(sample.veh_id)
+        seen = vehicles_by_group.setdefault(key, set())
+        if vehicle in seen:
+            raise ValueError(
+                "duplicate vehicle in MAPPO joint frame "
+                f"episode={key[0]} decision_idx={key[1]} veh_id={vehicle!r}"
+            )
+        seen.add(vehicle)
+        groups.setdefault(key, []).append(index)
+    return list(groups.values())
+
+
+def _dense_observation_and_active_mask(
     *,
     samples: Sequence[OnlineDecisionSample],
-    indices: Sequence[int],
+    frame_groups: Sequence[Sequence[int]],
+    frame_indices: Sequence[int],
     actor_critic: TorchRLMappoActorCritic,
     device: torch.device,
-) -> Tuple[torch.Tensor, List[int]]:
-    n = int(len(indices))
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    n = int(len(frame_indices))
     obs = torch.zeros(
         (n, int(actor_critic.n_agents), int(actor_critic.obs_dim)),
         device=device,
         dtype=torch.float32,
     )
-    slots: List[int] = []
-    for row, raw_idx in enumerate(indices):
-        sample = samples[int(raw_idx)]
-        slot = actor_critic.slot_for_vehicle(str(sample.veh_id))
-        obs[row, slot] = torch.as_tensor(
-            _sample_observation(sample, obs_dim=int(actor_critic.obs_dim)),
-            device=device,
-            dtype=torch.float32,
-        )
-        slots.append(int(slot))
-    return obs, slots
+    active_mask = torch.zeros(
+        (n, int(actor_critic.n_agents)),
+        device=device,
+        dtype=torch.bool,
+    )
+    for row, frame_index in enumerate(frame_indices):
+        for raw_idx in frame_groups[int(frame_index)]:
+            sample = samples[int(raw_idx)]
+            slot = actor_critic.slot_for_vehicle(str(sample.veh_id))
+            if bool(active_mask[row, slot].detach().cpu().item()):
+                raise ValueError(
+                    f"duplicate MAPPO slot {slot} in frame {int(frame_index)}"
+                )
+            obs[row, slot] = torch.as_tensor(
+                _sample_observation(sample, obs_dim=int(actor_critic.obs_dim)),
+                device=device,
+                dtype=torch.float32,
+            )
+            active_mask[row, slot] = True
+    return obs, active_mask
 
 
 def _build_mappo_minibatch_td(
     *,
     samples: Sequence[OnlineDecisionSample],
-    indices: Sequence[int],
+    frame_groups: Sequence[Sequence[int]],
+    frame_indices: Sequence[int],
     actor_critic: TorchRLMappoActorCritic,
     advantages: np.ndarray,
     value_targets: np.ndarray,
     device: torch.device,
 ) -> TensorDict:
-    n = int(len(indices))
+    n = int(len(frame_indices))
     n_agents = int(actor_critic.n_agents)
     n_routes = int(actor_critic.n_routes)
-    obs, slots = _dense_observation_and_slots(
+    obs, active_mask = _dense_observation_and_active_mask(
         samples=samples,
-        indices=indices,
+        frame_groups=frame_groups,
+        frame_indices=frame_indices,
         actor_critic=actor_critic,
         device=device,
     )
     action = torch.zeros((n, n_agents), device=device, dtype=torch.long)
     old_log_prob = torch.zeros((n, n_agents), device=device, dtype=torch.float32)
     action_mask = torch.ones((n, n_agents, n_routes), device=device, dtype=torch.bool)
-    active_mask = torch.zeros((n, n_agents), device=device, dtype=torch.bool)
     rewards = torch.zeros((n, n_agents, 1), device=device, dtype=torch.float32)
     advantage = torch.zeros((n, n_agents, 1), device=device, dtype=torch.float32)
     value_target = torch.zeros((n, n_agents, 1), device=device, dtype=torch.float32)
 
-    for row, (raw_idx, slot) in enumerate(zip(indices, slots)):
-        sample_idx = int(raw_idx)
-        sample = samples[sample_idx]
-        action[row, slot] = int(np.clip(int(sample.action), 0, n_routes - 1))
-        old_lp = float(sample.old_log_prob)
-        old_log_prob[row, slot] = old_lp if np.isfinite(old_lp) else 0.0
-        action_mask[row, slot] = _sample_action_mask(sample, n_routes=n_routes, device=device)
-        active_mask[row, slot] = True
-        rewards[row, slot, 0] = float(sample.reward)
-        advantage[row, slot, 0] = float(advantages[sample_idx])
-        value_target[row, slot, 0] = float(value_targets[sample_idx])
+    for row, frame_index in enumerate(frame_indices):
+        for raw_idx in frame_groups[int(frame_index)]:
+            sample_idx = int(raw_idx)
+            sample = samples[sample_idx]
+            slot = actor_critic.slot_for_vehicle(str(sample.veh_id))
+            action[row, slot] = int(np.clip(int(sample.action), 0, n_routes - 1))
+            old_lp = float(sample.old_log_prob)
+            old_log_prob[row, slot] = old_lp if np.isfinite(old_lp) else 0.0
+            action_mask[row, slot] = _sample_action_mask(
+                sample,
+                n_routes=n_routes,
+                device=device,
+            )
+            rewards[row, slot, 0] = float(sample.reward)
+            advantage[row, slot, 0] = float(advantages[sample_idx])
+            value_target[row, slot, 0] = float(value_targets[sample_idx])
 
     return TensorDict(
         {
@@ -491,6 +683,7 @@ def _mappo_effective_minibatch_size(
 def _compute_mappo_advantages(
     *,
     samples: Sequence[OnlineDecisionSample],
+    frame_groups: Sequence[Sequence[int]],
     actor_critic: TorchRLMappoActorCritic,
     gamma: float,
     lmbda: float,
@@ -508,26 +701,36 @@ def _compute_mappo_advantages(
         rewards[row] = float(sample.reward)
         by_vehicle.setdefault((int(sample.episode), str(sample.veh_id)), []).append(row)
 
-    chunk_size = max(1, min(int(value_chunk_size), n))
+    n_frames = int(len(frame_groups))
+    chunk_size = max(1, min(int(value_chunk_size), max(n_frames, 1)))
     actor_critic.eval()
     with torch.no_grad():
-        for start in range(0, n, chunk_size):
-            indices = list(range(start, min(start + chunk_size, n)))
-            obs, chunk_slots = _dense_observation_and_slots(
+        for start in range(0, n_frames, chunk_size):
+            frame_indices = list(range(start, min(start + chunk_size, n_frames)))
+            obs, active_mask = _dense_observation_and_active_mask(
                 samples=samples,
-                indices=indices,
+                frame_groups=frame_groups,
+                frame_indices=frame_indices,
                 actor_critic=actor_critic,
                 device=device,
             )
             value_td = actor_critic.critic(
-                TensorDict({("agents", "observation"): obs}, batch_size=[len(indices)], device=device)
+                TensorDict(
+                    {
+                        ("agents", "observation"): obs,
+                        ("agents", "active_mask"): active_mask,
+                    },
+                    batch_size=[len(frame_indices)],
+                    device=device,
+                )
             )
             value_tensor = value_td.get(("agents", "state_value")).detach()
-            rows = torch.arange(len(indices), device=device)
-            slot_tensor = torch.as_tensor(chunk_slots, device=device, dtype=torch.long)
-            values[start : start + len(indices)] = (
-                value_tensor[rows, slot_tensor, 0].detach().cpu().numpy().astype(np.float32)
-            )
+            for local_row, frame_index in enumerate(frame_indices):
+                for sample_index in frame_groups[int(frame_index)]:
+                    slot = slots[int(sample_index)]
+                    values[int(sample_index)] = float(
+                        value_tensor[local_row, slot, 0].detach().cpu().item()
+                    )
 
     advantages = np.zeros((n,), dtype=np.float32)
     value_targets = np.zeros((n,), dtype=np.float32)
@@ -563,90 +766,31 @@ def build_torchrl_mappo_batch(
     normalize_advantage: bool,
     device: torch.device,
 ) -> TensorDict:
-    n = int(len(samples))
-    if n <= 0:
+    if not samples:
         raise ValueError("cannot build a MAPPO TorchRL batch with no samples")
-
-    n_agents = int(actor_critic.n_agents)
-    obs_dim = int(actor_critic.obs_dim)
-    n_routes = int(actor_critic.n_routes)
-    obs = torch.zeros((n, n_agents, obs_dim), device=device, dtype=torch.float32)
-    action = torch.zeros((n, n_agents), device=device, dtype=torch.long)
-    old_log_prob = torch.zeros((n, n_agents), device=device, dtype=torch.float32)
-    action_mask = torch.ones((n, n_agents, n_routes), device=device, dtype=torch.bool)
-    active_mask = torch.zeros((n, n_agents), device=device, dtype=torch.bool)
-    rewards = torch.zeros((n, n_agents, 1), device=device, dtype=torch.float32)
-    slot_rows: List[int] = []
-    by_vehicle: Dict[Tuple[int, str], List[int]] = {}
-
-    for row, sample in enumerate(samples):
-        slot = actor_critic.slot_for_vehicle(str(sample.veh_id))
-        slot_rows.append(int(slot))
-        sample_obs = np.asarray(sample.obs, dtype=np.float32).reshape(-1)
-        if int(sample_obs.shape[0]) != obs_dim:
-            raise ValueError(
-                f"sample obs_dim={sample_obs.shape[0]} does not match actor obs_dim={obs_dim}"
-            )
-        obs[row, slot] = torch.as_tensor(sample_obs, device=device, dtype=torch.float32)
-        action[row, slot] = int(np.clip(int(sample.action), 0, n_routes - 1))
-        old_lp = float(sample.old_log_prob)
-        old_log_prob[row, slot] = old_lp if np.isfinite(old_lp) else 0.0
-        mask_np = np.asarray(sample.valid_mask, dtype=bool).reshape(-1)
-        if int(mask_np.shape[0]) >= n_routes:
-            action_mask[row, slot] = torch.as_tensor(mask_np[:n_routes], device=device, dtype=torch.bool)
-        else:
-            action_mask[row, slot, : int(mask_np.shape[0])] = torch.as_tensor(mask_np, device=device, dtype=torch.bool)
-        if not bool(action_mask[row, slot].any().detach().cpu().item()):
-            action_mask[row, slot] = True
-        active_mask[row, slot] = True
-        rewards[row, slot, 0] = float(sample.reward)
-        by_vehicle.setdefault((int(sample.episode), str(sample.veh_id)), []).append(row)
-
-    td = TensorDict(
-        {
-            ("agents", "observation"): obs,
-            ("agents", "action"): action,
-            ("agents", "sample_log_prob"): old_log_prob.detach(),
-            ("agents", "action_mask"): action_mask,
-            ("agents", "active_mask"): active_mask,
-        },
-        batch_size=[n],
+    frame_groups = _group_mappo_frame_indices(
+        samples,
+        mode=actor_critic.centralized_state_mode,
+    )
+    _slots, _rewards, advantages, value_targets = _compute_mappo_advantages(
+        samples=samples,
+        frame_groups=frame_groups,
+        actor_critic=actor_critic,
+        gamma=float(gamma),
+        lmbda=float(lmbda),
+        normalize_advantage=bool(normalize_advantage),
+        value_chunk_size=max(len(frame_groups), 1),
         device=device,
     )
-    with torch.no_grad():
-        value_td = actor_critic.critic(TensorDict({("agents", "observation"): obs}, batch_size=[n], device=device))
-        values = value_td.get(("agents", "state_value")).detach()
-
-    advantage = torch.zeros((n, n_agents, 1), device=device, dtype=torch.float32)
-    value_target = torch.zeros((n, n_agents, 1), device=device, dtype=torch.float32)
-    gamma_f = float(gamma)
-    lmbda_f = float(lmbda)
-    for indices in by_vehicle.values():
-        ordered = sorted(indices, key=lambda i: (int(samples[i].decision_idx), int(samples[i].sim_step)))
-        next_adv = torch.zeros((), device=device, dtype=torch.float32)
-        next_value = torch.zeros((), device=device, dtype=torch.float32)
-        for row in reversed(ordered):
-            slot = int(slot_rows[row])
-            value = values[row, slot, 0]
-            reward = rewards[row, slot, 0]
-            delta = reward + gamma_f * next_value - value
-            adv = delta + gamma_f * lmbda_f * next_adv
-            advantage[row, slot, 0] = adv
-            value_target[row, slot, 0] = adv + value
-            next_adv = adv
-            next_value = value
-
-    if bool(normalize_advantage):
-        active_adv = advantage[active_mask]
-        if int(active_adv.numel()) > 1:
-            mean = active_adv.mean()
-            std = active_adv.std(unbiased=False).clamp_min(1e-6)
-            advantage = torch.where(active_mask.unsqueeze(-1), (advantage - mean) / std, advantage)
-
-    td.set(("agents", "advantage"), advantage.detach())
-    td.set(("agents", "value_target"), value_target.detach())
-    td.set(("agents", "reward"), rewards.detach())
-    return td
+    return _build_mappo_minibatch_td(
+        samples=samples,
+        frame_groups=frame_groups,
+        frame_indices=list(range(len(frame_groups))),
+        actor_critic=actor_critic,
+        advantages=advantages,
+        value_targets=value_targets,
+        device=device,
+    )
 
 
 def build_torchrl_mappo_loss(
@@ -676,7 +820,11 @@ class ToyMappoTorchRLTrainer(ToyOnlineAcTrainer):
     """Fixed-role toy trainer using TorchRL's MAPPO actor/critic/loss stack."""
 
     def __init__(self, cfg: ToyMappoTorchRLConfig):
-        self.cfg = cfg.resolve()
+        resolved_cfg = cfg.resolve()
+        self.cfg = replace(
+            resolved_cfg,
+            centralized_state_mode=_resolve_mappo_state_mode(resolved_cfg),
+        ).resolve()
         self.output_dir = Path(self.cfg.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         torch.manual_seed(int(self.cfg.seed))
@@ -728,6 +876,10 @@ class ToyMappoTorchRLTrainer(ToyOnlineAcTrainer):
             "update_epochs": 0.0,
             "updates_per_epoch": 0.0,
             "frames_per_batch": 0.0,
+            "joint_frames": 0.0,
+            "active_transition_passes": 0.0,
+            "joint_frame_passes": 0.0,
+            "optimizer_steps": 0.0,
             "return_mean": 0.0,
             "return_std": 0.0,
             "adv_mean": 0.0,
@@ -750,35 +902,66 @@ class ToyMappoTorchRLTrainer(ToyOnlineAcTrainer):
         self.actor.load_state_dict(actor_state)
         optimizer_state = state.get("optimizer")
         if optimizer_state is not None:
-            self.optimizer.load_state_dict(optimizer_state)
+            if self._optimizer_state_shapes_match(optimizer_state):
+                self.optimizer.load_state_dict(optimizer_state)
+            else:
+                print(
+                    "[toy-mappo-torchrl] resume optimizer state shape mismatch; "
+                    "continuing with a fresh optimizer",
+                    flush=True,
+                )
         episode = int(state.get("episode", 0) or 0)
         print(f"[toy-mappo-torchrl] resumed actor/critic from {path} at episode {episode}", flush=True)
         return episode
 
+    def _optimizer_state_shapes_match(self, optimizer_state: Dict[str, Any]) -> bool:
+        state_by_param = optimizer_state.get("state", {})
+        saved_groups = optimizer_state.get("param_groups", [])
+        current_groups = self.optimizer.param_groups
+        if not isinstance(state_by_param, dict) or len(saved_groups) != len(current_groups):
+            return False
+        for saved_group, current_group in zip(saved_groups, current_groups):
+            saved_params = list(saved_group.get("params", []))
+            current_params = list(current_group.get("params", []))
+            if len(saved_params) != len(current_params):
+                return False
+            for saved_param_id, current_param in zip(saved_params, current_params):
+                saved_state = state_by_param.get(saved_param_id, {})
+                if not isinstance(saved_state, dict):
+                    continue
+                current_shape = tuple(current_param.shape)
+                for value in saved_state.values():
+                    if torch.is_tensor(value) and value.ndim > 0 and tuple(value.shape) != current_shape:
+                        return False
+        return True
+
     def update_from_replay(self, episode_batches: Sequence[Sequence[OnlineDecisionSample]]) -> Dict[str, float]:
         samples = [sample for batch in episode_batches for sample in batch]
         if len(samples) < int(self.cfg.min_samples_per_update):
-            return {
-                "loss": 0.0,
-                "loss_objective": 0.0,
-                "loss_entropy": 0.0,
-                "loss_critic": 0.0,
-                "entropy": 0.0,
-                "clip_fraction": 0.0,
-                "n_samples": float(len(samples)),
-                "replay_episodes": float(len(episode_batches)),
-                "update_epochs": 0.0,
-                "skipped": 1.0,
-            }
+            metrics = self._pending_update_metrics(
+                n_samples=len(samples),
+                pending_episodes=len(episode_batches),
+            )
+            metrics["pending_batch"] = 0.0
+            return metrics
 
-        frames = int(len(samples))
-        configured_minibatch_size = min(max(int(self.cfg.minibatch_size), 1), max(frames, 1))
+        active_total = int(len(samples))
+        frame_groups = _group_mappo_frame_indices(
+            samples,
+            mode=str(self.cfg.centralized_state_mode),
+        )
+        joint_frames = int(len(frame_groups))
+        configured_minibatch_size = min(
+            max(int(self.cfg.minibatch_size), 1),
+            max(joint_frames, 1),
+        )
         effective_minibatch_size = _mappo_effective_minibatch_size(
             configured_minibatch_size=configured_minibatch_size,
             actor_critic=self.actor,
         )
         _slots, _rewards, advantages, value_targets = _compute_mappo_advantages(
             samples=samples,
+            frame_groups=frame_groups,
             actor_critic=self.actor,
             gamma=float(self.cfg.gamma),
             lmbda=float(self.cfg.lmbda),
@@ -786,24 +969,17 @@ class ToyMappoTorchRLTrainer(ToyOnlineAcTrainer):
             value_chunk_size=int(effective_minibatch_size),
             device=self.device,
         )
-        active_total = int(len(samples))
         if active_total <= 0:
-            return {
-                "loss": 0.0,
-                "loss_objective": 0.0,
-                "loss_entropy": 0.0,
-                "loss_critic": 0.0,
-                "entropy": 0.0,
-                "clip_fraction": 0.0,
-                "n_samples": 0.0,
-                "replay_episodes": float(len(episode_batches)),
-                "update_epochs": 0.0,
-                "skipped": 1.0,
-            }
+            metrics = self._pending_update_metrics(
+                n_samples=0,
+                pending_episodes=len(episode_batches),
+            )
+            metrics["pending_batch"] = 0.0
+            return metrics
 
-        frames_per_batch = frames
+        frames_per_batch = active_total
         updates_per_epoch = max(
-            (frames + configured_minibatch_size - 1) // configured_minibatch_size,
+            (joint_frames + configured_minibatch_size - 1) // configured_minibatch_size,
             1,
         )
         update_epochs = max(int(self.cfg.num_epochs), 1)
@@ -816,13 +992,19 @@ class ToyMappoTorchRLTrainer(ToyOnlineAcTrainer):
         loss_critic_values: List[float] = []
         entropy_values: List[float] = []
         clip_values: List[float] = []
+        metric_weights: List[int] = []
+        optimizer_steps = 0
         for _epoch in range(update_epochs):
             for optimizer_batch_indices in _random_minibatch_indices(
-                n_samples=frames,
+                n_samples=joint_frames,
                 minibatch_size=configured_minibatch_size,
             ):
                 self.optimizer.zero_grad(set_to_none=True)
                 optimizer_batch_size = int(len(optimizer_batch_indices))
+                optimizer_active_total = sum(
+                    len(frame_groups[int(frame_index)])
+                    for frame_index in optimizer_batch_indices
+                )
                 optimizer_batch_has_grad = False
                 for start in range(0, optimizer_batch_size, effective_minibatch_size):
                     batch_indices = optimizer_batch_indices[
@@ -830,7 +1012,8 @@ class ToyMappoTorchRLTrainer(ToyOnlineAcTrainer):
                     ]
                     subdata = _build_mappo_minibatch_td(
                         samples=samples,
-                        indices=batch_indices,
+                        frame_groups=frame_groups,
+                        frame_indices=batch_indices,
                         actor_critic=self.actor,
                         advantages=advantages,
                         value_targets=value_targets,
@@ -850,7 +1033,7 @@ class ToyMappoTorchRLTrainer(ToyOnlineAcTrainer):
                     critic_loss = _loss_matrix(loss_vals.get("loss_critic"), active_float)
                     total_matrix = objective + entropy_loss + critic_loss
                     loss = _masked_mean(total_matrix, active)
-                    loss_scale = float(active_count) / float(max(optimizer_batch_size, 1))
+                    loss_scale = float(active_count) / float(max(optimizer_active_total, 1))
                     (loss * loss_scale).backward()
                     optimizer_batch_has_grad = True
 
@@ -864,12 +1047,14 @@ class ToyMappoTorchRLTrainer(ToyOnlineAcTrainer):
                     loss_critic_values.append(
                         float(_masked_mean(critic_loss.detach(), active).cpu().item())
                     )
-                    entropy_tensor = loss_vals.get("entropy")
-                    if torch.is_tensor(entropy_tensor):
-                        entropy_values.append(float(entropy_tensor.detach().mean().cpu().item()))
-                    clip_tensor = loss_vals.get("clip_fraction")
-                    if torch.is_tensor(clip_tensor):
-                        clip_values.append(float(clip_tensor.detach().mean().cpu().item()))
+                    active_entropy, active_clip = _active_policy_diagnostics(
+                        actor_critic=self.actor,
+                        data=subdata,
+                        clip_epsilon=float(self.cfg.clip_epsilon),
+                    )
+                    entropy_values.append(active_entropy)
+                    clip_values.append(active_clip)
+                    metric_weights.append(active_count)
 
                 if optimizer_batch_has_grad:
                     torch.nn.utils.clip_grad_norm_(
@@ -877,9 +1062,15 @@ class ToyMappoTorchRLTrainer(ToyOnlineAcTrainer):
                         float(self.cfg.max_grad_norm),
                     )
                     self.optimizer.step()
+                    optimizer_steps += 1
 
         def mean(values: Sequence[float]) -> float:
-            return float(np.mean(values)) if values else 0.0
+            if not values:
+                return 0.0
+            weights = np.asarray(metric_weights[: len(values)], dtype=np.float64)
+            if len(weights) != len(values) or float(weights.sum()) <= 0.0:
+                return float(np.mean(values))
+            return float(np.average(np.asarray(values, dtype=np.float64), weights=weights))
 
         return {
             "loss": mean(loss_values),
@@ -892,10 +1083,14 @@ class ToyMappoTorchRLTrainer(ToyOnlineAcTrainer):
             "clip_fraction": mean(clip_values),
             "clip_frac": mean(clip_values),
             "n_samples": float(active_total),
+            "joint_frames": float(joint_frames),
             "replay_episodes": float(len(episode_batches)),
             "update_epochs": float(update_epochs),
             "updates_per_epoch": float(updates_per_epoch),
             "frames_per_batch": float(frames_per_batch),
+            "active_transition_passes": float(active_total * update_epochs),
+            "joint_frame_passes": float(joint_frames * update_epochs),
+            "optimizer_steps": float(optimizer_steps),
             "configured_minibatch_size": float(configured_minibatch_size),
             "effective_minibatch_size": float(effective_minibatch_size),
             "return_mean": float(np.mean(value_targets)) if value_targets.size else 0.0,
@@ -910,6 +1105,12 @@ class ToyMappoTorchRLTrainer(ToyOnlineAcTrainer):
         path.parent.mkdir(parents=True, exist_ok=True)
         state = {
             "model_family": "mappo_torchrl",
+            "mappo_layout": str(self.cfg.centralized_state_mode),
+            "critic_layout": (
+                "joint_multioutput_v1"
+                if str(self.cfg.centralized_state_mode) == "joint_frame"
+                else "legacy_shared_scalar_v1"
+            ),
             "episode": int(episode),
             "actor_critic": self.actor.state_dict(),
             "actor": self.actor.state_dict(),
@@ -970,6 +1171,10 @@ class ToyMappoTorchRLTrainer(ToyOnlineAcTrainer):
                     f"completion={row.get('completion_rate', float('nan')):.6f} "
                     f"unfinished={int(row.get('unfinished_all', 0))} "
                     f"batch={update.get('replay_episodes', 0.0):.0f}/{batch_episodes} "
+                    f"joint_frames={update.get('joint_frames', 0.0):.0f} "
+                    f"active={update.get('frames_per_batch', 0.0):.0f} "
+                    f"passes={update.get('active_transition_passes', 0.0):.0f} "
+                    f"steps={update.get('optimizer_steps', 0.0):.0f} "
                     f"pending={int(update.get('pending_batch', 0.0))} "
                     f"clip={update.get('clip_frac', 0.0):.3f}",
                     flush=True,
@@ -1002,6 +1207,12 @@ class ToyMappoTorchRLTrainer(ToyOnlineAcTrainer):
                 "share_parameters_policy": False,
                 "share_parameters_critic": True,
                 "centralized_critic": True,
+                "centralized_state_mode": str(self.cfg.centralized_state_mode),
+                "critic_layout": (
+                    "joint_multioutput_v1"
+                    if str(self.cfg.centralized_state_mode) == "joint_frame"
+                    else "legacy_shared_scalar_v1"
+                ),
                 "value_estimator": "gae",
                 "agent_frames_per_batch": int(self.cfg.agent_frames_per_batch),
                 "clip_epsilon": float(self.cfg.clip_epsilon),
@@ -1176,6 +1387,7 @@ def build_config(args: argparse.Namespace) -> ToyMappoTorchRLConfig:
         policy_network_num_cells=int(args.policy_network_num_cells),
         critic_network_depth=int(args.critic_network_depth),
         critic_network_num_cells=int(args.critic_network_num_cells),
+        centralized_state_mode=str(args.centralized_state_mode),
         av_execution_mode=str(args.av_execution_mode),
     )
     if bool(args.eval_only) and int(args.eval_sim_buffer_after_last_depart) > 0:
@@ -1253,6 +1465,17 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--policy-network-num-cells", type=int, default=64)
     parser.add_argument("--critic-network-depth", type=int, default=3)
     parser.add_argument("--critic-network-num-cells", type=int, default=64)
+    parser.add_argument(
+        "--centralized-state-mode",
+        choices=["auto", "focal", "joint_frame"],
+        default="auto",
+        help=(
+            "MAPPO critic layout. joint_frame groups all CAV decisions from the same "
+            "episode/decision tick; focal reproduces the legacy one-vehicle row; auto "
+            "detects the layout from a resume checkpoint and uses joint_frame for a "
+            "new training run."
+        ),
+    )
     parser.add_argument("--hdv-gawron-mode", default="routerl")
     parser.add_argument("--hdv-gawron-alpha-zero", type=float, default=0.2)
     parser.add_argument("--hdv-gawron-beta", type=float, default=-1.5)
@@ -1278,6 +1501,7 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
 
 
 def build_plan(cfg: ToyMappoTorchRLConfig) -> Dict[str, Any]:
+    resolved_state_mode = _resolve_mappo_state_mode(cfg)
     return {
         "baseline": "toy_cross_bottleneck_mappo_torchrl",
         "network": cfg.network_name,
@@ -1307,6 +1531,13 @@ def build_plan(cfg: ToyMappoTorchRLConfig) -> Dict[str, Any]:
             "share_parameters_policy": False,
             "share_parameters_critic": True,
             "centralized_critic": True,
+            "centralized_state_mode": str(cfg.centralized_state_mode),
+            "resolved_centralized_state_mode": resolved_state_mode,
+            "critic_layout": (
+                "joint_multioutput_v1"
+                if resolved_state_mode == "joint_frame"
+                else "legacy_shared_scalar_v1"
+            ),
             "agent_frames_per_batch": int(cfg.agent_frames_per_batch),
             "n_iters": int(cfg.n_iters or cfg.train_episodes),
             "checkpoint_interval": int(cfg.checkpoint_interval),

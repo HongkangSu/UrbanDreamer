@@ -382,6 +382,7 @@ class UrbanWorldModel(nn.Module):
         # --- Stackelberg equilibrium layer (optional) ---
         self.stackelberg: Optional[StackelbergLayer] = None
         self._route_registry = route_registry
+        self._hdv_episode_pred_cache: Optional[torch.Tensor] = None
         if stackelberg_cfg is not None and stackelberg_cfg.get("enabled", False):
             total_av_count = float(stackelberg_cfg.get("total_av_count", 0.0))
             total_hdv_count = float(stackelberg_cfg.get("total_hdv_count", 0.0))
@@ -1294,6 +1295,10 @@ class UrbanWorldModel(nn.Module):
         depart: Optional[Union[np.ndarray, torch.Tensor]] = None,
         context: Optional[Union[np.ndarray, torch.Tensor]] = None,
         normalize: bool = True,
+        predictor_flow_time: float = 0.5,
+        episode_pressure_normalize: bool = False,
+        episode_pressure_epsilon: float = 1e-8,
+        smoothing_momentum: float = 0.0,
     ) -> Optional[torch.Tensor]:
         """Predict an episode-level HDV edge response from aggregated AV pressure.
 
@@ -1316,12 +1321,18 @@ class UrbanWorldModel(nn.Module):
             z = torch.as_tensor(z_context, device=self.device, dtype=torch.float32)
             if z.dim() == 3:
                 z = z[0]
-            if z.dim() != 2:
-                raise ValueError(f"z_context must be (E,D) or (1,E,D), got {tuple(z.shape)}")
+        if z.dim() != 2:
+            raise ValueError(f"z_context must be (E,D) or (1,E,D), got {tuple(z.shape)}")
         packed_seq = z.unsqueeze(0).unsqueeze(0)
         action = torch.as_tensor(episode_av_pressure, device=self.device, dtype=packed_seq.dtype)
         if action.dim() > 1:
             action = action.reshape(-1)
+        if episode_pressure_normalize:
+            action = torch.nan_to_num(action, nan=0.0)
+            action = action.clamp_min(0.0)
+            pressure_sum = action.sum().clamp_min(float(episode_pressure_epsilon))
+            if pressure_sum > 1e-12:
+                action = action / pressure_sum
         model_actions = self._prepare_model_actions(
             batch_size=1,
             seq_len=1,
@@ -1331,7 +1342,12 @@ class UrbanWorldModel(nn.Module):
             device=self.device,
             dtype=packed_seq.dtype,
         )
-        flow_time = torch.zeros((1, 1), device=self.device, dtype=torch.float32)
+        flow_time = torch.full(
+            (1, 1),
+            fill_value=float(predictor_flow_time),
+            device=self.device,
+            dtype=torch.float32,
+        )
         _, _, hdv_logits = self.dynamics(
             model_actions, None, None, packed_seq,
             act_mask=None, agent_tokens=None,
@@ -1340,7 +1356,15 @@ class UrbanWorldModel(nn.Module):
         if hdv_logits is None:
             return None
         if normalize:
-            return torch.softmax(hdv_logits[0, -1].float(), dim=-1).detach().cpu()
+            probs = torch.softmax(hdv_logits[0, -1].float(), dim=-1)
+            momentum = float(smoothing_momentum)
+            if momentum > 0.0 and self._hdv_episode_pred_cache is not None:
+                cache = self._hdv_episode_pred_cache.to(device=probs.device, dtype=probs.dtype)
+                if cache.shape == probs.shape:
+                    probs = torch.clamp((1.0 - momentum) * probs + momentum * cache, min=0.0)
+                    probs = probs / probs.sum().clamp_min(1e-8)
+            self._hdv_episode_pred_cache = probs.detach().clone().cpu()
+            return probs.detach().cpu()
         return hdv_logits[0, -1].float().detach().cpu()
 
     @torch.inference_mode()

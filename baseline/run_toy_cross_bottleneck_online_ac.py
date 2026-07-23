@@ -103,6 +103,35 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
     def __init__(self, *, actor: VehicleRouteActor, cfg: OnlineNoCfmConfig, **collector_kwargs: Any):
         super().__init__(wm=None, actor=actor, cfg=cfg, **collector_kwargs)
 
+    def _reset_episode_epsilon_scope(self) -> None:
+        self._episode_epsilon_seen_vehicle_ids: set[str] = set()
+        self._episode_epsilon_policy_rows = 0
+        self._episode_epsilon_eligible_rows = 0
+
+    def episode_epsilon_scope_stats(self) -> Dict[str, float]:
+        policy_rows = int(getattr(self, "_episode_epsilon_policy_rows", 0))
+        eligible_rows = int(getattr(self, "_episode_epsilon_eligible_rows", 0))
+        epsilon = float(getattr(self._policy_eval, "epsilon", 0.0))
+        return {
+            "epsilon_policy_rows": float(policy_rows),
+            "epsilon_eligible_rows": float(eligible_rows),
+            "effective_epsilon_mean": (
+                epsilon * float(eligible_rows) / float(policy_rows)
+                if policy_rows > 0
+                else 0.0
+            ),
+        }
+
+    def _commit_episode_epsilon_scope(self, active_ids: Sequence[str]) -> None:
+        if (
+            bool(getattr(self._policy_eval, "training", False))
+            and str(getattr(self._policy_eval, "epsilon_scope", "per_decision"))
+            == "first_decision_per_vehicle"
+        ):
+            self._episode_epsilon_seen_vehicle_ids.update(
+                str(veh_id) for veh_id in active_ids
+            )
+
     def _policy_logits_for_active_ids(
         self,
         obs: torch.Tensor,
@@ -110,6 +139,26 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
     ) -> torch.Tensor:
         active_logits = getattr(self._policy_eval, "forward_logits_for_active_ids", None)
         if callable(active_logits):
+            if not hasattr(self, "_episode_epsilon_seen_vehicle_ids"):
+                self._reset_episode_epsilon_scope()
+            scope = str(getattr(self._policy_eval, "epsilon_scope", "per_decision"))
+            if bool(getattr(self._policy_eval, "training", False)):
+                self._episode_epsilon_policy_rows += int(len(active_ids))
+                if scope == "first_decision_per_vehicle":
+                    seen = self._episode_epsilon_seen_vehicle_ids
+                    eligible = [str(veh_id) not in seen for veh_id in active_ids]
+                    self._episode_epsilon_eligible_rows += int(sum(eligible))
+                    epsilon_by_row = torch.as_tensor(
+                        eligible,
+                        device=obs.device,
+                        dtype=obs.dtype,
+                    ) * float(getattr(self._policy_eval, "epsilon", 0.0))
+                    return active_logits(
+                        obs,
+                        active_ids,
+                        epsilon_by_row=epsilon_by_row,
+                    )
+                self._episode_epsilon_eligible_rows += int(len(active_ids))
             return active_logits(obs, active_ids)
         return self._policy_eval.forward_logits(obs)
 
@@ -135,6 +184,7 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
         max_steps: int,
     ) -> tuple[List[OnlineDecisionSample], Dict[str, Any]]:
         self._first_decision_routes: Dict[str, List[str]] = {}
+        self._reset_episode_epsilon_scope()
         return super()._collect_single_episode(episode_id, max_steps)
 
     def _select_av_actions(self, state: Dict[str, Any], rng: np.random.RandomState) -> Dict[str, List[str]]:
@@ -310,6 +360,8 @@ class ToyOnlineAcCollector(OnlineNoCfmCollector):
                 selected_indices[i] = self._select_policy_route_index(probs, rng)
                 selected_indices[i] = int(np.clip(selected_indices[i], 0, len(route_batch[i]) - 1))
                 probs_np[i] = probs.astype(np.float32)
+
+        self._commit_episode_epsilon_scope(active_ids)
 
         live_cost_matrix = (
             _edge_route_cost_matrix(

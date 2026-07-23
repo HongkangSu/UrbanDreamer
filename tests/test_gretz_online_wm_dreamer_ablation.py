@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT))
 
 from ablation.online_wm_dreamer_actor_critic import (  # noqa: E402
     CausalHdvResponseModel,
+    GLOBAL_CRITIC_SEMANTICS,
     OnlineHdvEpisodeSummary,
     OnlineImaginedActorCritic,
     OnlineWmDreamerConfig,
@@ -26,6 +27,9 @@ from ablation.online_wm_dreamer_actor_critic import (  # noqa: E402
     _sample_masked_actions,
     _discounted_returns_by_vehicle_ids,
     _global_network_reward_from_latent,
+    _global_t_all_potential_reward,
+    _has_trained_t_all_head,
+    _imagined_global_context,
     build_eval_command,
     build_gretz_online_wm_dreamer_plan,
     capped_step_cost_reward_matrix,
@@ -75,8 +79,18 @@ def test_online_wm_plan_marks_cfm_and_online_wm_training(tmp_path):
     assert plan["training"]["wm_hdv_pressure_trace_enabled"] is True
     assert plan["training"]["imag_horizon"] == 8
     assert plan["training"]["imagined_rollout_batch_size"] == 4
-    assert plan["training"]["global_critic_enabled"] is True
-    assert plan["training"]["ac_global_advantage_weight"] == 1.0
+    assert plan["training"]["global_critic_enabled"] is False
+    assert plan["training"]["global_critic_semantics"] == "state_value_v1"
+    assert plan["training"]["ac_global_advantage_weight"] == 0.0
+    assert plan["training"]["wm_t_all_supervision_weight"] == 0.2
+    assert plan["reward_semantics"]["global_reward_semantics"] == "t_all_potential_v1"
+    assert plan["reward_semantics"]["global_reward_enabled"] is False
+    assert plan["reward_semantics"]["global_enablement"] == (
+        "disabled_pending_held_out_t_all_calibration"
+    )
+    assert plan["reward_semantics"]["global_source"] == (
+        "supervised_completed_vehicle_episode_t_all_head"
+    )
     assert plan["world_model_usage"]["imagined_action_mode"] == "stochastic_masked_sample_one_hot"
     assert plan["world_model_usage"]["real_collection_action_mode"] == "stochastic_policy_sample_one_hot"
     assert plan["training"]["real_policy_route_selection"] == "sample"
@@ -104,6 +118,27 @@ def test_online_wm_updater_unfreezes_world_model_parameters():
 
     assert all(param.requires_grad for param in wm.flow_projector.parameters())
     assert all(param.requires_grad for param in wm.dynamics.parameters())
+
+
+def test_online_wm_batch_carries_completed_vehicle_episode_t_all():
+    step = _wm_step(decision_idx=0, hdv_action=torch.tensor([0.25, 0.75]))
+    step.episode_t_all_minutes = 4.75
+    updater = object.__new__(OnlineWorldModelUpdater)
+    updater.device = torch.device("cpu")
+
+    batch = updater._batch_tensors([step])
+
+    torch.testing.assert_close(batch["episode_t_all"], torch.tensor([4.75]))
+
+
+def test_t_all_head_must_leave_zero_initialization_before_global_use():
+    from dreamer4.urban_routing.flow_projector import FlowProjector
+
+    projector = FlowProjector(d_spatial=8, enable_t_all_head=True)
+    assert _has_trained_t_all_head(projector) is False
+    with torch.no_grad():
+        projector.t_all_head[-1].weight.fill_(1e-3)
+    assert _has_trained_t_all_head(projector) is True
 
 
 def test_online_wm_causal_pair_aligns_current_action_to_next_target():
@@ -226,11 +261,37 @@ def test_causal_hdv_response_pairs_previous_episode_to_current_static_demand():
     torch.testing.assert_close(y[0], torch.tensor([0.0, 1.0]))
 
 
+def test_residual_hdv_response_initialises_to_previous_episode_distribution():
+    cfg = OnlineWmDreamerConfig(
+        train_episodes=10,
+        hdv_response_predictor_enabled=True,
+        hdv_response_predictor_min_pairs=1,
+        hdv_response_predictor_parameterization="residual_logit",
+    )
+    model = CausalHdvResponseModel(n_edges=3, cfg=cfg, device=torch.device("cpu"))
+    model.trained_pairs = 1
+    summaries = [
+        OnlineHdvEpisodeSummary(
+            episode=1,
+            av_edge_pressure=np.asarray([3.0, 1.0, 0.0], dtype=np.float32),
+            hdv_static_edge_demand=np.asarray([2.0, 1.0, 1.0], dtype=np.float32),
+            hdv_target=np.asarray([2.0, 1.0, 1.0], dtype=np.float32),
+        )
+    ]
+
+    pred, metrics = model.predict_for_next_episode(summaries, episode=2)
+
+    assert pred is not None
+    np.testing.assert_allclose(pred, np.asarray([0.5, 0.25, 0.25]), atol=1e-6)
+    assert metrics["hdv_response_pred_source_code"] == 2.0
+
+
 def test_causal_hdv_response_checkpoint_roundtrip_preserves_progress_denominator(tmp_path):
     cfg = OnlineWmDreamerConfig(
         train_episodes=10,
         hdv_response_predictor_enabled=True,
         hdv_response_predictor_progress_denominator=7,
+        hdv_response_predictor_parameterization="residual_logit",
     )
     model = CausalHdvResponseModel(n_edges=2, cfg=cfg, device=torch.device("cpu"))
     model.trained_pairs = 3
@@ -250,6 +311,164 @@ def test_causal_hdv_response_checkpoint_roundtrip_preserves_progress_denominator
     assert state["metrics"]["edge_tv"] == 0.1
     assert loaded.trained_pairs == 3
     assert loaded.progress_denominator == 7
+    assert loaded.parameterization == "residual_logit"
+
+
+def test_legacy_hdv_response_checkpoint_keeps_absolute_logit_semantics(tmp_path):
+    legacy_cfg = OnlineWmDreamerConfig(
+        train_episodes=10,
+        hdv_response_predictor_enabled=True,
+        hdv_response_predictor_parameterization="absolute_logits",
+    )
+    legacy = CausalHdvResponseModel(n_edges=2, cfg=legacy_cfg, device=torch.device("cpu"))
+    with torch.no_grad():
+        for parameter in legacy.model.parameters():
+            parameter.zero_()
+    legacy_path = tmp_path / "legacy_hdv_response.pt"
+    torch.save(
+        {
+            "format": "causal_hdv_response_predictor_v1",
+            "model_state_dict": legacy.model.state_dict(),
+            "trained_pairs": 4,
+            "n_edges": 2,
+            "hidden_dim": legacy.hidden_dim,
+            "depth": legacy.depth,
+        },
+        legacy_path,
+    )
+    loaded = CausalHdvResponseModel(
+        n_edges=2,
+        cfg=OnlineWmDreamerConfig(
+            train_episodes=10,
+            hdv_response_predictor_enabled=True,
+            hdv_response_predictor_parameterization="residual_logit",
+        ),
+        device=torch.device("cpu"),
+    )
+
+    loaded.load_checkpoint(legacy_path)
+
+    assert loaded.parameterization == "absolute_logits"
+    x = torch.tensor([[0.8, 0.2, 0.9, 0.1, 0.2]], dtype=torch.float32)
+    torch.testing.assert_close(
+        loaded.predict_distribution(x),
+        torch.tensor([[0.5, 0.5]], dtype=torch.float32),
+    )
+
+
+def test_residual_hdv_response_checkpoint_roundtrip_preserves_prediction_scale(tmp_path):
+    cfg = OnlineWmDreamerConfig(
+        train_episodes=10,
+        hdv_response_predictor_enabled=True,
+        hdv_response_predictor_parameterization="residual_logit",
+        hdv_response_predictor_residual_scale=0.25,
+    )
+    model = CausalHdvResponseModel(n_edges=2, cfg=cfg, device=torch.device("cpu"))
+    ckpt = model.save_checkpoint(tmp_path / "residual_hdv_response.pt")
+    loaded = CausalHdvResponseModel(
+        n_edges=2,
+        cfg=OnlineWmDreamerConfig(
+            train_episodes=10,
+            hdv_response_predictor_enabled=True,
+            hdv_response_predictor_parameterization="absolute_logits",
+        ),
+        device=torch.device("cpu"),
+    )
+
+    state = loaded.load_checkpoint(ckpt)
+
+    assert state["format"] == "causal_hdv_response_predictor_v2"
+    assert loaded.parameterization == "residual_logit"
+    assert loaded.residual_scale == pytest.approx(0.25)
+
+
+def test_zero_scale_residual_checkpoint_can_continue_online_training():
+    cfg = OnlineWmDreamerConfig(
+        train_episodes=3,
+        hdv_response_predictor_enabled=True,
+        hdv_response_predictor_update_epochs=1,
+        hdv_response_predictor_parameterization="residual_logit",
+        hdv_response_predictor_residual_scale=0.0,
+    )
+    model = CausalHdvResponseModel(n_edges=2, cfg=cfg, device=torch.device("cpu"))
+    summaries = [
+        OnlineHdvEpisodeSummary(
+            episode=1,
+            av_edge_pressure=np.asarray([1.0, 0.0], dtype=np.float32),
+            hdv_static_edge_demand=np.asarray([1.0, 0.0], dtype=np.float32),
+            hdv_target=np.asarray([1.0, 0.0], dtype=np.float32),
+        ),
+        OnlineHdvEpisodeSummary(
+            episode=2,
+            av_edge_pressure=np.asarray([0.0, 1.0], dtype=np.float32),
+            hdv_static_edge_demand=np.asarray([0.0, 1.0], dtype=np.float32),
+            hdv_target=np.asarray([0.0, 1.0], dtype=np.float32),
+        ),
+    ]
+
+    metrics = model.update(summaries)
+
+    assert metrics["hdv_response_updates"] == 1.0
+    assert np.isfinite(metrics["hdv_response_loss"])
+
+
+def test_online_wm_resume_preserves_hdv_response_pairs_as_pretrained(tmp_path):
+    cfg = OnlineWmDreamerConfig(
+        resume_checkpoint=str(tmp_path / "checkpoint_ep00150.pt"),
+        hdv_response_predictor_enabled=True,
+    )
+    actor = torch.nn.Linear(2, 2)
+    response_model = CausalHdvResponseModel(
+        n_edges=2,
+        cfg=cfg,
+        device=torch.device("cpu"),
+    )
+    torch.save(
+        {
+            "episode": 150,
+            "actor": actor.state_dict(),
+            "hdv_response_predictor": response_model.model.state_dict(),
+            "hdv_response_trained_pairs": 145,
+        },
+        cfg.resume_checkpoint,
+    )
+    trainer = object.__new__(OnlineWmDreamerTrainer)
+    trainer.cfg = cfg
+    trainer.device = torch.device("cpu")
+    trainer.actor = torch.nn.Linear(2, 2)
+    trainer.hdv_response_model = response_model
+
+    resumed_episode = trainer._load_resume_checkpoint()
+
+    assert resumed_episode == 150
+    assert response_model.pretrained_pairs == 145
+    assert response_model.trained_pairs == 145
+
+
+def test_online_wm_resume_rejects_legacy_action_conditioned_global_critic(tmp_path):
+    checkpoint = tmp_path / "legacy_global_critic.pt"
+    actor = torch.nn.Linear(2, 2)
+    torch.save(
+        {
+            "episode": 150,
+            "actor": actor.state_dict(),
+            "global_critic": {"legacy.weight": torch.ones(1)},
+        },
+        checkpoint,
+    )
+    trainer = object.__new__(OnlineWmDreamerTrainer)
+    trainer.cfg = OnlineWmDreamerConfig(resume_checkpoint=str(checkpoint))
+    trainer.device = torch.device("cpu")
+    trainer.actor = torch.nn.Linear(2, 2)
+    trainer.global_critic = torch.nn.Linear(2, 1)
+    trainer.hdv_response_model = None
+
+    with pytest.raises(RuntimeError, match="legacy action-conditioned global critic"):
+        trainer._load_resume_checkpoint()
+
+
+def test_global_critic_checkpoint_semantics_constant_is_state_value():
+    assert GLOBAL_CRITIC_SEMANTICS == "state_value_v1"
 
 
 def test_online_wm_collector_projects_vehicle_local_hdv_routes_to_static_edge_demand():
@@ -580,25 +799,54 @@ def test_global_network_reward_weights_edge_tt_by_all_vehicle_count():
     torch.testing.assert_close(reward, torch.tensor(-0.5))
 
 
-def test_existing_global_critic_produces_lambda_advantage_for_actor_groups():
+def test_t_all_potential_reward_is_objective_aligned_and_telescopes():
+    class DummyProjector:
+        has_t_all_head = True
+
+        @staticmethod
+        def predict_t_all_from_z(z):
+            return z.float().mean(dim=(-2, -1))
+
+    class DummyWm:
+        flow_projector = DummyProjector()
+
+    reward, diagnostics = _global_t_all_potential_reward(
+        DummyWm(),
+        torch.full((2, 3), 6.0),
+        torch.full((2, 3), 5.0),
+        gamma=0.9,
+        reward_scale=1.0,
+    )
+
+    # Phi(z)=-T_all(z), so gamma*Phi(next)-Phi(current)=6-0.9*5.
+    torch.testing.assert_close(reward, torch.tensor(1.5))
+    assert diagnostics["global_t_all_current"] == pytest.approx(6.0)
+    assert diagnostics["global_t_all_next"] == pytest.approx(5.0)
+
+
+def test_global_critic_is_state_only_when_building_lambda_advantage():
     class ConstantGlobalCritic(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.value = torch.nn.Parameter(torch.tensor(0.0))
 
         def forward(self, z, action=None, context=None):
+            assert action is None
             return self.value.expand(int(z.shape[0]), 1)
 
     imagined = object.__new__(OnlineImaginedActorCritic)
     imagined.global_critic = ConstantGlobalCritic()
     imagined.device = torch.device("cpu")
-    imagined.cfg = OnlineWmDreamerConfig(gamma=0.0, ac_lambda=0.95)
+    imagined.cfg = OnlineWmDreamerConfig(
+        gamma=0.0,
+        ac_lambda=0.95,
+        ac_global_advantage_weight=1.0,
+    )
     part = {
         "global_latent_states": torch.zeros((2, 3, 4)),
         "global_next_latent_states": torch.zeros((2, 3, 4)),
         "global_contexts": torch.zeros((2, 3)),
         "global_rewards": torch.tensor([-1.0, -2.0]),
-        "action_edges": [torch.zeros(3), torch.zeros(3)],
     }
 
     loss, advantage, stats = imagined._global_critic_terms([part])
@@ -606,6 +854,91 @@ def test_existing_global_critic_produces_lambda_advantage_for_actor_groups():
     torch.testing.assert_close(loss, torch.tensor(1.25))
     torch.testing.assert_close(advantage, torch.tensor([-1.0, -2.0]))
     assert stats["imag_global_adv_mean"] == -1.5
+
+
+def test_imagined_global_context_advances_time_and_active_cavs_only():
+    initial = torch.tensor([0.25, 0.8, 0.6])
+
+    current = _imagined_global_context(
+        initial,
+        horizon_idx=0,
+        episode_steps=60,
+        initial_active_av=10,
+        active_av=8,
+    )
+    later = _imagined_global_context(
+        initial,
+        horizon_idx=6,
+        episode_steps=60,
+        initial_active_av=10,
+        active_av=5,
+    )
+
+    torch.testing.assert_close(current, initial)
+    torch.testing.assert_close(later, torch.tensor([0.35, 0.4, 0.6]))
+
+
+def test_global_critic_bootstraps_with_explicit_next_context():
+    class RecordingGlobalCritic(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.bias = torch.nn.Parameter(torch.tensor(0.0))
+            self.context_calls = []
+
+        def forward(self, z, action=None, context=None):
+            assert action is None
+            self.context_calls.append(context.detach().clone())
+            return self.bias + context[:, :1]
+
+    critic = RecordingGlobalCritic()
+    imagined = object.__new__(OnlineImaginedActorCritic)
+    imagined.global_critic = critic
+    imagined.device = torch.device("cpu")
+    imagined.cfg = OnlineWmDreamerConfig(
+        gamma=0.9,
+        ac_lambda=0.95,
+        ac_global_advantage_weight=1.0,
+    )
+    current_context = torch.tensor(
+        [[0.1, 1.0, 0.8], [0.2, 0.5, 0.8]],
+    )
+    next_context = torch.tensor(
+        [[0.2, 0.5, 0.8], [0.3, 0.0, 0.8]],
+    )
+    part = {
+        "global_latent_states": torch.zeros((2, 3, 4)),
+        "global_next_latent_states": torch.zeros((2, 3, 4)),
+        "global_contexts": current_context,
+        "global_next_contexts": next_context,
+        "global_rewards": torch.tensor([-1.0, -2.0]),
+    }
+
+    imagined._global_critic_terms([part])
+
+    torch.testing.assert_close(critic.context_calls[0], current_context)
+    torch.testing.assert_close(critic.context_calls[1], next_context)
+
+
+def test_disabled_global_advantage_does_not_train_global_critic():
+    class ExplodingGlobalCritic(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.value = torch.nn.Parameter(torch.tensor(0.0))
+
+        def forward(self, *_args, **_kwargs):
+            raise AssertionError("disabled global critic must not be evaluated")
+
+    imagined = object.__new__(OnlineImaginedActorCritic)
+    imagined.global_critic = ExplodingGlobalCritic()
+    imagined.device = torch.device("cpu")
+    imagined.cfg = OnlineWmDreamerConfig(ac_global_advantage_weight=0.0)
+    part = {"global_rewards": torch.tensor([1.0, 2.0])}
+
+    loss, advantage, stats = imagined._global_critic_terms([part])
+
+    torch.testing.assert_close(loss, torch.tensor(0.0))
+    torch.testing.assert_close(advantage, torch.zeros(2))
+    assert stats["imag_global_enabled"] == 0.0
 
 
 def test_imagined_route_progress_reward_stops_after_arrival():
@@ -823,6 +1156,10 @@ def test_online_wm_runner_dry_run_allows_missing(tmp_path):
             "4",
             "--global-advantage-weight",
             "0.75",
+            "--global-reward-scale",
+            "2.0",
+            "--wm-t-all-supervision-weight",
+            "0.15",
             "--real-policy-route-selection",
             "sample",
             "--eval-policy-route-selection",
@@ -834,6 +1171,13 @@ def test_online_wm_runner_dry_run_allows_missing(tmp_path):
             str(tmp_path / "hdv_response.pt"),
             "--hdv-response-predictor-progress-denominator",
             "50",
+            "--enable-hdv-response-online-update",
+            "--hdv-response-predictor-online-lr",
+            "0.0002",
+            "--hdv-response-predictor-online-update-epochs",
+            "3",
+            "--hdv-response-predictor-online-buffer-episodes",
+            "8",
             "--dry-run",
             "--allow-missing",
         ]
@@ -851,6 +1195,8 @@ def test_online_wm_runner_dry_run_allows_missing(tmp_path):
     assert cfg.imag_horizon == 8
     assert cfg.imagined_rollout_batch_size == 4
     assert cfg.ac_global_advantage_weight == 0.75
+    assert cfg.global_reward_scale == 2.0
+    assert cfg.wm_t_all_supervision_weight == 0.15
     assert cfg.real_policy_route_selection == "sample"
     assert cfg.eval_policy_route_selection == "sample"
     assert cfg.reward_mode == "capped_step_cost"
@@ -859,6 +1205,10 @@ def test_online_wm_runner_dry_run_allows_missing(tmp_path):
     assert cfg.imagined_hdv_context_source == "causal_response_predictor"
     assert cfg.hdv_response_predictor_ckpt == str(tmp_path / "hdv_response.pt")
     assert cfg.hdv_response_predictor_progress_denominator == 50
+    assert cfg.hdv_response_predictor_online_update_enabled is True
+    assert cfg.hdv_response_predictor_online_lr == 0.0002
+    assert cfg.hdv_response_predictor_online_update_epochs == 3
+    assert cfg.hdv_response_predictor_online_buffer_episodes == 8
 
     enabled_args = parse_args(
         [

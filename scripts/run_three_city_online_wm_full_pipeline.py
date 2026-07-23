@@ -53,6 +53,7 @@ class CitySpec:
     network_name: str
     settings_rel: str
     post_bundle_rel: str
+    hdv_response_predictor_ckpt_rel: str
     sumo_extra_args: str = "--collision.action warn"
     train_sim_buffer_after_last_depart: int | None = None
 
@@ -76,6 +77,10 @@ CITY_SPECS: Mapping[str, CitySpec] = {
             "neg_986733117_1_S0b_s500_e2500_v0p1/urb_fair_eval.env"
         ),
         post_bundle_rel="networks/gretz_armainvilliers/post_mutation",
+        hdv_response_predictor_ckpt_rel=(
+            "experiment_result/hdv_od_route_predictor_train_fit_v4_20260723/"
+            "gretz/persistence_anchored_od_route_predictor.pt"
+        ),
     ),
     "ingolstadt_custom": CitySpec(
         key="ingolstadt_custom",
@@ -85,6 +90,10 @@ CITY_SPECS: Mapping[str, CitySpec] = {
             "urb_fair_eval.env"
         ),
         post_bundle_rel="networks/ingolstadt_custom/post_mutation",
+        hdv_response_predictor_ckpt_rel=(
+            "experiment_result/hdv_od_route_predictor_train_fit_v4_20260723/"
+            "ingolstadt/persistence_anchored_od_route_predictor.pt"
+        ),
     ),
     "fontenay_en_parisis": CitySpec(
         key="fontenay_en_parisis",
@@ -95,6 +104,10 @@ CITY_SPECS: Mapping[str, CitySpec] = {
             "fastcap_20260609/urb_fair_eval.env"
         ),
         post_bundle_rel="networks/fontenay_en_parisis",
+        hdv_response_predictor_ckpt_rel=(
+            "experiment_result/hdv_od_route_predictor_train_fit_v4_20260723/"
+            "fontenay/persistence_anchored_od_route_predictor.pt"
+        ),
         sumo_extra_args=(
             "--collision.action warn --ignore-junction-blocker 60 "
             "--tripinfo-output.write-unfinished"
@@ -262,6 +275,7 @@ def required_inputs(root: Path, spec: CitySpec) -> tuple[Path, ...]:
         paths.network_dir / f"od_{spec.network_name}.txt",
         paths.network_dir / f"{spec.network_name}.net.xml",
         paths.edge_registry,
+        root / spec.hdv_response_predictor_ckpt_rel,
     )
 
 
@@ -355,6 +369,9 @@ def prepare_city_inputs(
         "agents_csv": str((paths.source_bundle / "agents.csv").resolve()),
         "routes_csv": str((paths.source_bundle / "routes.csv").resolve()),
         "route_rou_xml": str((paths.source_bundle / "route.rou.xml").resolve()),
+        "hdv_response_predictor_ckpt": str(
+            (root / spec.hdv_response_predictor_ckpt_rel).resolve()
+        ),
     }
     paths.portable_post_state.parent.mkdir(parents=True, exist_ok=True)
     paths.portable_post_state.write_text(
@@ -371,6 +388,12 @@ def prepare_city_inputs(
         "source_post_mutation_state_sha256": _sha256(paths.source_post_state),
         "source_hdv_state": str(paths.source_hdv_state.resolve()),
         "source_hdv_state_sha256": _sha256(paths.source_hdv_state),
+        "hdv_response_predictor_checkpoint": str(
+            (root / spec.hdv_response_predictor_ckpt_rel).resolve()
+        ),
+        "hdv_response_predictor_checkpoint_sha256": _sha256(
+            root / spec.hdv_response_predictor_ckpt_rel
+        ),
         "source_bundle": str(paths.source_bundle.resolve()),
         "portable_settings": str(paths.portable_settings.resolve()),
         "portable_post_mutation_state": str(paths.portable_post_state.resolve()),
@@ -711,10 +734,17 @@ def build_online_command(
         "--imagined-hdv-context-source",
         "causal_response_predictor",
         "--enable-hdv-response-predictor",
+        "--hdv-response-predictor-ckpt",
+        str(root / spec.hdv_response_predictor_ckpt_rel),
         "--hdv-response-predictor-fallback",
         "prev_hdv",
-        "--hdv-response-predictor-update-epochs",
-        "64",
+        "--enable-hdv-response-online-update",
+        "--hdv-response-predictor-online-lr",
+        "0.0001",
+        "--hdv-response-predictor-online-update-epochs",
+        "2",
+        "--hdv-response-predictor-online-buffer-episodes",
+        "16",
         "--hdv-response-predictor-min-pairs",
         "2",
         "--ratio-machines",
@@ -746,7 +776,11 @@ def build_online_command(
         "--eval-policy-route-selection",
         "sample",
         "--global-advantage-weight",
+        "0.0",
+        "--global-reward-scale",
         "1.0",
+        "--wm-t-all-supervision-weight",
+        "0.20",
         "--imag-horizon",
         "8",
         "--imagined-updates-per-episode",
@@ -1769,7 +1803,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             "wm_init": "cfm_current_8k",
             "online_real_action": "masked_policy_sample_one_hot",
             "imagined_action": "masked_policy_sample_one_hot",
-            "global_advantage_weight": 1.0,
+            "global_advantage_weight": 0.0,
+            "global_critic": "state_only_value",
+            "global_reward": "completed_vehicle_t_all_potential_difference",
+            "global_reward_status": "disabled_pending_held_out_t_all_calibration",
+            "wm_t_all_supervision_weight": 0.20,
+            "hdv_response_predictor": (
+                "pretrained_train_selected_persistence_anchored_od_route_"
+                "residual_v4_with_causal_online_finetuning"
+            ),
+            "hdv_response_predictor_checkpoints": {
+                spec.key: str((root / spec.hdv_response_predictor_ckpt_rel).resolve())
+                for spec in cities
+            },
             "online_hdv_learning": True,
             "eval_action": "masked_policy_sample",
             "eval_episodes_per_checkpoint": int(args.eval_episodes),

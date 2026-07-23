@@ -273,8 +273,11 @@ def verify_post_mutation_state(
         raise ValueError("post-mutation state should_humans_adapt mismatch")
     machine_ids = [str(x) for x in state.get("machine_agent_ids", [])]
     human_ids = [str(x) for x in state.get("human_agent_ids", [])]
-    if not machine_ids or not human_ids:
-        raise ValueError("post-mutation state machine/human ids must be non-empty")
+    ratio_machines = float(expected_ratio_machines)
+    if not machine_ids and ratio_machines > 0.0:
+        raise ValueError("post-mutation state machine ids must be non-empty when ratio_machines > 0")
+    if not human_ids and ratio_machines < 1.0:
+        raise ValueError("post-mutation state human ids must be non-empty when ratio_machines < 1")
     if set(machine_ids) & set(human_ids):
         raise ValueError("post-mutation state machine/human ids overlap")
     state_hashes = state.get("artifact_hashes", {})

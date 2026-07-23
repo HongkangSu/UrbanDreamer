@@ -71,6 +71,22 @@ def _safe_route(row: Dict[str, str], preferred: str, fallback: str = "initial_ro
     return -1
 
 
+def _route_from_column(row: Dict[str, str], key: str) -> int:
+    value = row.get(key)
+    if value is None or str(value).strip() == "":
+        return -1
+    try:
+        route = int(float(value))
+    except ValueError:
+        return -1
+    return route if route >= 0 else -1
+
+
+def _row_was_seen_in_episode(row: Dict[str, str]) -> bool:
+    value = str(row.get("seen_in_episode", "1")).strip().lower()
+    return value not in {"0", "false", "no", "off", ""}
+
+
 def _load_edge_ids(edge_registry: Path) -> List[str]:
     with edge_registry.open("r", encoding="utf-8") as f:
         data = json.load(f)
@@ -114,8 +130,10 @@ def _load_route_edges(route_xml: Path, edge_ids: Sequence[str]) -> Tuple[List[Od
 class StaticHdvDataset:
     episodes: np.ndarray
     av_route: np.ndarray
+    av_route_counts: np.ndarray
     av_edge: np.ndarray
     hdv_route: np.ndarray
+    hdv_route_counts: np.ndarray
     hdv_edge: np.ndarray
     hdv_od_weight: np.ndarray
     ods: List[Od]
@@ -157,6 +175,8 @@ def load_static_hdv_dataset(
     episodes_dir: Optional[Path],
     av_action_col: str = "policy_action",
     hdv_action_col: str = "initial_route_action",
+    require_seen_in_episode: bool = False,
+    strict_route_actions: bool = False,
 ) -> StaticHdvDataset:
     edge_ids = _load_edge_ids(edge_registry)
     ods, n_routes, route_edges = _load_route_edges(route_xml, edge_ids)
@@ -174,7 +194,9 @@ def load_static_hdv_dataset(
 
     episodes: List[int] = []
     av_route_rows: List[np.ndarray] = []
+    av_route_count_rows: List[np.ndarray] = []
     hdv_route_rows: List[np.ndarray] = []
+    hdv_route_count_rows: List[np.ndarray] = []
     av_edge_rows: List[np.ndarray] = []
     hdv_edge_rows: List[np.ndarray] = []
     hdv_od_weight_rows: List[np.ndarray] = []
@@ -190,6 +212,8 @@ def load_static_hdv_dataset(
                 role = str(row.get("vType", "")).strip().lower()
                 if role not in {"av", "human"}:
                     continue
+                if bool(require_seen_in_episode) and not _row_was_seen_in_episode(row):
+                    continue
                 try:
                     od = (int(float(row["origin"])), int(float(row["destination"])))
                 except (KeyError, TypeError, ValueError):
@@ -197,10 +221,15 @@ def load_static_hdv_dataset(
                 od_idx = od_to_idx.get(od)
                 if od_idx is None:
                     continue
-                route = _safe_route(
-                    row,
-                    av_action_col if role == "av" else hdv_action_col,
-                    fallback="initial_route_action",
+                action_col = av_action_col if role == "av" else hdv_action_col
+                route = (
+                    _route_from_column(row, action_col)
+                    if bool(strict_route_actions)
+                    else _safe_route(
+                        row,
+                        action_col,
+                        fallback="initial_route_action",
+                    )
                 )
                 if route < 0 or route >= n_routes:
                     continue
@@ -216,7 +245,9 @@ def load_static_hdv_dataset(
                     hdv_od_counts[od_idx] += 1.0
                     np.add.at(hdv_edge, np.asarray(edge_indices, dtype=np.int64), 1.0)
         episodes.append(_episode_num(path))
+        av_route_count_rows.append(av_route.copy())
         av_route_rows.append(_normalise_od_routes(av_route))
+        hdv_route_count_rows.append(hdv_route.copy())
         hdv_route_rows.append(_normalise_od_routes(hdv_route))
         av_edge_rows.append(_normalise_np(av_edge))
         hdv_edge_rows.append(_normalise_np(hdv_edge))
@@ -230,8 +261,10 @@ def load_static_hdv_dataset(
     return StaticHdvDataset(
         episodes=np.asarray(episodes, dtype=np.int64),
         av_route=np.stack(av_route_rows, axis=0),
+        av_route_counts=np.stack(av_route_count_rows, axis=0),
         av_edge=np.stack(av_edge_rows, axis=0),
         hdv_route=np.stack(hdv_route_rows, axis=0),
+        hdv_route_counts=np.stack(hdv_route_count_rows, axis=0),
         hdv_edge=np.stack(hdv_edge_rows, axis=0),
         hdv_od_weight=np.stack(hdv_od_weight_rows, axis=0),
         ods=ods,
