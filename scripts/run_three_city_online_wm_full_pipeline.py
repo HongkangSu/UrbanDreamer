@@ -776,9 +776,13 @@ def build_online_command(
         "--eval-policy-route-selection",
         "sample",
         "--global-advantage-weight",
-        "0.0",
+        "1.0",
         "--global-reward-scale",
         "1.0",
+        "--wm-active-count-supervision-weight",
+        "1.0",
+        "--wm-active-count-readout-lr",
+        "0.001",
         "--wm-t-all-supervision-weight",
         "0.20",
         "--imag-horizon",
@@ -1803,10 +1807,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             "wm_init": "cfm_current_8k",
             "online_real_action": "masked_policy_sample_one_hot",
             "imagined_action": "masked_policy_sample_one_hot",
-            "global_advantage_weight": 0.0,
+            "global_advantage_weight": 1.0,
             "global_critic": "state_only_value",
-            "global_reward": "completed_vehicle_t_all_potential_difference",
-            "global_reward_status": "disabled_pending_held_out_t_all_calibration",
+            "global_reward": "active_vehicle_exposure_mean_travel_time",
+            "global_reward_status": "enabled",
+            "global_reward_real_source": "sumo_active_vehicle_exposure",
+            "global_reward_imagined_source": (
+                "calibrated_current_next_latent_transition_exposure_readout"
+            ),
+            "global_reward_raw_decoder_sum_role": (
+                "anchor_diagnostic_fallback"
+            ),
+            "wm_active_count_supervision_weight": 1.0,
+            "wm_active_count_readout_lr": 0.001,
             "wm_t_all_supervision_weight": 0.20,
             "hdv_response_predictor": (
                 "pretrained_train_selected_persistence_anchored_od_route_"

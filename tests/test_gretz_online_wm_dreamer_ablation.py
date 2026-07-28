@@ -8,7 +8,11 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+import ablation.online_wm_dreamer_actor_critic as online_wm_module  # noqa: E402
+
 from ablation.online_wm_dreamer_actor_critic import (  # noqa: E402
+    ACTIVE_COUNT_READOUT_SEMANTICS,
+    AggregateActiveVehicleReadout,
     CausalHdvResponseModel,
     GLOBAL_CRITIC_SEMANTICS,
     OnlineHdvEpisodeSummary,
@@ -21,15 +25,19 @@ from ablation.online_wm_dreamer_actor_critic import (  # noqa: E402
     OnlineWorldModelUpdater,
     _causal_pair,
     _advance_imagined_route_progress,
+    _active_vehicle_count_from_latent,
+    _active_vehicle_count_readout_supervision_loss,
     _aggregate_selected_routes_to_action_edge,
+    _decoded_active_vehicle_count,
     _combine_vehicle_global_advantages,
     _current_to_dest_candidate_paths,
     _sample_masked_actions,
     _discounted_returns_by_vehicle_ids,
+    _global_active_vehicle_reward,
     _global_network_reward_from_latent,
-    _global_t_all_potential_reward,
-    _has_trained_t_all_head,
     _imagined_global_context,
+    _nominal_transition_active_vehicle_count,
+    _real_global_transition_part,
     build_eval_command,
     build_gretz_online_wm_dreamer_plan,
     capped_step_cost_reward_matrix,
@@ -58,7 +66,11 @@ def test_online_wm_plan_marks_cfm_and_online_wm_training(tmp_path):
     assert plan["world_model_usage"]["cfm_transition_in_training"] is True
     assert plan["world_model_usage"]["world_model_online_update"] is True
     assert plan["world_model_usage"]["direct_real_a2c_update"] is False
-    assert plan["world_model_usage"]["updated_modules"] == ["flow_projector", "cfm_dynamics"]
+    assert plan["world_model_usage"]["updated_modules"] == [
+        "flow_projector",
+        "cfm_dynamics",
+        "transition_exposure_readout",
+    ]
     assert plan["world_model_usage"]["wm_grad_enabled"] is True
     assert plan["training"]["wm_replay_buffer_episodes"] == 8
     assert plan["training"]["wm_update_epochs"] == 1
@@ -79,18 +91,25 @@ def test_online_wm_plan_marks_cfm_and_online_wm_training(tmp_path):
     assert plan["training"]["wm_hdv_pressure_trace_enabled"] is True
     assert plan["training"]["imag_horizon"] == 8
     assert plan["training"]["imagined_rollout_batch_size"] == 4
-    assert plan["training"]["global_critic_enabled"] is False
+    assert plan["training"]["global_critic_enabled"] is True
     assert plan["training"]["global_critic_semantics"] == "state_value_v1"
-    assert plan["training"]["ac_global_advantage_weight"] == 0.0
+    assert plan["training"]["ac_global_advantage_weight"] == 1.0
     assert plan["training"]["wm_t_all_supervision_weight"] == 0.2
-    assert plan["reward_semantics"]["global_reward_semantics"] == "t_all_potential_v1"
-    assert plan["reward_semantics"]["global_reward_enabled"] is False
-    assert plan["reward_semantics"]["global_enablement"] == (
-        "disabled_pending_held_out_t_all_calibration"
+    assert plan["reward_semantics"]["global_reward_semantics"] == (
+        "active_vehicle_transition_exposure_readout_v4"
     )
+    assert plan["reward_semantics"]["global_reward_enabled"] is True
+    assert plan["reward_semantics"]["global_enablement"] == "enabled_by_default"
     assert plan["reward_semantics"]["global_source"] == (
-        "supervised_completed_vehicle_episode_t_all_head"
+        "real_sumo_vehicle_seconds_and_imagined_calibrated_exposure"
     )
+    assert plan["reward_semantics"]["global_imagined_active_exposure_source"] == (
+        "current_next_latent_transition_exposure_readout_with_scheduled_duration"
+    )
+    assert plan["reward_semantics"]["global_raw_decoder_sum_role"] == (
+        "initialization_anchor_diagnostic_and_legacy_fallback"
+    )
+    assert plan["reward_semantics"]["global_unit"] == "mean_travel_time_minutes"
     assert plan["world_model_usage"]["imagined_action_mode"] == "stochastic_masked_sample_one_hot"
     assert plan["world_model_usage"]["real_collection_action_mode"] == "stochastic_policy_sample_one_hot"
     assert plan["training"]["real_policy_route_selection"] == "sample"
@@ -114,31 +133,46 @@ def test_online_wm_updater_unfreezes_world_model_parameters():
                 param.requires_grad_(False)
 
     wm = DummyWm()
-    OnlineWorldModelUpdater(wm, OnlineWmDreamerConfig(wm_lr=1e-5), torch.device("cpu"))
+    updater = OnlineWorldModelUpdater(
+        wm,
+        OnlineWmDreamerConfig(
+            wm_lr=1e-5,
+            wm_active_count_readout_lr=1e-3,
+        ),
+        torch.device("cpu"),
+    )
 
     assert all(param.requires_grad for param in wm.flow_projector.parameters())
     assert all(param.requires_grad for param in wm.dynamics.parameters())
+    assert updater.active_count_readout_optimizer.param_groups[0]["lr"] == (
+        pytest.approx(1e-3)
+    )
 
 
 def test_online_wm_batch_carries_completed_vehicle_episode_t_all():
     step = _wm_step(decision_idx=0, hdv_action=torch.tensor([0.25, 0.75]))
     step.episode_t_all_minutes = 4.75
+    step.active_vehicle_seconds = 90.0
+    step.transition_seconds = 30.0
+    step.scheduled_transition_seconds = 60.0
     updater = object.__new__(OnlineWorldModelUpdater)
     updater.device = torch.device("cpu")
 
     batch = updater._batch_tensors([step])
 
     torch.testing.assert_close(batch["episode_t_all"], torch.tensor([4.75]))
-
-
-def test_t_all_head_must_leave_zero_initialization_before_global_use():
-    from dreamer4.urban_routing.flow_projector import FlowProjector
-
-    projector = FlowProjector(d_spatial=8, enable_t_all_head=True)
-    assert _has_trained_t_all_head(projector) is False
-    with torch.no_grad():
-        projector.t_all_head[-1].weight.fill_(1e-3)
-    assert _has_trained_t_all_head(projector) is True
+    torch.testing.assert_close(
+        batch["active_vehicle_seconds"],
+        torch.tensor([90.0]),
+    )
+    torch.testing.assert_close(
+        batch["transition_seconds"],
+        torch.tensor([30.0]),
+    )
+    torch.testing.assert_close(
+        batch["scheduled_transition_seconds"],
+        torch.tensor([60.0]),
+    )
 
 
 def test_online_wm_causal_pair_aligns_current_action_to_next_target():
@@ -465,6 +499,91 @@ def test_online_wm_resume_rejects_legacy_action_conditioned_global_critic(tmp_pa
 
     with pytest.raises(RuntimeError, match="legacy action-conditioned global critic"):
         trainer._load_resume_checkpoint()
+
+
+def test_online_wm_resume_resets_global_critic_when_reward_semantics_changed(
+    tmp_path,
+):
+    checkpoint = tmp_path / "old_reward_global_critic.pt"
+    actor = torch.nn.Linear(2, 2)
+    saved_global_critic = torch.nn.Linear(2, 1)
+    with torch.no_grad():
+        saved_global_critic.weight.fill_(7.0)
+        saved_global_critic.bias.fill_(7.0)
+    torch.save(
+        {
+            "episode": 150,
+            "actor": actor.state_dict(),
+            "global_critic": saved_global_critic.state_dict(),
+            "global_critic_semantics": GLOBAL_CRITIC_SEMANTICS,
+            "global_reward_semantics": "t_all_potential_v1",
+        },
+        checkpoint,
+    )
+    trainer = object.__new__(OnlineWmDreamerTrainer)
+    trainer.cfg = OnlineWmDreamerConfig(resume_checkpoint=str(checkpoint))
+    trainer.device = torch.device("cpu")
+    trainer.actor = torch.nn.Linear(2, 2)
+    trainer.global_critic = torch.nn.Linear(2, 1)
+    trainer.hdv_response_model = None
+    with torch.no_grad():
+        trainer.global_critic.weight.zero_()
+        trainer.global_critic.bias.zero_()
+
+    trainer._load_resume_checkpoint()
+
+    torch.testing.assert_close(
+        trainer.global_critic.weight,
+        torch.zeros_like(trainer.global_critic.weight),
+    )
+    torch.testing.assert_close(
+        trainer.global_critic.bias,
+        torch.zeros_like(trainer.global_critic.bias),
+    )
+
+
+def test_online_wm_resume_restores_compatible_active_count_readout(tmp_path):
+    checkpoint = tmp_path / "active_count_readout.pt"
+    actor = torch.nn.Linear(2, 2)
+    saved_readout = AggregateActiveVehicleReadout(
+        d_spatial=3,
+        hidden_dim=4,
+    )
+    with torch.no_grad():
+        saved_readout.correction_head[-1].bias.fill_(1.25)
+    torch.save(
+        {
+            "episode": 150,
+            "actor": actor.state_dict(),
+            "active_count_readout": saved_readout.state_dict(),
+            "active_count_readout_semantics": (
+                ACTIVE_COUNT_READOUT_SEMANTICS
+            ),
+        },
+        checkpoint,
+    )
+    trainer = object.__new__(OnlineWmDreamerTrainer)
+    trainer.cfg = OnlineWmDreamerConfig(resume_checkpoint=str(checkpoint))
+    trainer.device = torch.device("cpu")
+    trainer.actor = torch.nn.Linear(2, 2)
+    trainer.hdv_response_model = None
+    restored_readout = AggregateActiveVehicleReadout(
+        d_spatial=3,
+        hidden_dim=4,
+    )
+    trainer.wm_updater = type(
+        "Updater",
+        (),
+        {"active_count_readout": restored_readout},
+    )()
+
+    resumed_episode = trainer._load_resume_checkpoint()
+
+    assert resumed_episode == 150
+    torch.testing.assert_close(
+        restored_readout.correction_head[-1].bias,
+        torch.tensor([1.25]),
+    )
 
 
 def test_global_critic_checkpoint_semantics_constant_is_state_value():
@@ -799,29 +918,373 @@ def test_global_network_reward_weights_edge_tt_by_all_vehicle_count():
     torch.testing.assert_close(reward, torch.tensor(-0.5))
 
 
-def test_t_all_potential_reward_is_objective_aligned_and_telescopes():
-    class DummyProjector:
-        has_t_all_head = True
+def test_global_active_vehicle_reward_sums_to_negative_mean_travel_time_minutes():
+    active_counts = torch.tensor([3.0, 2.0, 1.0])
 
-        @staticmethod
-        def predict_t_all_from_z(z):
-            return z.float().mean(dim=(-2, -1))
-
-    class DummyWm:
-        flow_projector = DummyProjector()
-
-    reward, diagnostics = _global_t_all_potential_reward(
-        DummyWm(),
-        torch.full((2, 3), 6.0),
-        torch.full((2, 3), 5.0),
-        gamma=0.9,
+    rewards = _global_active_vehicle_reward(
+        active_counts,
+        total_vehicle_count=3,
+        transition_seconds=60.0,
         reward_scale=1.0,
     )
 
-    # Phi(z)=-T_all(z), so gamma*Phi(next)-Phi(current)=6-0.9*5.
-    torch.testing.assert_close(reward, torch.tensor(1.5))
-    assert diagnostics["global_t_all_current"] == pytest.approx(6.0)
-    assert diagnostics["global_t_all_next"] == pytest.approx(5.0)
+    torch.testing.assert_close(
+        rewards,
+        torch.tensor([-1.0, -2.0 / 3.0, -1.0 / 3.0]),
+    )
+    torch.testing.assert_close(rewards.sum(), torch.tensor(-2.0))
+
+
+def test_nominal_transition_count_preserves_truncated_vehicle_seconds():
+    # Three vehicles active for a realized 30-second terminal transition:
+    # 90 vehicle-seconds represented over a nominal 60-second imagined step.
+    equivalent_count = _nominal_transition_active_vehicle_count(
+        90.0,
+        nominal_transition_seconds=60.0,
+        total_vehicle_count=3,
+    )
+    reward = _global_active_vehicle_reward(
+        equivalent_count,
+        total_vehicle_count=3,
+        transition_seconds=60.0,
+        reward_scale=1.0,
+    )
+
+    torch.testing.assert_close(equivalent_count, torch.tensor(1.5))
+    torch.testing.assert_close(reward, torch.tensor(-0.5))
+
+
+def test_nominal_transition_count_does_not_hide_unrepresentable_exposure():
+    equivalent_count = _nominal_transition_active_vehicle_count(
+        600.0,
+        nominal_transition_seconds=30.0,
+        total_vehicle_count=10,
+    )
+
+    torch.testing.assert_close(equivalent_count, torch.tensor(20.0))
+
+
+def test_decoded_active_vehicle_count_restores_capacity_scaled_total():
+    class DummyProjector:
+        @staticmethod
+        def decode(_z):
+            return torch.tensor(
+                [[0.0, 1.0, 0.5, 0.0], [0.0, 1.0, 0.25, 0.0]],
+            )
+
+    class DummyWm:
+        flow_projector = DummyProjector()
+        bpr = type("Bpr", (), {"capacities": torch.tensor([10.0, 20.0])})()
+
+    count = _decoded_active_vehicle_count(
+        DummyWm(),
+        torch.zeros((2, 3)),
+        total_vehicle_count=20,
+    )
+
+    torch.testing.assert_close(count, torch.tensor(10.0))
+
+
+def test_active_count_readout_starts_as_decoder_sum_residual_anchor():
+    readout = AggregateActiveVehicleReadout(d_spatial=3, hidden_dim=4)
+    z = torch.zeros((2, 3), dtype=torch.float32)
+
+    predicted_fraction = readout(
+        z,
+        z_prev=z,
+        raw_decoder_fraction=torch.tensor(0.25),
+        transition_seconds=30.0,
+    )
+
+    torch.testing.assert_close(predicted_fraction, torch.tensor(0.25))
+
+
+def test_active_count_readout_broadcasts_batch_over_singleton_time_axis():
+    readout = AggregateActiveVehicleReadout(d_spatial=3, hidden_dim=4)
+    z = torch.zeros((2, 1, 2, 3), dtype=torch.float32)
+
+    predicted_fraction = readout(
+        z,
+        z_prev=z,
+        raw_decoder_fraction=torch.tensor([0.25, 0.5]),
+        transition_seconds=torch.tensor([30.0, 60.0]),
+    )
+
+    assert predicted_fraction.shape == (2, 1)
+    torch.testing.assert_close(
+        predicted_fraction[:, 0],
+        torch.tensor([0.25, 0.5]),
+    )
+
+
+def test_active_count_readout_is_conditioned_on_both_transition_endpoints():
+    readout = AggregateActiveVehicleReadout(d_spatial=2, hidden_dim=1)
+    z_next = torch.zeros((2, 2), dtype=torch.float32)
+    with torch.no_grad():
+        readout.correction_head[0].weight.zero_()
+        readout.correction_head[0].bias.zero_()
+        readout.correction_head[0].weight[0, 0] = 1.0
+        readout.correction_head[-1].weight.fill_(1.0)
+        readout.correction_head[-1].bias.zero_()
+
+    unchanged = readout(
+        z_next,
+        z_prev=torch.zeros_like(z_next),
+        raw_decoder_fraction=0.5,
+        transition_seconds=30.0,
+    )
+    changed = readout(
+        z_next,
+        z_prev=torch.ones_like(z_next),
+        raw_decoder_fraction=0.5,
+        transition_seconds=30.0,
+    )
+
+    assert float(changed.detach()) != pytest.approx(float(unchanged.detach()))
+
+
+def test_active_count_readout_is_conditioned_on_scheduled_duration():
+    readout = AggregateActiveVehicleReadout(d_spatial=2, hidden_dim=1)
+    z = torch.zeros((2, 2), dtype=torch.float32)
+    with torch.no_grad():
+        readout.correction_head[0].weight.zero_()
+        readout.correction_head[0].bias.zero_()
+        readout.correction_head[0].weight[0, -1] = 1.0
+        readout.correction_head[-1].weight.fill_(1.0)
+        readout.correction_head[-1].bias.zero_()
+
+    short = readout(
+        z,
+        z_prev=z,
+        raw_decoder_fraction=0.5,
+        transition_seconds=30.0,
+    )
+    long = readout(
+        z,
+        z_prev=z,
+        raw_decoder_fraction=0.5,
+        transition_seconds=300.0,
+    )
+
+    assert float(long.detach()) > float(short.detach())
+
+
+def test_active_count_readout_can_correct_large_decoder_sum_error():
+    readout = AggregateActiveVehicleReadout(d_spatial=3, hidden_dim=4)
+    z = torch.zeros((2, 3), dtype=torch.float32)
+    with torch.no_grad():
+        readout.correction_head[-1].bias.fill_(
+            torch.logit(torch.tensor(0.2))
+            - torch.logit(torch.tensor(0.999))
+        )
+
+    predicted_fraction = readout(
+        z,
+        z_prev=z,
+        raw_decoder_fraction=torch.tensor(4.0),
+        transition_seconds=30.0,
+    )
+
+    torch.testing.assert_close(
+        predicted_fraction,
+        torch.tensor(0.2),
+        atol=1e-5,
+        rtol=1e-5,
+    )
+
+
+def test_active_count_readout_applies_real_transition_calibration_immediately():
+    readout = AggregateActiveVehicleReadout(d_spatial=3, hidden_dim=4)
+    z = torch.zeros((2, 3), dtype=torch.float32)
+
+    readout.update_global_calibration(
+        raw_decoder_fraction=torch.tensor([4.0]),
+        target_fraction=torch.tensor([0.2]),
+    )
+    predicted_fraction = readout(
+        z,
+        z_prev=z,
+        raw_decoder_fraction=torch.tensor(4.0),
+        transition_seconds=30.0,
+    )
+
+    assert int(readout.calibration_updates) == 1
+    torch.testing.assert_close(
+        predicted_fraction,
+        torch.tensor(0.2),
+        atol=1e-5,
+        rtol=1e-5,
+    )
+
+
+def test_active_vehicle_count_from_latent_uses_readout_not_raw_edge_sum():
+    class DummyProjector:
+        @staticmethod
+        def decode(_z):
+            return torch.tensor(
+                [[0.0, 1.0, 2.0, 0.0], [0.0, 1.0, 2.0, 0.0]],
+            )
+
+    class DummyReadout(torch.nn.Module):
+        def forward(
+            self,
+            _z,
+            *,
+            raw_decoder_fraction,
+            z_prev,
+            transition_seconds,
+        ):
+            assert float(raw_decoder_fraction) == pytest.approx(4.0)
+            assert tuple(z_prev.shape) == (2, 3)
+            assert float(transition_seconds) == pytest.approx(30.0)
+            return torch.tensor(0.25)
+
+    class DummyWm:
+        flow_projector = DummyProjector()
+        bpr = type("Bpr", (), {"capacities": torch.tensor([10.0, 10.0])})()
+
+    predicted_count, raw_count = _active_vehicle_count_from_latent(
+        DummyWm(),
+        DummyReadout(),
+        torch.zeros((2, 3)),
+        z_prev=torch.ones((2, 3)),
+        transition_seconds=30.0,
+        total_vehicle_count=10,
+    )
+
+    torch.testing.assert_close(raw_count, torch.tensor(40.0))
+    torch.testing.assert_close(predicted_count, torch.tensor(2.5))
+
+
+def test_active_count_readout_supervision_uses_exact_sumo_fraction():
+    class DummyProjector:
+        @staticmethod
+        def decode(_z):
+            return torch.tensor(
+                [
+                    [[0.0, 1.0, 0.5, 0.0], [0.0, 1.0, 0.25, 0.0]],
+                    [[0.0, 1.0, 0.2, 0.0], [0.0, 1.0, 0.1, 0.0]],
+                ],
+                requires_grad=True,
+            )
+
+    class SpyReadout(AggregateActiveVehicleReadout):
+        def __init__(self):
+            super().__init__(d_spatial=3, hidden_dim=4)
+            self.seen_previous_latents = []
+
+        def corrected_logits(self, z_next, **kwargs):
+            self.seen_previous_latents.append(
+                kwargs["z_prev"].detach().clone()
+            )
+            return super().corrected_logits(z_next, **kwargs)
+
+    readout = SpyReadout()
+    loss, diagnostics = _active_vehicle_count_readout_supervision_loss(
+        z_current=torch.ones((2, 2, 3)),
+        z_pred_next=torch.zeros((2, 2, 3)),
+        z_encoded_next=torch.zeros((2, 2, 3)),
+        flow_projector=DummyProjector(),
+        active_count_readout=readout,
+        capacities=torch.tensor([10.0, 20.0]),
+        target_active_vehicle_count=torch.tensor([8.0, 5.0]),
+        transition_seconds=torch.tensor([60.0, 60.0], dtype=torch.float32),
+        raw_decoder_target_active_vehicle_count=torch.tensor([10.0, 4.0]),
+        total_vehicle_count=torch.tensor([20.0, 20.0]),
+        supervision_weight=1.0,
+    )
+
+    assert torch.isfinite(loss)
+    assert float(loss.detach()) > 0.0
+    torch.testing.assert_close(
+        diagnostics["pred_next_active_vehicle_count_raw_sum_mae"],
+        torch.tensor(0.0),
+    )
+    assert (
+        float(
+            diagnostics[
+                "pred_next_active_vehicle_count_mae"
+            ].detach()
+        )
+        < 1.5
+    )
+    assert len(readout.seen_previous_latents) == 2
+    for z_previous in readout.seen_previous_latents:
+        torch.testing.assert_close(
+            z_previous,
+            torch.ones((2, 2, 3)),
+        )
+    loss.backward()
+    assert any(
+        param.grad is not None and bool(torch.isfinite(param.grad).all())
+        for param in readout.parameters()
+    )
+
+
+def test_active_count_readout_supervision_rejects_unrepresentable_fraction():
+    class DummyProjector:
+        @staticmethod
+        def decode(z):
+            decoded = torch.zeros((*z.shape[:-1], 4), dtype=z.dtype)
+            decoded[..., 2] = 0.5
+            return decoded
+
+    readout = AggregateActiveVehicleReadout(d_spatial=3, hidden_dim=4)
+    loss, diagnostics = _active_vehicle_count_readout_supervision_loss(
+        z_current=torch.zeros((1, 2, 3)),
+        z_pred_next=torch.zeros((1, 2, 3)),
+        z_encoded_next=torch.zeros((1, 2, 3)),
+        flow_projector=DummyProjector(),
+        active_count_readout=readout,
+        capacities=torch.tensor([10.0, 10.0]),
+        target_active_vehicle_count=torch.tensor([12.0]),
+        transition_seconds=torch.tensor([30.0]),
+        raw_decoder_target_active_vehicle_count=torch.tensor([0.0]),
+        total_vehicle_count=torch.tensor([10.0]),
+        supervision_weight=1.0,
+    )
+
+    torch.testing.assert_close(loss, torch.tensor(0.0))
+    torch.testing.assert_close(
+        diagnostics["pred_next_active_vehicle_count_valid_frac"],
+        torch.tensor(0.0),
+    )
+    torch.testing.assert_close(
+        diagnostics["pred_next_active_vehicle_count_unrepresentable_frac"],
+        torch.tensor(1.0),
+    )
+
+
+def test_real_global_transition_part_uses_recorded_sumo_rewards():
+    class IdentityProjector(torch.nn.Module):
+        def forward(self, flow):
+            return flow
+
+    wm = type("Wm", (), {"flow_projector": IdentityProjector()})()
+    first = _wm_step(decision_idx=0, hdv_action=torch.tensor([0.5, 0.5]))
+    second = _wm_step(decision_idx=1, hdv_action=torch.tensor([0.5, 0.5]))
+    first.flow = np.ones((2, 3), dtype=np.float32)
+    first.next_flow = np.full((2, 3), 2.0, dtype=np.float32)
+    first.next_context = np.asarray([0.1, 0.9, 0.8], dtype=np.float32)
+    first.global_reward = -0.5
+    first.transition_terminal = False
+    second.flow = np.full((2, 3), 2.0, dtype=np.float32)
+    second.next_flow = np.full((2, 3), 3.0, dtype=np.float32)
+    second.next_context = np.asarray([0.2, 0.0, 0.0], dtype=np.float32)
+    second.global_reward = -0.25
+    second.transition_terminal = True
+
+    part = _real_global_transition_part(wm, [first, second], torch.device("cpu"))
+
+    torch.testing.assert_close(part["global_rewards"], torch.tensor([-0.5, -0.25]))
+    torch.testing.assert_close(
+        part["global_latent_states"],
+        torch.stack([torch.from_numpy(first.flow), torch.from_numpy(second.flow)]),
+    )
+    torch.testing.assert_close(
+        part["global_terminal"],
+        torch.tensor([False, True]),
+    )
 
 
 def test_global_critic_is_state_only_when_building_lambda_advantage():
@@ -917,6 +1380,126 @@ def test_global_critic_bootstraps_with_explicit_next_context():
 
     torch.testing.assert_close(critic.context_calls[0], current_context)
     torch.testing.assert_close(critic.context_calls[1], next_context)
+
+
+def test_global_critic_zeroes_explicit_terminal_bootstrap():
+    class ContextGlobalCritic(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.bias = torch.nn.Parameter(torch.tensor(0.0))
+
+        def forward(self, z, action=None, context=None):
+            assert action is None
+            return self.bias + context[:, :1]
+
+    imagined = object.__new__(OnlineImaginedActorCritic)
+    imagined.global_critic = ContextGlobalCritic()
+    imagined.device = torch.device("cpu")
+    imagined.cfg = OnlineWmDreamerConfig(
+        gamma=1.0,
+        ac_lambda=1.0,
+        ac_global_advantage_weight=1.0,
+    )
+    part = {
+        "global_latent_states": torch.zeros((2, 3, 4)),
+        "global_next_latent_states": torch.zeros((2, 3, 4)),
+        "global_contexts": torch.zeros((2, 3)),
+        "global_next_contexts": torch.tensor(
+            [[5.0, 0.0, 0.0], [5.0, 0.0, 0.0]],
+        ),
+        "global_rewards": torch.tensor([-1.0, -2.0]),
+        "global_terminal": torch.tensor([False, True]),
+    }
+
+    _loss, advantage, _stats = imagined._global_critic_terms(
+        [part],
+    )
+
+    torch.testing.assert_close(advantage, torch.tensor([-3.0, -2.0]))
+
+
+@pytest.mark.parametrize(
+    ("scheduled_episode_terminal", "expected_terminal"),
+    [(True, True), (False, False)],
+)
+def test_imagined_rollout_emits_only_known_scheduled_terminal(
+    monkeypatch,
+    scheduled_episode_terminal,
+    expected_terminal,
+):
+    monkeypatch.setattr(
+        online_wm_module,
+        "_decoded_edge_state_numpy_from_z",
+        lambda *_args, **_kwargs: (
+            np.zeros((2, 4), dtype=np.float32),
+            np.ones((2,), dtype=np.float32),
+        ),
+    )
+    imagined = object.__new__(OnlineImaginedActorCritic)
+    imagined.wm = object()
+    imagined.device = torch.device("cpu")
+    imagined.cfg = OnlineWmDreamerConfig(
+        ac_global_advantage_weight=0.0,
+    )
+    start = _wm_step(
+        decision_idx=59,
+        hdv_action=torch.tensor([0.5, 0.5]),
+    )
+    start.scheduled_episode_terminal = scheduled_episode_terminal
+    state = {
+        "start": start,
+        "samples": [],
+        "vehicle_states": [],
+        "z": torch.zeros((2, 3)),
+        "initial_context": torch.tensor([0.9, 0.0, 0.2]),
+        "initial_active_av": 0,
+        "total_vehicle_count": 10,
+        "next_step_cache": None,
+        "done": False,
+        "obs_steps": [],
+        "action_steps": [],
+        "old_logp_steps": [],
+        "valid_steps": [],
+        "reward_steps": [],
+        "group_steps": [],
+        "next_group_steps": [],
+        "vehicle_id_steps": [],
+        "next_obs_steps": [],
+        "next_valid_steps": [],
+        "entropies": [],
+        "action_edges": [],
+        "global_latent_steps": [],
+        "global_next_latent_steps": [],
+        "global_context_steps": [],
+        "global_next_context_steps": [],
+        "global_reward_steps": [],
+        "global_active_vehicle_count_steps": [],
+        "global_raw_decoder_vehicle_count_steps": [],
+        "global_transition_seconds_steps": [],
+        "global_terminal_steps": [],
+    }
+    prepared = {
+        "state": state,
+        "horizon_idx": 0,
+        "active_indices": [],
+        "obs": torch.zeros((1, 4)),
+        "selected": torch.tensor([0]),
+        "old_logp": torch.tensor([0.0]),
+        "valid": torch.tensor([[True]]),
+        "rewards": torch.tensor([0.0]),
+        "action_edge": torch.zeros((2,)),
+        "context": torch.tensor([0.9, 0.0, 0.2]),
+        "entropy": torch.tensor(0.0),
+        "transition_seconds": 30.0,
+    }
+
+    imagined._finish_imagined_horizon_step(
+        prepared,
+        torch.zeros((2, 3)),
+    )
+
+    assert bool(state["global_terminal_steps"][0]) is expected_terminal
+    assert bool(state["done"]) is expected_terminal
 
 
 def test_disabled_global_advantage_does_not_train_global_critic():
@@ -1158,6 +1741,8 @@ def test_online_wm_runner_dry_run_allows_missing(tmp_path):
             "0.75",
             "--global-reward-scale",
             "2.0",
+            "--wm-active-count-readout-lr",
+            "0.002",
             "--wm-t-all-supervision-weight",
             "0.15",
             "--real-policy-route-selection",
@@ -1196,6 +1781,7 @@ def test_online_wm_runner_dry_run_allows_missing(tmp_path):
     assert cfg.imagined_rollout_batch_size == 4
     assert cfg.ac_global_advantage_weight == 0.75
     assert cfg.global_reward_scale == 2.0
+    assert cfg.wm_active_count_readout_lr == pytest.approx(0.002)
     assert cfg.wm_t_all_supervision_weight == 0.15
     assert cfg.real_policy_route_selection == "sample"
     assert cfg.eval_policy_route_selection == "sample"
@@ -1221,3 +1807,17 @@ def test_online_wm_runner_dry_run_allows_missing(tmp_path):
     )
     enabled_cfg = build_config(enabled_args)
     assert enabled_cfg.vehicle_arrival_head_enabled is True
+
+    default_cfg = build_config(
+        parse_args(
+            [
+                "--output-dir",
+                str(tmp_path),
+                "--dry-run",
+                "--allow-missing",
+            ]
+        )
+    )
+    assert default_cfg.ac_global_advantage_weight == 1.0
+    assert default_cfg.wm_active_count_supervision_weight == 1.0
+    assert default_cfg.wm_active_count_readout_lr == pytest.approx(1e-3)

@@ -132,7 +132,184 @@ from dreamer4.urban_routing.dreamer_hdv_response import (  # noqa: E402
 
 DEFAULT_ONLINE_WM_CHECKPOINT_EPISODES = (25, 50, 100)
 GLOBAL_CRITIC_SEMANTICS = "state_value_v1"
-GLOBAL_REWARD_SEMANTICS = "t_all_potential_v1"
+GLOBAL_REWARD_SEMANTICS = "active_vehicle_transition_exposure_readout_v4"
+ACTIVE_COUNT_READOUT_SEMANTICS = (
+    "latent_pair_transition_exposure_residual_logit_v3"
+)
+
+
+class AggregateActiveVehicleReadout(torch.nn.Module):
+    """Predict transition exposure without summing raw per-edge errors.
+
+    The endpoint decoder remains responsible for spatial vehicle volume. This
+    transition head uses both endpoint latents and the scheduled interval to
+    predict a residual around the decoded next-state count. Exact real SUMO
+    vehicle-seconds supervise the mean active fraction over that interval.
+    """
+
+    def __init__(
+        self,
+        d_spatial: int,
+        hidden_dim: Optional[int] = None,
+        *,
+        fraction_eps: float = 1e-3,
+    ):
+        super().__init__()
+        self.d_spatial = int(d_spatial)
+        self.fraction_eps = float(max(min(fraction_eps, 0.1), 1e-6))
+        hidden = int(hidden_dim or max(self.d_spatial // 2, 32))
+        pooled_dim = 4 * self.d_spatial
+        self.latent_norm = torch.nn.LayerNorm(pooled_dim)
+        self.correction_head = torch.nn.Sequential(
+            torch.nn.Linear(pooled_dim + 3, hidden),
+            torch.nn.SiLU(),
+            torch.nn.Linear(hidden, 1),
+        )
+        self.register_buffer(
+            "global_logit_bias",
+            torch.zeros((), dtype=torch.float32),
+        )
+        self.register_buffer(
+            "calibration_updates",
+            torch.zeros((), dtype=torch.long),
+        )
+        torch.nn.init.orthogonal_(self.correction_head[0].weight)
+        torch.nn.init.zeros_(self.correction_head[0].bias)
+        torch.nn.init.zeros_(self.correction_head[-1].weight)
+        torch.nn.init.zeros_(self.correction_head[-1].bias)
+
+    def corrected_logits(
+        self,
+        z_next: torch.Tensor,
+        *,
+        z_prev: torch.Tensor,
+        raw_decoder_fraction: torch.Tensor | float,
+        transition_seconds: torch.Tensor | float,
+    ) -> torch.Tensor:
+        if z_next.dim() < 2 or int(z_next.shape[-1]) != self.d_spatial:
+            raise ValueError(
+                "AggregateActiveVehicleReadout expects (..., E, d_spatial), "
+                f"got {tuple(z_next.shape)} with d_spatial={self.d_spatial}"
+            )
+        if tuple(z_prev.shape) != tuple(z_next.shape):
+            raise ValueError(
+                "AggregateActiveVehicleReadout expects z_prev and z_next "
+                f"with equal shapes, got {tuple(z_prev.shape)} and "
+                f"{tuple(z_next.shape)}"
+            )
+        leading_shape = z_next.shape[:-2]
+        latent_features = self.latent_norm(
+            torch.cat(
+                [
+                    z_prev.mean(dim=-2),
+                    z_prev.max(dim=-2).values,
+                    z_next.mean(dim=-2),
+                    z_next.max(dim=-2).values,
+                ],
+                dim=-1,
+            )
+        )
+        duration = torch.as_tensor(
+            transition_seconds,
+            device=z_next.device,
+            dtype=z_next.dtype,
+        )
+        while duration.dim() < len(leading_shape):
+            duration = duration.unsqueeze(-1)
+        duration = torch.broadcast_to(duration, leading_shape)
+        if bool(torch.any(~torch.isfinite(duration)).item()) or bool(
+            torch.any(duration <= 0.0).item()
+        ):
+            raise ValueError("transition_seconds must be finite and positive")
+        duration_feature = torch.log1p(duration).unsqueeze(-1)
+        raw = torch.as_tensor(
+            raw_decoder_fraction,
+            device=z_next.device,
+            dtype=z_next.dtype,
+        )
+        while raw.dim() < len(leading_shape):
+            raw = raw.unsqueeze(-1)
+        raw = torch.broadcast_to(raw, leading_shape)
+        raw = torch.nan_to_num(raw, nan=0.0, posinf=1e6, neginf=0.0)
+        raw = raw.clamp(min=0.0, max=1e6)
+        base = raw.clamp(
+            min=self.fraction_eps,
+            max=1.0 - self.fraction_eps,
+        )
+        raw_features = torch.stack([base, torch.log1p(raw)], dim=-1)
+        correction = self.correction_head(
+            torch.cat(
+                [latent_features, raw_features, duration_feature],
+                dim=-1,
+            )
+        ).squeeze(-1)
+        return (
+            torch.logit(base)
+            + self.global_logit_bias.to(
+                device=z_next.device,
+                dtype=z_next.dtype,
+            )
+            + correction
+        )
+
+    @torch.no_grad()
+    def update_global_calibration(
+        self,
+        *,
+        raw_decoder_fraction: torch.Tensor,
+        target_fraction: torch.Tensor,
+        momentum: float = 0.95,
+    ) -> None:
+        """Track robust endpoint-to-exposure calibration from SUMO labels."""
+        raw = raw_decoder_fraction.detach().reshape(-1)
+        target = target_fraction.detach().reshape(-1)
+        n = min(int(raw.numel()), int(target.numel()))
+        if n <= 0:
+            return
+        raw = raw[:n]
+        target = target[:n]
+        valid = torch.isfinite(raw) & torch.isfinite(target)
+        if not bool(valid.any().item()):
+            return
+        raw_base = raw[valid].clamp(
+            self.fraction_eps,
+            1.0 - self.fraction_eps,
+        )
+        target_base = target[valid].clamp(
+            self.fraction_eps,
+            1.0 - self.fraction_eps,
+        )
+        observed_bias = torch.median(
+            torch.logit(target_base) - torch.logit(raw_base)
+        ).clamp(-12.0, 12.0)
+        if int(self.calibration_updates.item()) <= 0:
+            self.global_logit_bias.copy_(
+                observed_bias.to(self.global_logit_bias)
+            )
+        else:
+            keep = float(min(max(momentum, 0.0), 0.9999))
+            self.global_logit_bias.mul_(keep).add_(
+                observed_bias.to(self.global_logit_bias),
+                alpha=1.0 - keep,
+            )
+        self.calibration_updates.add_(1)
+
+    def forward(
+        self,
+        z_next: torch.Tensor,
+        *,
+        z_prev: torch.Tensor,
+        raw_decoder_fraction: torch.Tensor | float,
+        transition_seconds: torch.Tensor | float,
+    ) -> torch.Tensor:
+        return torch.sigmoid(
+            self.corrected_logits(
+                z_next,
+                z_prev=z_prev,
+                raw_decoder_fraction=raw_decoder_fraction,
+                transition_seconds=transition_seconds,
+            )
+        )
 
 
 @dataclass
@@ -158,6 +335,8 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
     wm_lr: float = 1e-5
     wm_grad_clip: float = 10.0
     wm_transition_decoded_supervision_weight: float = 1.0
+    wm_active_count_supervision_weight: float = 1.0
+    wm_active_count_readout_lr: float = 1e-3
     wm_t_all_supervision_weight: float = 0.2
     wm_hdv_policy_weight: float = 0.05
     wm_hdv_target_source: str = "episode_mean_current_occupancy"
@@ -199,9 +378,7 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
     imagined_max_start_samples: int = 1
     min_replay_episodes_before_actor: int = 1
     ac_lambda: float = 0.95
-    # Disabled by default until the t_all readout passes an explicit held-out
-    # calibration audit. A non-zero head weight does not prove calibration.
-    ac_global_advantage_weight: float = 0.0
+    ac_global_advantage_weight: float = 1.0
     global_reward_scale: float = 1.0
     wm_prediction_diagnostic_every_episodes: int = 1
     wm_prediction_diagnostic_max_steps: int = 16
@@ -282,6 +459,8 @@ class OnlineWmDreamerConfig(OnlineNoCfmConfig):
             "wm_lr",
             "wm_grad_clip",
             "wm_transition_decoded_supervision_weight",
+            "wm_active_count_supervision_weight",
+            "wm_active_count_readout_lr",
             "wm_t_all_supervision_weight",
             "wm_hdv_policy_weight",
             "wm_hdv_policy_target_mode",
@@ -546,6 +725,16 @@ class OnlineWorldModelStep:
     depart: np.ndarray
     context: np.ndarray
     episode_t_all_minutes: float = float("nan")
+    active_vehicle_count: float = float("nan")
+    next_active_vehicle_count: float = float("nan")
+    active_vehicle_seconds: float = float("nan")
+    transition_seconds: float = float("nan")
+    scheduled_transition_seconds: float = float("nan")
+    total_vehicle_count: int = 0
+    global_reward: float = float("nan")
+    next_context: Optional[np.ndarray] = None
+    transition_terminal: bool = False
+    scheduled_episode_terminal: bool = False
     hdv_target: Optional[np.ndarray] = None
     hdv_static_edge_demand: Optional[np.ndarray] = None
     hdv_predicted_edge_demand: Optional[np.ndarray] = None
@@ -1604,6 +1793,9 @@ class OnlineWmDreamerCollector(OnlineNoCfmCollector):
             self._current_decision_idx_eval = int(decision_idx)
 
             frame_t = self._collect_flow(state)
+            current_active_vehicle_count = int(
+                len(state.get("vehicles", {}))
+            )
             before = len(self._episode_samples)
             av_actions = self._select_av_actions(state, rng)
             new_samples = list(self._episode_samples[before:])
@@ -1635,6 +1827,51 @@ class OnlineWmDreamerCollector(OnlineNoCfmCollector):
             )
             state = self.connector.get_traffic_state()
             frame_next = self._collect_flow(state)
+            transition_seconds = float(
+                getattr(
+                    self.connector,
+                    "last_advance_elapsed_seconds",
+                    advance_steps,
+                )
+            )
+            if not np.isfinite(transition_seconds) or transition_seconds <= 0.0:
+                transition_seconds = float(max(int(advance_steps), 1))
+            active_vehicle_seconds = float(
+                getattr(
+                    self.connector,
+                    "last_advance_active_vehicle_seconds",
+                    float("nan"),
+                )
+            )
+            if not np.isfinite(active_vehicle_seconds):
+                active_vehicle_seconds = (
+                    float(current_active_vehicle_count) * transition_seconds
+                )
+            mean_active_vehicle_count = (
+                active_vehicle_seconds / max(transition_seconds, 1e-8)
+            )
+            total_vehicle_count = max(
+                int(getattr(self, "_num_agents", 0) or 0),
+                1,
+            )
+            global_reward = float(
+                _global_active_vehicle_reward(
+                    mean_active_vehicle_count,
+                    total_vehicle_count=total_vehicle_count,
+                    transition_seconds=transition_seconds,
+                    reward_scale=float(self._cfg.global_reward_scale),
+                ).item()
+            )
+            next_active_vehicle_count = int(
+                len(state.get("vehicles", {}))
+            )
+            transition_terminal = bool(
+                self.connector.is_done()
+                or (
+                    next_active_vehicle_count == 0
+                    and int(current_tick) > 10
+                )
+            )
             self._wm_episode_steps.append(
                 OnlineWorldModelStep(
                     episode=int(episode_id),
@@ -1646,11 +1883,26 @@ class OnlineWmDreamerCollector(OnlineNoCfmCollector):
                     hdv_action=np.asarray(hdv_edge_frac, dtype=np.float32),
                     depart=np.asarray(decision_depart, dtype=np.float32),
                     context=np.asarray(decision_context, dtype=np.float32),
+                    active_vehicle_count=float(mean_active_vehicle_count),
+                    next_active_vehicle_count=float(next_active_vehicle_count),
+                    active_vehicle_seconds=float(active_vehicle_seconds),
+                    transition_seconds=float(transition_seconds),
+                    scheduled_transition_seconds=float(advance_steps),
+                    total_vehicle_count=int(total_vehicle_count),
+                    global_reward=float(global_reward),
+                    next_context=np.asarray(
+                        self._decision_context(state, int(current_tick)),
+                        dtype=np.float32,
+                    ),
+                    transition_terminal=bool(transition_terminal),
+                    scheduled_episode_terminal=bool(
+                        (decision_idx + 1) >= len(decision_ticks)
+                    ),
                     samples=new_samples,
                 )
             )
             ep_decisions += 1
-            if self.connector.is_done() or (len(state.get("vehicles", {})) == 0 and current_tick > 10):
+            if transition_terminal:
                 break
 
         if (
@@ -1668,6 +1920,16 @@ class OnlineWmDreamerCollector(OnlineNoCfmCollector):
         episode_reward = float(np.mean(ep_rewards)) if ep_rewards else 0.0
         self._write_urb_episode_csv(int(episode_id), episode_reward)
         total_agents = int(getattr(self, "_num_agents", 0) or 0)
+        global_rewards = [
+            float(step.global_reward)
+            for step in self._wm_episode_steps
+            if np.isfinite(float(step.global_reward))
+        ]
+        active_vehicle_counts = [
+            float(step.active_vehicle_count)
+            for step in self._wm_episode_steps
+            if np.isfinite(float(step.active_vehicle_count))
+        ]
         row = {
             "episode": int(episode_id),
             "phase": "train",
@@ -1676,6 +1938,12 @@ class OnlineWmDreamerCollector(OnlineNoCfmCollector):
             "wm_transitions": int(len(self._wm_episode_steps)),
             "reward_mean": float(np.mean(ep_rewards)) if ep_rewards else float("nan"),
             "reward_sum": float(np.sum(ep_rewards)) if ep_rewards else 0.0,
+            "global_reward_sum": float(np.sum(global_rewards)),
+            "global_active_vehicle_mean": float(
+                np.mean(active_vehicle_counts)
+            )
+            if active_vehicle_counts
+            else float("nan"),
             "arrived_all": len(self._last_ep_travel_times),
             "arrived_av": len(self._last_ep_av_travel_times),
             "arrived_hdv": len(self._last_ep_hdv_travel_times),
@@ -1698,6 +1966,12 @@ class OnlineWmDreamerCollector(OnlineNoCfmCollector):
         episode_t_all = (
             float(row["t_all"])
             if int(row["episode_complete"]) and np.isfinite(float(row["t_all"]))
+            else float("nan")
+        )
+        row["global_reward_t_all_residual"] = (
+            float(row["global_reward_sum"])
+            + float(self._cfg.global_reward_scale) * episode_t_all
+            if np.isfinite(episode_t_all)
             else float("nan")
         )
         for step in self._wm_episode_steps:
@@ -2233,6 +2507,29 @@ class OnlineWorldModelUpdater:
                 param.requires_grad_(True)
         self.params = list(wm.flow_projector.parameters()) + list(wm.dynamics.parameters())
         self.optimizer = torch.optim.Adam(self.params, lr=float(cfg.wm_lr))
+        d_spatial = int(
+            getattr(
+                wm,
+                "d_spatial",
+                getattr(
+                    wm.flow_projector,
+                    "d_spatial",
+                    getattr(wm.flow_projector, "out_features", 0),
+                ),
+            )
+        )
+        if d_spatial <= 0:
+            raise ValueError("Cannot infer d_spatial for active-count readout")
+        self.active_count_readout = AggregateActiveVehicleReadout(
+            d_spatial=d_spatial,
+        ).to(device)
+        self.active_count_readout_optimizer = torch.optim.Adam(
+            self.active_count_readout.parameters(),
+            lr=float(cfg.wm_active_count_readout_lr),
+        )
+        self.all_params = self.params + list(
+            self.active_count_readout.parameters()
+        )
 
     def _batch_tensors(self, steps: Sequence[OnlineWorldModelStep]) -> Dict[str, torch.Tensor]:
         flows = _stack_np([s.flow for s in steps])
@@ -2246,6 +2543,40 @@ class OnlineWorldModelUpdater:
             [float(s.episode_t_all_minutes) for s in steps],
             dtype=np.float32,
         )
+        active_vehicle_count = np.asarray(
+            [float(s.active_vehicle_count) for s in steps],
+            dtype=np.float32,
+        )
+        next_active_vehicle_count = np.asarray(
+            [float(s.next_active_vehicle_count) for s in steps],
+            dtype=np.float32,
+        )
+        active_vehicle_seconds = np.asarray(
+            [float(s.active_vehicle_seconds) for s in steps],
+            dtype=np.float32,
+        )
+        transition_seconds = np.asarray(
+            [float(s.transition_seconds) for s in steps],
+            dtype=np.float32,
+        )
+        scheduled_transition_seconds = np.asarray(
+            [float(s.scheduled_transition_seconds) for s in steps],
+            dtype=np.float32,
+        )
+        scheduled_transition_seconds = np.where(
+            np.isfinite(scheduled_transition_seconds)
+            & (scheduled_transition_seconds > 0.0),
+            scheduled_transition_seconds,
+            transition_seconds,
+        ).astype(np.float32)
+        total_vehicle_count = np.asarray(
+            [float(s.total_vehicle_count) for s in steps],
+            dtype=np.float32,
+        )
+        global_reward = np.asarray(
+            [float(s.global_reward) for s in steps],
+            dtype=np.float32,
+        )
         flow_pair = np.stack([flows, next_flows], axis=1).astype(np.float32)
         return {
             "flows": torch.from_numpy(flow_pair).to(device=self.device, dtype=torch.float32),
@@ -2255,6 +2586,28 @@ class OnlineWorldModelUpdater:
             "depart": torch.from_numpy(depart).to(device=self.device, dtype=torch.float32),
             "context": torch.from_numpy(context).to(device=self.device, dtype=torch.float32),
             "episode_t_all": torch.from_numpy(episode_t_all).to(
+                device=self.device,
+                dtype=torch.float32,
+            ),
+            "active_vehicle_count": torch.from_numpy(
+                active_vehicle_count
+            ).to(device=self.device, dtype=torch.float32),
+            "next_active_vehicle_count": torch.from_numpy(
+                next_active_vehicle_count
+            ).to(device=self.device, dtype=torch.float32),
+            "active_vehicle_seconds": torch.from_numpy(
+                active_vehicle_seconds
+            ).to(device=self.device, dtype=torch.float32),
+            "transition_seconds": torch.from_numpy(
+                transition_seconds
+            ).to(device=self.device, dtype=torch.float32),
+            "scheduled_transition_seconds": torch.from_numpy(
+                scheduled_transition_seconds
+            ).to(device=self.device, dtype=torch.float32),
+            "total_vehicle_count": torch.from_numpy(
+                total_vehicle_count
+            ).to(device=self.device, dtype=torch.float32),
+            "global_reward": torch.from_numpy(global_reward).to(
                 device=self.device,
                 dtype=torch.float32,
             ),
@@ -2328,6 +2681,7 @@ class OnlineWorldModelUpdater:
             return {"wm_loss": 0.0, "wm_updates": 0.0, "wm_replay_transitions": 0.0, "wm_skipped": 1.0}
         self.wm.flow_projector.train()
         self.wm.dynamics.train()
+        self.active_count_readout.train()
         stats: List[Dict[str, float]] = []
         for _ in range(max(int(self.cfg.wm_update_epochs), 1)):
             steps = replay.sample_steps(rng, int(self.cfg.wm_batch_size))
@@ -2341,6 +2695,18 @@ class OnlineWorldModelUpdater:
             depart = batch["depart"]
             context = batch["context"]
             episode_t_all = batch["episode_t_all"]
+            active_vehicle_seconds = batch["active_vehicle_seconds"]
+            transition_seconds = batch["transition_seconds"]
+            scheduled_transition_seconds = batch["scheduled_transition_seconds"]
+            next_active_vehicle_count = batch["next_active_vehicle_count"]
+            total_vehicle_count = batch["total_vehicle_count"]
+            target_exposure_vehicle_count = (
+                _nominal_transition_active_vehicle_count(
+                    active_vehicle_seconds,
+                    nominal_transition_seconds=scheduled_transition_seconds,
+                    total_vehicle_count=total_vehicle_count,
+                )
+            )
             z_pair = self.wm.flow_projector(flows)
             transition_action = self._transition_action(actions_raw, hdv_target_current)
             transition_hdv_context = self._transition_hdv_context(transition_action, hdv_target_current)
@@ -2417,6 +2783,31 @@ class OnlineWorldModelUpdater:
                 volume_weight=2.0,
                 busy_threshold=float(self.cfg.wm_cfm_busy_threshold),
             )
+            active_count_loss, active_count_aux = (
+                _active_vehicle_count_readout_supervision_loss(
+                    z_current=z_pair[:, 0],
+                    z_pred_next=z_pred_next,
+                    z_encoded_next=z_pair[:, -1],
+                    flow_projector=self.wm.flow_projector,
+                    active_count_readout=self.active_count_readout,
+                    capacities=_wm_vehicle_capacities(
+                        self.wm,
+                        device=z_pred_next.device,
+                        dtype=z_pred_next.dtype,
+                    ),
+                    target_active_vehicle_count=(
+                        target_exposure_vehicle_count
+                    ),
+                    raw_decoder_target_active_vehicle_count=(
+                        next_active_vehicle_count
+                    ),
+                    transition_seconds=scheduled_transition_seconds,
+                    total_vehicle_count=total_vehicle_count,
+                    supervision_weight=float(
+                        self.cfg.wm_active_count_supervision_weight
+                    ),
+                )
+            )
             t_all_loss, t_all_aux = episode_t_all_supervision_loss(
                 flow_projector=self.wm.flow_projector,
                 z_tokens=z_pair,
@@ -2424,12 +2815,133 @@ class OnlineWorldModelUpdater:
                 t_all_weight=float(self.cfg.wm_t_all_supervision_weight),
                 target_mode="relative",
             )
-            loss = base_loss + transition_loss + t_all_loss
+            loss = (
+                base_loss
+                + transition_loss
+                + active_count_loss
+                + t_all_loss
+            )
             self.optimizer.zero_grad(set_to_none=True)
+            self.active_count_readout_optimizer.zero_grad(set_to_none=True)
             row = {
                 "wm_loss": float(loss.detach().cpu().item()),
                 "wm_cfm_loss": float(base_loss.detach().cpu().item()),
                 "wm_transition_loss": float(transition_loss.detach().cpu().item()),
+                "wm_active_count_loss": float(
+                    active_count_loss.detach().cpu().item()
+                ),
+                "wm_active_count_mae": float(
+                    active_count_aux.get(
+                        "pred_next_active_vehicle_count_mae",
+                        torch.zeros((), device=self.device),
+                    )
+                    .detach()
+                    .cpu()
+                    .item()
+                )
+                if isinstance(active_count_aux, dict)
+                else 0.0,
+                "wm_active_count_pred_mean": float(
+                    active_count_aux.get(
+                        "pred_next_active_vehicle_count_pred_mean",
+                        torch.zeros((), device=self.device),
+                    )
+                    .detach()
+                    .cpu()
+                    .item()
+                )
+                if isinstance(active_count_aux, dict)
+                else 0.0,
+                "wm_active_count_target_mean": float(
+                    active_count_aux.get(
+                        "pred_next_active_vehicle_count_target_mean",
+                        torch.zeros((), device=self.device),
+                    )
+                    .detach()
+                    .cpu()
+                    .item()
+                )
+                if isinstance(active_count_aux, dict)
+                else 0.0,
+                "wm_active_count_raw_sum_mae": float(
+                    active_count_aux.get(
+                        "pred_next_active_vehicle_count_raw_sum_mae",
+                        torch.zeros((), device=self.device),
+                    )
+                    .detach()
+                    .cpu()
+                    .item()
+                )
+                if isinstance(active_count_aux, dict)
+                else 0.0,
+                "wm_active_count_global_logit_bias": float(
+                    active_count_aux.get(
+                        "active_vehicle_count_global_logit_bias",
+                        torch.zeros((), device=self.device),
+                    )
+                    .detach()
+                    .cpu()
+                    .item()
+                )
+                if isinstance(active_count_aux, dict)
+                else 0.0,
+                "wm_active_count_calibration_updates": float(
+                    active_count_aux.get(
+                        "active_vehicle_count_calibration_updates",
+                        torch.zeros((), device=self.device),
+                    )
+                    .detach()
+                    .cpu()
+                    .item()
+                )
+                if isinstance(active_count_aux, dict)
+                else 0.0,
+                "wm_active_count_valid_frac": float(
+                    active_count_aux.get(
+                        "pred_next_active_vehicle_count_valid_frac",
+                        torch.zeros((), device=self.device),
+                    )
+                    .detach()
+                    .cpu()
+                    .item()
+                )
+                if isinstance(active_count_aux, dict)
+                else 0.0,
+                "wm_active_count_unrepresentable_frac": float(
+                    active_count_aux.get(
+                        "pred_next_active_vehicle_count_unrepresentable_frac",
+                        torch.zeros((), device=self.device),
+                    )
+                    .detach()
+                    .cpu()
+                    .item()
+                )
+                if isinstance(active_count_aux, dict)
+                else 0.0,
+                "wm_transition_seconds_mean": float(
+                    transition_seconds[
+                        torch.isfinite(transition_seconds)
+                    ]
+                    .mean()
+                    .detach()
+                    .cpu()
+                    .item()
+                )
+                if bool(torch.isfinite(transition_seconds).any().item())
+                else 0.0,
+                "wm_scheduled_transition_seconds_mean": float(
+                    scheduled_transition_seconds[
+                        torch.isfinite(scheduled_transition_seconds)
+                    ]
+                    .mean()
+                    .detach()
+                    .cpu()
+                    .item()
+                )
+                if bool(
+                    torch.isfinite(scheduled_transition_seconds).any().item()
+                )
+                else 0.0,
                 "wm_t_all_loss": float(t_all_loss.detach().cpu().item()),
                 "wm_t_all_pred_mse_minutes": float(
                     t_all_aux.get("t_all_pred_mse_raw_minutes", torch.zeros(())).detach().cpu().item()
@@ -2471,7 +2983,7 @@ class OnlineWorldModelUpdater:
                 loss.backward()
                 try:
                     grad_norm = torch.nn.utils.clip_grad_norm_(
-                        self.params,
+                        self.all_params,
                         float(self.cfg.wm_grad_clip),
                         error_if_nonfinite=True,
                     )
@@ -2480,13 +2992,18 @@ class OnlineWorldModelUpdater:
                         raise
                     row["wm_nonfinite_grad"] = 1.0
                     self.optimizer.zero_grad(set_to_none=True)
+                    self.active_count_readout_optimizer.zero_grad(
+                        set_to_none=True
+                    )
                 else:
                     self.optimizer.step()
+                    self.active_count_readout_optimizer.step()
                     row["wm_update_applied"] = 1.0
                     row["wm_grad_norm"] = float(grad_norm.detach().cpu().item())
             stats.append(row)
         self.wm.flow_projector.eval()
         self.wm.dynamics.eval()
+        self.active_count_readout.eval()
         if not stats:
             return {"wm_loss": 0.0, "wm_updates": 0.0, "wm_replay_transitions": float(len(replay.all_steps())), "wm_skipped": 1.0}
         out = {k: float(np.mean([row.get(k, 0.0) for row in stats])) for k in stats[-1].keys()}
@@ -2695,65 +3212,472 @@ def _global_network_reward_from_latent(
         )
 
 
-def _has_trained_t_all_head(projector: torch.nn.Module) -> bool:
-    """Return whether the optional t_all head has left its zero initialization.
+def _nominal_transition_active_vehicle_count(
+    active_vehicle_seconds: torch.Tensor | float,
+    *,
+    nominal_transition_seconds: torch.Tensor | float,
+    total_vehicle_count: Optional[torch.Tensor | float] = None,
+) -> torch.Tensor:
+    """Convert exact exposure to the count equivalent for one imagined step.
 
-    This is only a structural compatibility check. It deliberately does not
-    claim that the readout is calibrated; global advantage remains opt-in and
-    requires a separate held-out audit.
+    A truncated real transition is treated as zero-active padding through the
+    remainder of the nominal imagined interval. Multiplying this count by the
+    same nominal interval therefore reconstructs the observed vehicle-seconds.
     """
-    if not bool(getattr(projector, "has_t_all_head", False)):
-        return False
-    head = getattr(projector, "t_all_head", None)
-    if head is None:
-        return False
-    output_layer = next(
-        (module for module in reversed(list(head.modules())) if isinstance(module, torch.nn.Linear)),
-        None,
+    exposure = (
+        active_vehicle_seconds
+        if torch.is_tensor(active_vehicle_seconds)
+        else torch.as_tensor(active_vehicle_seconds, dtype=torch.float32)
     )
-    if output_layer is None:
-        return False
-    return bool(torch.count_nonzero(output_layer.weight.detach()).item())
+    nominal = torch.as_tensor(
+        nominal_transition_seconds,
+        device=exposure.device,
+        dtype=exposure.dtype,
+    )
+    if bool(torch.any(~torch.isfinite(nominal)).item()) or bool(
+        torch.any(nominal <= 0.0).item()
+    ):
+        raise ValueError(
+            "nominal_transition_seconds must be finite and positive"
+        )
+    count = exposure / nominal
+    if total_vehicle_count is not None:
+        total = torch.as_tensor(
+            total_vehicle_count,
+            device=count.device,
+            dtype=count.dtype,
+        )
+        # Only absorb floating-point overshoot. A materially unrepresentable
+        # label remains visible so supervision can reject it instead of
+        # silently converting a long transition into a fully-active one.
+        count = torch.where(
+            (count > total) & (count <= total + 1e-5),
+            total,
+            count,
+        )
+    return count
 
 
-def _global_t_all_potential_reward(
+def _global_active_vehicle_reward(
+    active_vehicle_count: torch.Tensor | float,
+    *,
+    total_vehicle_count: torch.Tensor | float,
+    transition_seconds: torch.Tensor | float,
+    reward_scale: float,
+) -> torch.Tensor:
+    """Return the deterministic active-occupancy reward in travel-time minutes.
+
+    ``-N_active * delta_t / N_total`` is the negative mean time spent in the
+    network over the transition.  ``delta_t`` enters in seconds and is divided
+    by 60 so an episode sum uses the same minute unit as the reported
+    ``t_all`` metric.
+    """
+    active = (
+        active_vehicle_count
+        if torch.is_tensor(active_vehicle_count)
+        else torch.as_tensor(active_vehicle_count, dtype=torch.float32)
+    )
+    total = torch.as_tensor(
+        total_vehicle_count,
+        device=active.device,
+        dtype=active.dtype,
+    )
+    duration = torch.as_tensor(
+        transition_seconds,
+        device=active.device,
+        dtype=active.dtype,
+    )
+    if bool(torch.any(~torch.isfinite(total)).item()) or bool(
+        torch.any(total <= 0.0).item()
+    ):
+        raise ValueError("total_vehicle_count must be finite and positive")
+    if bool(torch.any(~torch.isfinite(duration)).item()) or bool(
+        torch.any(duration < 0.0).item()
+    ):
+        raise ValueError("transition_seconds must be finite and non-negative")
+    safe_active = torch.nan_to_num(active, nan=0.0, posinf=0.0, neginf=0.0)
+    safe_active = torch.minimum(safe_active.clamp_min(0.0), total)
+    return (
+        -float(reward_scale)
+        * safe_active
+        * (duration / 60.0)
+        / total
+    )
+
+
+def _wm_vehicle_capacities(
+    wm,
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+    capacities_override: Optional[torch.Tensor | np.ndarray] = None,
+) -> torch.Tensor:
+    capacities = capacities_override
+    if capacities is None:
+        capacities = getattr(getattr(wm, "bpr", None), "capacities", None)
+    if capacities is None:
+        capacities = getattr(getattr(wm, "_registry", None), "capacities", None)
+    if capacities is None:
+        raise RuntimeError(
+            "Decoded active-vehicle count requires edge capacities from the "
+            "world model or an explicit capacities_override."
+        )
+    return torch.as_tensor(capacities, device=device, dtype=dtype).reshape(-1)
+
+
+def _decoded_active_vehicle_count(
     wm,
     z: torch.Tensor,
+    *,
+    total_vehicle_count: Optional[torch.Tensor | float] = None,
+    capacities_override: Optional[torch.Tensor | np.ndarray] = None,
+) -> torch.Tensor:
+    """Return the raw capacity-restored AV+HDV edge-volume sum.
+
+    Per-edge errors accumulate in this quantity.  Global reward should use
+    :func:`_active_vehicle_count_from_latent`, which applies the aggregate
+    readout, while this raw sum remains an anchor and diagnostic.
+    """
+    decoded = wm.flow_projector.decode(z)
+    if int(decoded.shape[-1]) <= 2:
+        raise RuntimeError("FlowProjector decoder has no vehicle-volume channel")
+    capacities = _wm_vehicle_capacities(
+        wm,
+        device=decoded.device,
+        dtype=decoded.dtype,
+        capacities_override=capacities_override,
+    )
+    if int(decoded.shape[-2]) != int(capacities.numel()):
+        raise ValueError(
+            "Decoded edge count and capacity count differ: "
+            f"{int(decoded.shape[-2])} != {int(capacities.numel())}"
+        )
+    count = (
+        torch.nan_to_num(decoded[..., 2], nan=0.0, posinf=0.0, neginf=0.0)
+        .clamp_min(0.0)
+        .mul(capacities)
+        .sum(dim=-1)
+    )
+    if total_vehicle_count is not None:
+        total = torch.as_tensor(
+            total_vehicle_count,
+            device=count.device,
+            dtype=count.dtype,
+        )
+        count = torch.minimum(count, total.clamp_min(0.0))
+    return count
+
+
+def _active_vehicle_count_from_latent(
+    wm,
+    active_count_readout: Optional[AggregateActiveVehicleReadout],
     z_next: torch.Tensor,
     *,
-    gamma: float,
-    reward_scale: float,
-) -> Tuple[torch.Tensor, Dict[str, float]]:
-    """Potential difference whose discounted sum targets predicted episode t_all.
+    z_prev: torch.Tensor,
+    total_vehicle_count: torch.Tensor | float,
+    capacities_override: Optional[torch.Tensor | np.ndarray] = None,
+    transition_seconds: torch.Tensor | float,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Return transition-equivalent and raw endpoint active counts."""
+    raw_count = _decoded_active_vehicle_count(
+        wm,
+        z_next,
+        capacities_override=capacities_override,
+    )
+    total = torch.as_tensor(
+        total_vehicle_count,
+        device=raw_count.device,
+        dtype=raw_count.dtype,
+    )
+    while total.dim() < raw_count.dim():
+        total = total.unsqueeze(-1)
+    if bool(torch.any(~torch.isfinite(total)).item()) or bool(
+        torch.any(total <= 0.0).item()
+    ):
+        raise ValueError("total_vehicle_count must be finite and positive")
+    if active_count_readout is None:
+        predicted_count = torch.minimum(
+            raw_count.clamp_min(0.0),
+            total,
+        )
+    else:
+        predicted_fraction = active_count_readout(
+            z_next,
+            z_prev=z_prev,
+            raw_decoder_fraction=(raw_count / total).detach(),
+            transition_seconds=transition_seconds,
+        )
+        predicted_count = predicted_fraction * total
+    return predicted_count, raw_count
 
-    The supervised head predicts completed-vehicle episode mean travel time in
-    minutes.  With ``Phi(z) = -T_all_hat(z)``, the discounted sum of
-    ``gamma * Phi(z_next) - Phi(z)`` telescopes to the terminal potential plus
-    a start-state constant, so it does not substitute an instantaneous
-    congestion statistic for the episode objective.
-    """
-    projector = getattr(wm, "flow_projector", None)
-    pred_fn = getattr(projector, "predict_t_all_from_z", None)
-    if not bool(getattr(projector, "has_t_all_head", False)) or not callable(pred_fn):
-        raise RuntimeError(
-            "Global t_all potential reward requires a supervised FlowProjector "
-            "t_all_head; set ac_global_advantage_weight=0 for checkpoints without it."
+
+def _active_vehicle_count_readout_supervision_loss(
+    *,
+    z_current: torch.Tensor,
+    z_pred_next: torch.Tensor,
+    z_encoded_next: Optional[torch.Tensor],
+    flow_projector: torch.nn.Module,
+    active_count_readout: AggregateActiveVehicleReadout,
+    capacities: torch.Tensor | np.ndarray,
+    target_active_vehicle_count: torch.Tensor,
+    transition_seconds: torch.Tensor | float,
+    raw_decoder_target_active_vehicle_count: Optional[
+        torch.Tensor
+    ] = None,
+    total_vehicle_count: torch.Tensor,
+    supervision_weight: float,
+) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    """Calibrate nominal-step exposure from exact real SUMO transitions."""
+    zero = z_pred_next.sum() * 0.0
+    if float(supervision_weight) <= 0.0:
+        return zero, {}
+    capacities_t = torch.as_tensor(
+        capacities,
+        device=z_pred_next.device,
+        dtype=z_pred_next.dtype,
+    ).reshape(-1)
+    target_count = target_active_vehicle_count.to(
+        device=z_pred_next.device,
+        dtype=z_pred_next.dtype,
+    ).reshape(-1)
+    total_count = total_vehicle_count.to(
+        device=z_pred_next.device,
+        dtype=z_pred_next.dtype,
+    ).reshape(-1)
+    raw_target_count = (
+        target_count
+        if raw_decoder_target_active_vehicle_count is None
+        else raw_decoder_target_active_vehicle_count.to(
+            device=z_pred_next.device,
+            dtype=z_pred_next.dtype,
+        ).reshape(-1)
+    )
+    n = min(int(target_count.numel()), int(total_count.numel()))
+    n = min(n, int(raw_target_count.numel()))
+    duration = torch.as_tensor(
+        transition_seconds,
+        device=z_pred_next.device,
+        dtype=z_pred_next.dtype,
+    ).reshape(-1)
+    if int(duration.numel()) == 1 and n > 1:
+        duration = duration.expand(n)
+    else:
+        n = min(n, int(duration.numel()))
+    target_count = target_count[:n]
+    total_count = total_count[:n]
+    raw_target_count = raw_target_count[:n]
+    duration = duration[:n]
+    valid = (
+        torch.isfinite(target_count)
+        & torch.isfinite(total_count)
+        & torch.isfinite(raw_target_count)
+        & torch.isfinite(duration)
+        & (total_count > 0.0)
+        & (target_count >= 0.0)
+        & (target_count <= total_count + 1e-5)
+        & (raw_target_count >= 0.0)
+        & (duration > 0.0)
+    )
+    if not bool(valid.any().detach().cpu().item()):
+        return zero, {
+            "pred_next_active_vehicle_count_valid_frac": valid.to(
+                dtype=z_pred_next.dtype
+            ).mean().detach()
+            if n > 0
+            else zero.detach(),
+            "pred_next_active_vehicle_count_unrepresentable_frac": (
+                (
+                    torch.isfinite(target_count)
+                    & torch.isfinite(total_count)
+                    & (total_count > 0.0)
+                    & (target_count > total_count + 1e-5)
+                )
+                .to(dtype=z_pred_next.dtype)
+                .mean()
+                .detach()
+                if n > 0
+                else zero.detach()
+            ),
+        }
+
+    target_fraction = (
+        target_count[valid] / total_count[valid]
+    ).clamp(0.0, 1.0)
+    views = [("pred_next", z_pred_next)]
+    if z_encoded_next is not None:
+        views.append(("encoded_next", z_encoded_next))
+
+    view_losses: List[torch.Tensor] = []
+    view_metrics: Dict[str, torch.Tensor] = {}
+    for name, z_view in views:
+        decoded = flow_projector.decode(z_view)
+        if int(decoded.shape[-1]) <= 2:
+            continue
+        if int(decoded.shape[-2]) != int(capacities_t.numel()):
+            raise ValueError(
+                "Decoded edge count and capacity count differ for "
+                "active-count readout supervision"
+            )
+        raw_count = (
+            torch.nan_to_num(
+                decoded[..., 2],
+                nan=0.0,
+                posinf=0.0,
+                neginf=0.0,
+            )
+            .clamp_min(0.0)
+            .mul(capacities_t)
+            .sum(dim=-1)
+            .reshape(-1)[:n]
         )
+        raw_fraction = raw_count / total_count
+        if name == "pred_next":
+            active_count_readout.update_global_calibration(
+                raw_decoder_fraction=raw_fraction[valid],
+                target_fraction=target_fraction,
+            )
+        corrected_logits = active_count_readout.corrected_logits(
+            z_view,
+            z_prev=z_current,
+            transition_seconds=duration,
+            raw_decoder_fraction=raw_fraction.detach(),
+        ).reshape(-1)[:n]
+        predicted_fraction = torch.sigmoid(corrected_logits[valid])
+        predicted_count = predicted_fraction * total_count[valid]
+        # Subtract the target entropy so a perfect soft-label prediction has
+        # zero reported loss while retaining BCE-with-logits' stable gradient.
+        bce = torch.nn.functional.binary_cross_entropy_with_logits(
+            corrected_logits[valid],
+            target_fraction,
+        )
+        target_entropy = torch.nn.functional.binary_cross_entropy(
+            target_fraction.clamp(1e-6, 1.0 - 1e-6),
+            target_fraction,
+        )
+        view_losses.append(bce - target_entropy)
+        view_metrics[f"{name}_active_vehicle_count_mae"] = (
+            predicted_count - target_count[valid]
+        ).abs().mean().detach()
+        view_metrics[f"{name}_active_vehicle_count_pred_mean"] = (
+            predicted_count.mean().detach()
+        )
+        view_metrics[f"{name}_active_vehicle_count_raw_sum_mae"] = (
+            raw_count[valid] - raw_target_count[valid]
+        ).abs().mean().detach()
+        view_metrics[f"{name}_active_vehicle_count_raw_sum_mean"] = (
+            raw_count[valid].mean().detach()
+        )
+
+    if not view_losses:
+        return zero, {}
+    calibration_loss = torch.stack(view_losses).mean()
+    loss = float(supervision_weight) * calibration_loss
+    return loss, {
+        "pred_next_active_vehicle_count_loss": loss.detach(),
+        "pred_next_active_vehicle_count_target_mean": target_count[
+            valid
+        ].mean().detach(),
+        "pred_next_active_vehicle_count_valid_frac": valid.to(
+            dtype=z_pred_next.dtype
+        ).mean().detach(),
+        "pred_next_active_vehicle_count_unrepresentable_frac": (
+            (
+                torch.isfinite(target_count)
+                & torch.isfinite(total_count)
+                & (total_count > 0.0)
+                & (target_count > total_count + 1e-5)
+            )
+            .to(dtype=z_pred_next.dtype)
+            .mean()
+            .detach()
+        ),
+        "active_vehicle_count_global_logit_bias": (
+            active_count_readout.global_logit_bias.detach()
+        ),
+        "active_vehicle_count_calibration_updates": (
+            active_count_readout.calibration_updates.detach().to(
+                dtype=z_pred_next.dtype
+            )
+        ),
+        **view_metrics,
+    }
+
+
+def _real_global_transition_part(
+    wm,
+    steps: Sequence[OnlineWorldModelStep],
+    device: torch.device,
+) -> Dict[str, torch.Tensor]:
+    """Encode real SUMO transitions for direct global-critic supervision."""
+    valid_steps = [
+        step
+        for step in steps
+        if np.isfinite(float(step.global_reward))
+        and np.asarray(step.flow).size > 0
+        and np.asarray(step.next_flow).size > 0
+    ]
+    if not valid_steps:
+        return {}
+    flow = torch.from_numpy(
+        np.stack(
+            [np.asarray(step.flow, dtype=np.float32) for step in valid_steps],
+            axis=0,
+        )
+    ).to(device=device, dtype=torch.float32)
+    next_flow = torch.from_numpy(
+        np.stack(
+            [np.asarray(step.next_flow, dtype=np.float32) for step in valid_steps],
+            axis=0,
+        )
+    ).to(device=device, dtype=torch.float32)
     with torch.no_grad():
-        current = pred_fn(z.detach()).reshape(-1)
-        next_ = pred_fn(z_next.detach()).reshape(-1)
-        if int(current.numel()) != 1 or int(next_.numel()) != 1:
-            raise ValueError("Global t_all potential reward expects one latent state transition")
-        current_value = current[0].to(device=z_next.device, dtype=z_next.dtype)
-        next_value = next_[0].to(device=z_next.device, dtype=z_next.dtype)
-        if not bool(torch.isfinite(current_value).item()) or not bool(torch.isfinite(next_value).item()):
-            raise RuntimeError("FlowProjector t_all_head returned a non-finite prediction")
-        reward = float(reward_scale) * (
-            current_value - float(gamma) * next_value
+        z = wm.flow_projector(flow).detach()
+        z_next = wm.flow_projector(next_flow).detach()
+    contexts = torch.from_numpy(
+        np.stack(
+            [np.asarray(step.context, dtype=np.float32) for step in valid_steps],
+            axis=0,
         )
-    return reward, {
-        "global_t_all_current": float(current_value.detach().cpu().item()),
-        "global_t_all_next": float(next_value.detach().cpu().item()),
+    ).to(device=device, dtype=torch.float32)
+    next_contexts = torch.from_numpy(
+        np.stack(
+            [
+                np.asarray(
+                    step.next_context
+                    if step.next_context is not None
+                    else step.context,
+                    dtype=np.float32,
+                )
+                for step in valid_steps
+            ],
+            axis=0,
+        )
+    ).to(device=device, dtype=torch.float32)
+    return {
+        "global_latent_states": z,
+        "global_next_latent_states": z_next,
+        "global_contexts": contexts,
+        "global_next_contexts": next_contexts,
+        "global_rewards": torch.tensor(
+            [float(step.global_reward) for step in valid_steps],
+            device=device,
+            dtype=z.dtype,
+        ),
+        "global_terminal": torch.tensor(
+            [bool(step.transition_terminal) for step in valid_steps],
+            device=device,
+            dtype=torch.bool,
+        ),
+        "global_active_vehicle_count": torch.tensor(
+            [float(step.active_vehicle_count) for step in valid_steps],
+            device=device,
+            dtype=z.dtype,
+        ),
+        "global_transition_seconds": torch.tensor(
+            [float(step.transition_seconds) for step in valid_steps],
+            device=device,
+            dtype=z.dtype,
+        ),
     }
 
 
@@ -3025,6 +3949,7 @@ class OnlineImaginedActorCritic:
         self,
         *,
         wm,
+        active_count_readout: AggregateActiveVehicleReadout,
         actor: VehicleRouteActor,
         critic: CentralizedVehicleValueCritic,
         global_critic: CentralizedLatentValueCritic,
@@ -3036,6 +3961,8 @@ class OnlineImaginedActorCritic:
         obs_dim: int,
     ):
         self.wm = wm
+        self.active_count_readout = active_count_readout
+        self.active_count_readout.eval()
         self.actor = actor
         self.critic = critic
         self.global_critic = global_critic
@@ -3176,6 +4103,12 @@ class OnlineImaginedActorCritic:
         current_edge_pred: List[float] = []
         current_edge_true: List[float] = []
         current_edge_abs_errors: List[float] = []
+        active_count_pred: List[float] = []
+        active_count_raw: List[float] = []
+        active_count_true: List[float] = []
+        active_count_raw_true: List[float] = []
+        active_count_abs_errors: List[float] = []
+        active_count_raw_abs_errors: List[float] = []
         top1_matches: List[float] = []
         wm_best_live_regrets: List[float] = []
         active_decisions = 0
@@ -3183,6 +4116,7 @@ class OnlineImaginedActorCritic:
         n_routes = int(self.cfg.n_routes)
         self.wm.flow_projector.eval()
         self.wm.dynamics.eval()
+        self.active_count_readout.eval()
         with torch.no_grad():
             for raw_i in np.asarray(idx).reshape(-1):
                 step = candidate_steps[int(raw_i)]
@@ -3210,6 +4144,76 @@ class OnlineImaginedActorCritic:
                     z_true = self.wm.encode_observation(step.next_flow).to(device=self.device, dtype=torch.float32).clone()
                 except Exception:
                     continue
+                total_vehicle_count = int(
+                    getattr(step, "total_vehicle_count", 0) or 0
+                )
+                raw_target_active_count = float(
+                    getattr(step, "next_active_vehicle_count", float("nan"))
+                )
+                active_vehicle_seconds = float(
+                    getattr(step, "active_vehicle_seconds", float("nan"))
+                )
+                scheduled_transition_seconds = float(
+                    getattr(step, "scheduled_transition_seconds", float("nan"))
+                )
+                if (
+                    not np.isfinite(scheduled_transition_seconds)
+                    or scheduled_transition_seconds <= 0.0
+                ):
+                    scheduled_transition_seconds = float(
+                        getattr(step, "transition_seconds", float("nan"))
+                    )
+                if (
+                    not np.isfinite(scheduled_transition_seconds)
+                    or scheduled_transition_seconds <= 0.0
+                ):
+                    scheduled_transition_seconds = float(self.cfg.step_interval)
+                target_active_count = (
+                    float(
+                        _nominal_transition_active_vehicle_count(
+                            active_vehicle_seconds,
+                            nominal_transition_seconds=scheduled_transition_seconds,
+                            total_vehicle_count=total_vehicle_count,
+                        ).item()
+                    )
+                    if total_vehicle_count > 0
+                    and np.isfinite(active_vehicle_seconds)
+                    else float("nan")
+                )
+                if (
+                    total_vehicle_count > 0
+                    and np.isfinite(target_active_count)
+                    and target_active_count <= total_vehicle_count + 1e-5
+                    and np.isfinite(raw_target_active_count)
+                ):
+                    predicted_count_t, raw_count_t = (
+                        _active_vehicle_count_from_latent(
+                            self.wm,
+                            self.active_count_readout,
+                            z_pred,
+                            z_prev=z,
+                            transition_seconds=scheduled_transition_seconds,
+                            total_vehicle_count=total_vehicle_count,
+                        )
+                    )
+                    predicted_count = float(
+                        predicted_count_t.reshape(-1)[0].detach().cpu().item()
+                    )
+                    raw_count = float(
+                        raw_count_t.reshape(-1)[0].detach().cpu().item()
+                    )
+                    active_count_pred.append(predicted_count)
+                    active_count_raw.append(raw_count)
+                    active_count_true.append(target_active_count)
+                    active_count_raw_true.append(
+                        raw_target_active_count
+                    )
+                    active_count_abs_errors.append(
+                        abs(predicted_count - target_active_count)
+                    )
+                    active_count_raw_abs_errors.append(
+                        abs(raw_count - raw_target_active_count)
+                    )
                 edge_tt_pred = _edge_tt_numpy_from_z(self.wm, z_pred, self.cfg)
                 edge_tt_true = _edge_tt_numpy_from_z(self.wm, z_true, self.cfg)
                 for sample, paths in zip(samples, path_batch):
@@ -3245,7 +4249,11 @@ class OnlineImaginedActorCritic:
                         top1_matches.append(float(int(pred_best == true_best)))
                     if pred_best is not None and true_finite and np.isfinite(float(costs_true[pred_best])):
                         wm_best_live_regrets.append(float(costs_true[pred_best]) - float(min(true_finite)))
-        if not route_abs_errors and not current_edge_abs_errors:
+        if (
+            not route_abs_errors
+            and not current_edge_abs_errors
+            and not active_count_abs_errors
+        ):
             return {"wm_pred_diag_samples": 0.0, "wm_pred_diag_skipped": 1.0}
         return {
             "wm_pred_diag_samples": float(active_decisions),
@@ -3258,6 +4266,36 @@ class OnlineImaginedActorCritic:
                 float(np.mean(current_edge_abs_errors)) if current_edge_abs_errors else float("nan")
             ),
             "wm_pred_diag_current_edge_corr": _pearson_np(current_edge_pred, current_edge_true),
+            "wm_pred_diag_active_count_mae": (
+                float(np.mean(active_count_abs_errors))
+                if active_count_abs_errors
+                else float("nan")
+            ),
+            "wm_pred_diag_active_count_raw_sum_mae": (
+                float(np.mean(active_count_raw_abs_errors))
+                if active_count_raw_abs_errors
+                else float("nan")
+            ),
+            "wm_pred_diag_active_count_bias": (
+                float(
+                    np.mean(
+                        np.asarray(active_count_pred)
+                        - np.asarray(active_count_true)
+                    )
+                )
+                if active_count_pred
+                else float("nan")
+            ),
+            "wm_pred_diag_active_count_raw_sum_bias": (
+                float(
+                    np.mean(
+                        np.asarray(active_count_raw)
+                        - np.asarray(active_count_raw_true)
+                    )
+                )
+                if active_count_raw
+                else float("nan")
+            ),
             "wm_pred_diag_top1_match": float(np.mean(top1_matches)) if top1_matches else float("nan"),
             "wm_pred_diag_wm_best_live_regret": (
                 float(np.mean(wm_best_live_regrets)) if wm_best_live_regrets else float("nan")
@@ -3409,6 +4447,33 @@ class OnlineImaginedActorCritic:
             dtype=z.dtype,
         )
         hdv_context, _hdv_context_source = self._hdv_context_for_step(start, z.dtype)
+        total_vehicle_count = int(getattr(start, "total_vehicle_count", 0) or 0)
+        if total_vehicle_count <= 0:
+            total_vehicle_count = max(
+                int(
+                    round(
+                        float(len(vehicle_states))
+                        / max(float(self.cfg.ratio_machines), 1e-6)
+                    )
+                ),
+                len(vehicle_states),
+                1,
+            )
+        scheduled_transition_seconds = float(
+            getattr(start, "scheduled_transition_seconds", float("nan"))
+        )
+        if (
+            not np.isfinite(scheduled_transition_seconds)
+            or scheduled_transition_seconds <= 0.0
+        ):
+            scheduled_transition_seconds = float(
+                getattr(start, "transition_seconds", float("nan"))
+            )
+        if (
+            not np.isfinite(scheduled_transition_seconds)
+            or scheduled_transition_seconds <= 0.0
+        ):
+            scheduled_transition_seconds = float(self.cfg.step_interval)
         return {
             "start": start,
             "samples": samples,
@@ -3420,6 +4485,8 @@ class OnlineImaginedActorCritic:
             "context": context,
             "initial_context": context.clone(),
             "initial_active_av": int(len(vehicle_states)),
+            "scheduled_transition_seconds": scheduled_transition_seconds,
+            "total_vehicle_count": int(total_vehicle_count),
             "hdv_context": hdv_context,
             "obs_steps": [],
             "action_steps": [],
@@ -3438,8 +4505,10 @@ class OnlineImaginedActorCritic:
             "global_context_steps": [],
             "global_next_context_steps": [],
             "global_reward_steps": [],
-            "global_t_all_current_steps": [],
-            "global_t_all_next_steps": [],
+            "global_active_vehicle_count_steps": [],
+            "global_raw_decoder_vehicle_count_steps": [],
+            "global_transition_seconds_steps": [],
+            "global_terminal_steps": [],
             "arrived_events": 0,
             "next_step_cache": None,
             "done": False,
@@ -3529,6 +4598,11 @@ class OnlineImaginedActorCritic:
         if int(obs.shape[0]) <= 0:
             state["done"] = True
             return None
+        transition_seconds = (
+            float(state["scheduled_transition_seconds"])
+            if int(horizon_idx) == 0
+            else float(self.cfg.step_interval)
+        )
         state["context"] = _imagined_global_context(
             state["initial_context"],
             horizon_idx=int(horizon_idx),
@@ -3565,7 +4639,14 @@ class OnlineImaginedActorCritic:
                 edge_tt=edge_tt,
                 current_edge=int(vehicle.current_edge),
                 current_edge_remaining=float(vehicle.current_edge_remaining),
-                step_interval=float(self.cfg.step_interval),
+                step_interval=transition_seconds,
+            )
+            # State progression follows the recorded control interval, while
+            # the local capped-step objective keeps its configured per-action
+            # budget (the same convention used by real collection).
+            reward_elapsed = min(
+                max(float(advance.elapsed_cost), 0.0),
+                float(max(self.cfg.step_interval, 0.0)),
             )
             vehicle.current_edge = int(advance.current_edge)
             vehicle.current_edge_remaining = float(advance.current_edge_remaining)
@@ -3579,7 +4660,7 @@ class OnlineImaginedActorCritic:
                     float(remaining_before) + elapsed_before,
                     float(max(self.cfg.remaining_tt_eps, 1e-6)),
                 )
-                reward = float(max(float(advance.elapsed_cost), 0.0)) / denom
+                reward = reward_elapsed / denom
                 if float(self.cfg.progress_cap) > 0.0:
                     reward = min(reward, float(self.cfg.progress_cap))
                 reward_values.append(
@@ -3589,7 +4670,7 @@ class OnlineImaginedActorCritic:
                 reward_values.append(
                     -float(self.cfg.reward_weight)
                     * float(self.cfg.reward_scale)
-                    * float(advance.elapsed_cost)
+                    * reward_elapsed
                     / float(max(self.cfg.reward_temperature, 1e-6))
                 )
             arrived_events += int(bool(advance.arrived))
@@ -3599,7 +4680,7 @@ class OnlineImaginedActorCritic:
             active_path_batch,
             current_edges=active_current_edges,
             edge_travel_times=edge_tt,
-            horizon_seconds=float(self.cfg.step_interval),
+            horizon_seconds=transition_seconds,
             n_edges=n_edges,
             n_routes=n_routes,
             device=self.device,
@@ -3622,6 +4703,7 @@ class OnlineImaginedActorCritic:
             ),
             "action_edge": action_edge.detach(),
             "context": state["context"].detach(),
+            "transition_seconds": transition_seconds,
         }
 
     def _finish_imagined_horizon_step(
@@ -3646,38 +4728,65 @@ class OnlineImaginedActorCritic:
             z_next.detach(),
             self.cfg,
         )
+        known_global_terminal = bool(
+            horizon_idx == 0
+            and bool(getattr(start, "scheduled_episode_terminal", False))
+        )
         if abs(float(self.cfg.ac_global_advantage_weight)) > 0.0:
-            global_reward, global_diagnostics = _global_t_all_potential_reward(
-                self.wm,
-                state["z"],
-                z_next,
-                gamma=float(self.cfg.gamma),
+            transition_seconds = float(prepared["transition_seconds"])
+            with torch.no_grad():
+                (
+                    active_vehicle_count,
+                    raw_decoder_vehicle_count,
+                ) = _active_vehicle_count_from_latent(
+                    self.wm,
+                    self.active_count_readout,
+                    z_next,
+                    z_prev=state["z"],
+                    total_vehicle_count=int(state["total_vehicle_count"]),
+                    transition_seconds=transition_seconds,
+                )
+            active_vehicle_count = active_vehicle_count.to(
+                device=z_next.device,
+                dtype=z_next.dtype,
+            )
+            raw_decoder_vehicle_count = raw_decoder_vehicle_count.to(
+                device=z_next.device,
+                dtype=z_next.dtype,
+            )
+            # The readout target is real vehicle-seconds divided by this
+            # nominal interval. Multiplying by the same interval reconstructs
+            # transition exposure, including zero-active padding after an
+            # early terminal transition.
+            global_reward = _global_active_vehicle_reward(
+                active_vehicle_count,
+                total_vehicle_count=int(state["total_vehicle_count"]),
+                transition_seconds=transition_seconds,
                 reward_scale=float(self.cfg.global_reward_scale),
             )
         else:
             global_reward = z_next.new_zeros(())
-            global_diagnostics = {
-                "global_t_all_current": float("nan"),
-                "global_t_all_next": float("nan"),
-            }
+            active_vehicle_count = z_next.new_zeros(())
+            raw_decoder_vehicle_count = z_next.new_zeros(())
         next_path_batch: List[List[List[int]]] = []
         next_positions: List[int] = []
         next_active_indices: List[int] = []
-        for local_i, state_i in enumerate(active_indices):
-            vehicle = vehicle_states[int(state_i)]
-            if bool(vehicle.arrived) or int(vehicle.current_edge) < 0:
-                continue
-            candidates = self._imagined_candidate_paths(
-                edge_tt=next_edge_tt,
-                current_edge=int(vehicle.current_edge),
-                dest_edge=int(vehicle.dest_edge),
-                fallback_paths=vehicle.candidate_paths,
-            )
-            if not any(path for path in candidates):
-                continue
-            next_path_batch.append(candidates)
-            next_positions.append(int(local_i))
-            next_active_indices.append(int(state_i))
+        if not known_global_terminal:
+            for local_i, state_i in enumerate(active_indices):
+                vehicle = vehicle_states[int(state_i)]
+                if bool(vehicle.arrived) or int(vehicle.current_edge) < 0:
+                    continue
+                candidates = self._imagined_candidate_paths(
+                    edge_tt=next_edge_tt,
+                    current_edge=int(vehicle.current_edge),
+                    dest_edge=int(vehicle.dest_edge),
+                    fallback_paths=vehicle.candidate_paths,
+                )
+                if not any(path for path in candidates):
+                    continue
+                next_path_batch.append(candidates)
+                next_positions.append(int(local_i))
+                next_active_indices.append(int(state_i))
         if next_path_batch:
             next_obs_used, next_route_valid, _ = self._obs_from_paths(
                 z=z_next.detach(),
@@ -3754,12 +4863,24 @@ class OnlineImaginedActorCritic:
         state["global_context_steps"].append(prepared["context"])
         state["global_next_context_steps"].append(next_context.detach())
         state["global_reward_steps"].append(global_reward.detach())
-        state["global_t_all_current_steps"].append(
-            z_next.new_tensor(global_diagnostics["global_t_all_current"])
+        state["global_active_vehicle_count_steps"].append(
+            active_vehicle_count.detach()
         )
-        state["global_t_all_next_steps"].append(
-            z_next.new_tensor(global_diagnostics["global_t_all_next"])
+        state["global_raw_decoder_vehicle_count_steps"].append(
+            raw_decoder_vehicle_count.detach()
         )
+        state["global_transition_seconds_steps"].append(
+            z_next.new_tensor(float(prepared["transition_seconds"]))
+        )
+        state["global_terminal_steps"].append(
+            torch.tensor(
+                known_global_terminal,
+                device=z_next.device,
+                dtype=torch.bool,
+            )
+        )
+        if known_global_terminal:
+            state["done"] = True
         state["z"] = z_next.detach()
         state["context"] = next_context.detach()
 
@@ -3804,12 +4925,20 @@ class OnlineImaginedActorCritic:
                 dim=0,
             ),
             "global_rewards": torch.stack(state["global_reward_steps"], dim=0),
-            "global_t_all_current": torch.stack(
-                state["global_t_all_current_steps"],
+            "global_active_vehicle_count": torch.stack(
+                state["global_active_vehicle_count_steps"],
                 dim=0,
             ),
-            "global_t_all_next": torch.stack(
-                state["global_t_all_next_steps"],
+            "global_raw_decoder_vehicle_count": torch.stack(
+                state["global_raw_decoder_vehicle_count_steps"],
+                dim=0,
+            ),
+            "global_transition_seconds": torch.stack(
+                state["global_transition_seconds_steps"],
+                dim=0,
+            ),
+            "global_terminal": torch.stack(
+                state["global_terminal_steps"],
                 dim=0,
             ),
             "reward_mean": float(rewards_flat.mean().detach().cpu().item()),
@@ -3897,7 +5026,14 @@ class OnlineImaginedActorCritic:
     def _global_critic_terms(
         self,
         rollout_parts: Sequence[Dict[str, Any]],
+        *,
+        stats_prefix: str = "imag",
     ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, float]]:
+        prefix = str(stats_prefix or "imag").strip()
+
+        def stat(name: str) -> str:
+            return f"{prefix}_global_{name}"
+
         if abs(float(self.cfg.ac_global_advantage_weight)) <= 0.0:
             n_global = sum(
                 int(rewards.reshape(-1).numel())
@@ -3907,21 +5043,23 @@ class OnlineImaginedActorCritic:
             )
             zero = next(self.global_critic.parameters()).sum() * 0.0
             return zero, torch.zeros((n_global,), device=self.device), {
-                "imag_global_enabled": 0.0,
-                "imag_global_reward_mean": 0.0,
-                "imag_global_adv_mean": 0.0,
-                "imag_global_adv_std": 0.0,
-                "imag_global_value_target_ev": 0.0,
-                "imag_global_t_all_current_mean": 0.0,
-                "imag_global_t_all_next_mean": 0.0,
+                stat("enabled"): 0.0,
+                stat("reward_mean"): 0.0,
+                stat("adv_mean"): 0.0,
+                stat("adv_std"): 0.0,
+                stat("value_target_ev"): 0.0,
+                stat("active_vehicle_count_mean"): 0.0,
+                stat("raw_decoder_vehicle_count_mean"): 0.0,
+                stat("transition_seconds_mean"): 0.0,
             }
         losses: List[torch.Tensor] = []
         advantages: List[torch.Tensor] = []
         values_all: List[torch.Tensor] = []
         targets_all: List[torch.Tensor] = []
         rewards_all: List[torch.Tensor] = []
-        t_all_current_all: List[torch.Tensor] = []
-        t_all_next_all: List[torch.Tensor] = []
+        active_count_all: List[torch.Tensor] = []
+        raw_count_all: List[torch.Tensor] = []
+        transition_seconds_all: List[torch.Tensor] = []
         for part in rollout_parts:
             z = part.get("global_latent_states")
             z_next = part.get("global_next_latent_states")
@@ -3959,6 +5097,13 @@ class OnlineImaginedActorCritic:
                     z_next,
                     context=next_contexts,
                 ).reshape(-1)
+                terminal = part.get("global_terminal")
+                if torch.is_tensor(terminal):
+                    terminal = terminal.reshape(-1)[:n].to(
+                        device=self.device,
+                        dtype=torch.bool,
+                    )
+                    next_values = next_values.masked_fill(terminal, 0.0)
                 targets = lambda_return(
                     global_rewards,
                     next_values,
@@ -3970,28 +5115,40 @@ class OnlineImaginedActorCritic:
             values_all.append(values.detach())
             targets_all.append(targets)
             rewards_all.append(global_rewards.detach())
-            current_pred = part.get("global_t_all_current")
-            next_pred = part.get("global_t_all_next")
-            if torch.is_tensor(current_pred) and torch.is_tensor(next_pred):
-                current_finite = current_pred.reshape(-1)[:n].detach().cpu()
-                next_finite = next_pred.reshape(-1)[:n].detach().cpu()
-                current_finite = current_finite[torch.isfinite(current_finite)]
-                next_finite = next_finite[torch.isfinite(next_finite)]
-                if int(current_finite.numel()) > 0:
-                    t_all_current_all.append(current_finite)
-                if int(next_finite.numel()) > 0:
-                    t_all_next_all.append(next_finite)
+            active_count = part.get("global_active_vehicle_count")
+            if torch.is_tensor(active_count):
+                finite_count = active_count.reshape(-1)[:n].detach().cpu()
+                finite_count = finite_count[torch.isfinite(finite_count)]
+                if int(finite_count.numel()) > 0:
+                    active_count_all.append(finite_count)
+            raw_count = part.get("global_raw_decoder_vehicle_count")
+            if torch.is_tensor(raw_count):
+                finite_raw = raw_count.reshape(-1)[:n].detach().cpu()
+                finite_raw = finite_raw[torch.isfinite(finite_raw)]
+                if int(finite_raw.numel()) > 0:
+                    raw_count_all.append(finite_raw)
+            transition_seconds = part.get("global_transition_seconds")
+            if torch.is_tensor(transition_seconds):
+                finite_duration = (
+                    transition_seconds.reshape(-1)[:n].detach().cpu()
+                )
+                finite_duration = finite_duration[
+                    torch.isfinite(finite_duration)
+                ]
+                if int(finite_duration.numel()) > 0:
+                    transition_seconds_all.append(finite_duration)
 
         if not losses:
             zero = next(self.global_critic.parameters()).sum() * 0.0
             return zero, torch.zeros((0,), device=self.device), {
-                "imag_global_enabled": 1.0,
-                "imag_global_reward_mean": 0.0,
-                "imag_global_adv_mean": 0.0,
-                "imag_global_adv_std": 0.0,
-                "imag_global_value_target_ev": 0.0,
-                "imag_global_t_all_current_mean": 0.0,
-                "imag_global_t_all_next_mean": 0.0,
+                stat("enabled"): 1.0,
+                stat("reward_mean"): 0.0,
+                stat("adv_mean"): 0.0,
+                stat("adv_std"): 0.0,
+                stat("value_target_ev"): 0.0,
+                stat("active_vehicle_count_mean"): 0.0,
+                stat("raw_decoder_vehicle_count_mean"): 0.0,
+                stat("transition_seconds_mean"): 0.0,
             }
         values_cat = torch.cat(values_all, dim=0)
         targets_cat = torch.cat(targets_all, dim=0)
@@ -4002,18 +5159,27 @@ class OnlineImaginedActorCritic:
             residual_var = torch.var(targets_cat - values_cat, unbiased=False)
             value_ev = 1.0 - residual_var / target_var.clamp_min(1e-12)
         return torch.stack(losses).mean(), advantages_cat, {
-            "imag_global_enabled": 1.0,
-            "imag_global_reward_mean": float(torch.cat(rewards_all).mean().cpu().item()),
-            "imag_global_adv_mean": float(advantages_cat.mean().cpu().item()),
-            "imag_global_adv_std": float(advantages_cat.std(unbiased=False).cpu().item())
+            stat("enabled"): 1.0,
+            stat("reward_mean"): float(torch.cat(rewards_all).mean().cpu().item()),
+            stat("adv_mean"): float(advantages_cat.mean().cpu().item()),
+            stat("adv_std"): float(advantages_cat.std(unbiased=False).cpu().item())
             if int(advantages_cat.numel()) > 1
             else 0.0,
-            "imag_global_value_target_ev": float(value_ev.cpu().item()),
-            "imag_global_t_all_current_mean": float(torch.cat(t_all_current_all).mean().item())
-            if t_all_current_all
+            stat("value_target_ev"): float(value_ev.cpu().item()),
+            stat("active_vehicle_count_mean"): float(
+                torch.cat(active_count_all).mean().item()
+            )
+            if active_count_all
             else 0.0,
-            "imag_global_t_all_next_mean": float(torch.cat(t_all_next_all).mean().item())
-            if t_all_next_all
+            stat("raw_decoder_vehicle_count_mean"): float(
+                torch.cat(raw_count_all).mean().item()
+            )
+            if raw_count_all
+            else 0.0,
+            stat("transition_seconds_mean"): float(
+                torch.cat(transition_seconds_all).mean().item()
+            )
+            if transition_seconds_all
             else 0.0,
         }
 
@@ -4033,6 +5199,30 @@ class OnlineImaginedActorCritic:
             selected_starts = [
                 candidate_steps[int(idx)]
                 for idx in np.asarray(start_idx).reshape(-1)
+            ]
+            selected_real_episode = (
+                int(selected_starts[0].episode)
+                if selected_starts
+                and getattr(selected_starts[0], "episode", None) is not None
+                else None
+            )
+            replay_episodes = getattr(replay, "episodes", [])
+            if callable(replay_episodes):
+                replay_episodes = replay_episodes()
+            real_global_parts = [
+                part
+                for episode_steps in replay_episodes
+                if episode_steps
+                and selected_real_episode is not None
+                and int(episode_steps[0].episode) == selected_real_episode
+                for part in [
+                    _real_global_transition_part(
+                        self.wm,
+                        episode_steps,
+                        self.device,
+                    )
+                ]
+                if part
             ]
             rollout_batch_size = max(int(self.cfg.imagined_rollout_batch_size), 1)
             for offset in range(0, len(selected_starts), rollout_batch_size):
@@ -4116,7 +5306,20 @@ class OnlineImaginedActorCritic:
                     gamma=float(self.cfg.gamma),
                     lambda_=float(self.cfg.ac_lambda),
                 ).detach()
-            global_value_loss, compact_global_advantage, global_stats = self._global_critic_terms(rollout_parts)
+            imagined_global_value_loss, compact_global_advantage, global_stats = (
+                self._global_critic_terms(rollout_parts)
+            )
+            real_global_value_loss, _real_global_advantage, real_global_stats = (
+                self._global_critic_terms(
+                    real_global_parts,
+                    stats_prefix="real",
+                )
+            )
+            global_loss_parts = [imagined_global_value_loss]
+            if real_global_parts:
+                global_loss_parts.append(real_global_value_loss)
+            global_value_loss = torch.stack(global_loss_parts).mean()
+            global_stats.update(real_global_stats)
             global_advantage = torch.zeros((max(int(group_offset), 1),), device=self.device, dtype=returns.dtype)
             global_cursor = 0
             for part, base in zip(rollout_parts, part_group_bases):
@@ -4196,7 +5399,15 @@ class OnlineImaginedActorCritic:
                     "imag_loss": float(loss.detach().cpu().item()),
                     "imag_policy_loss": float(policy_loss.detach().cpu().item()),
                     "imag_value_loss": float(value_loss.detach().cpu().item()),
-                    "imag_global_value_loss": float(global_value_loss.detach().cpu().item()),
+                    "imag_global_value_loss": float(
+                        imagined_global_value_loss.detach().cpu().item()
+                    ),
+                    "real_global_value_loss": float(
+                        real_global_value_loss.detach().cpu().item()
+                    ),
+                    "global_value_loss": float(
+                        global_value_loss.detach().cpu().item()
+                    ),
                     "imag_entropy": float(entropy_mean.detach().cpu().item()),
                     "imag_clip_frac": float(clip_frac.detach().cpu().item()),
                     "imag_actor_grad_norm": float(actor_grad_norm.detach().cpu().item()),
@@ -4267,15 +5478,27 @@ def build_gretz_online_wm_dreamer_plan(cfg: Optional[OnlineWmDreamerConfig] = No
             "formula": reward_formula,
             "source": "world_model_decoded_edge_travel_time",
             "progress_state": "per_vehicle_route_suffix_until_arrival",
-            "global_source": "supervised_completed_vehicle_episode_t_all_head",
-            "global_formula": "global_reward_scale * (t_all_hat(z_t) - gamma * t_all_hat(z_t_plus_1))",
+            "global_source": (
+                "real_sumo_vehicle_seconds_and_imagined_calibrated_exposure"
+            ),
+            "global_formula": (
+                "-global_reward_scale * N_active * "
+                "(transition_seconds / 60) / N_vehicles"
+            ),
+            "global_unit": "mean_travel_time_minutes",
             "global_reward_scale": float(resolved.global_reward_scale),
             "global_reward_semantics": GLOBAL_REWARD_SEMANTICS,
+            "global_imagined_active_exposure_source": (
+                "current_next_latent_transition_exposure_readout_with_scheduled_duration"
+            ),
+            "global_raw_decoder_sum_role": (
+                "initialization_anchor_diagnostic_and_legacy_fallback"
+            ),
             "global_reward_enabled": bool(global_enabled),
             "global_enablement": (
-                "explicit_opt_in_after_held_out_t_all_calibration"
+                "enabled_by_default"
                 if global_enabled
-                else "disabled_pending_held_out_t_all_calibration"
+                else "disabled_by_configuration"
             ),
         },
         "world_model_usage": {
@@ -4290,7 +5513,11 @@ def build_gretz_online_wm_dreamer_plan(cfg: Optional[OnlineWmDreamerConfig] = No
             ),
             "real_collection_wm_action_alignment": "same_selected_one_hot",
             "world_model_online_update": True,
-            "updated_modules": ["flow_projector", "cfm_dynamics"],
+            "updated_modules": [
+                "flow_projector",
+                "cfm_dynamics",
+                "transition_exposure_readout",
+            ],
             "direct_real_a2c_update": bool(resolved.direct_real_a2c_update),
             "freeze_policy_obs_world_model": bool(resolved.freeze_policy_obs_world_model),
             "wm_grad_enabled": True,
@@ -4307,6 +5534,15 @@ def build_gretz_online_wm_dreamer_plan(cfg: Optional[OnlineWmDreamerConfig] = No
             "wm_replay_require_completion": bool(resolved.wm_replay_require_completion),
             "wm_replay_completion_threshold": float(resolved.wm_replay_completion_threshold),
             "wm_batch_size": int(resolved.wm_batch_size),
+            "wm_active_count_supervision_weight": float(
+                resolved.wm_active_count_supervision_weight
+            ),
+            "wm_active_count_readout_lr": float(
+                resolved.wm_active_count_readout_lr
+            ),
+            "wm_active_count_readout_semantics": (
+                ACTIVE_COUNT_READOUT_SEMANTICS
+            ),
             "wm_t_all_supervision_weight": float(resolved.wm_t_all_supervision_weight),
             "wm_gradient_checkpointing": bool(resolved.wm_gradient_checkpointing),
             "wm_space_attention_batch_chunk_size": int(
@@ -4426,28 +5662,19 @@ class OnlineWmDreamerTrainer:
         self.rng = np.random.default_rng(int(self.cfg.seed))
         self.device = torch.device(self.cfg.device if torch.cuda.is_available() else "cpu")
         self.wm = self._load_world_model()
-        global_enabled = abs(float(self.cfg.ac_global_advantage_weight)) > 0.0
+        self._dynamics_checkpoint_state = torch.load(
+            str(self.cfg.dynamics_ckpt),
+            map_location="cpu",
+            weights_only=False,
+        )
         supervises_t_all = float(self.cfg.wm_t_all_supervision_weight) > 0.0
         has_t_all_head = bool(getattr(self.wm.flow_projector, "has_t_all_head", False))
-        if (global_enabled or supervises_t_all) and not has_t_all_head:
+        if supervises_t_all and not has_t_all_head:
             raise RuntimeError(
-                "The corrected online-WM objective requires a FlowProjector "
-                "t_all_head when online supervision or global advantage is enabled. "
-                "Use a compatible projector checkpoint, or set both "
-                "ac_global_advantage_weight and wm_t_all_supervision_weight to 0."
-            )
-        if global_enabled and not _has_trained_t_all_head(self.wm.flow_projector):
-            raise RuntimeError(
-                "Global t_all advantage was explicitly enabled, but the FlowProjector "
-                "t_all_head is still at zero initialization. Disable global advantage "
-                "or supply a supervised and independently calibrated projector."
-            )
-        if global_enabled:
-            print(
-                "[online-wm-dreamer] WARNING: global t_all advantage is an explicit "
-                "opt-in. Confirm held-out t_all calibration for this projector/run; "
-                "non-zero head weights alone are not a calibration guarantee.",
-                flush=True,
+                "wm_t_all_supervision_weight > 0 requires a FlowProjector "
+                "t_all_head. Use a compatible projector checkpoint or set "
+                "wm_t_all_supervision_weight to 0; global reward does not "
+                "depend on this auxiliary head."
             )
         self.policy_obs_mode = str(getattr(self.cfg, "policy_obs_mode", "wm_latent") or "wm_latent").strip().lower()
         if self.policy_obs_mode in {"", "wm", "wm_latent", "latent"}:
@@ -4506,6 +5733,23 @@ class OnlineWmDreamerTrainer:
             lr=float(self.cfg.critic_lr),
         )
         self.wm_updater = OnlineWorldModelUpdater(self.wm, self.cfg, self.device)
+        saved_active_count_readout = self._dynamics_checkpoint_state.get(
+            "active_count_readout"
+        )
+        saved_active_count_semantics = str(
+            self._dynamics_checkpoint_state.get(
+                "active_count_readout_semantics",
+                "",
+            )
+        )
+        if (
+            saved_active_count_readout is not None
+            and saved_active_count_semantics == ACTIVE_COUNT_READOUT_SEMANTICS
+        ):
+            self.wm_updater.active_count_readout.load_state_dict(
+                saved_active_count_readout,
+                strict=True,
+            )
         self.policy_obs_wm = self._load_world_model() if bool(self.cfg.freeze_policy_obs_world_model) else self.wm
         self.policy_obs_wm.eval()
         if bool(self.cfg.freeze_policy_obs_world_model):
@@ -4513,6 +5757,7 @@ class OnlineWmDreamerTrainer:
                 param.requires_grad_(False)
         self.imagined_ac = OnlineImaginedActorCritic(
             wm=self.wm,
+            active_count_readout=self.wm_updater.active_count_readout,
             actor=self.actor,
             critic=self.critic,
             global_critic=self.global_critic,
@@ -4553,7 +5798,6 @@ class OnlineWmDreamerTrainer:
             hdv_target_source=str(self.cfg.wm_hdv_target_source),
         )
         self.collector: Optional[OnlineWmDreamerCollector] = None
-        self._dynamics_checkpoint_state = torch.load(str(self.cfg.dynamics_ckpt), map_location="cpu", weights_only=False)
         self.loaded_resume_episode = self._load_resume_checkpoint()
 
     def _resolve_hdv_response_predictor_ckpt(self) -> Optional[Path]:
@@ -5049,6 +6293,7 @@ class OnlineWmDreamerTrainer:
         if critic_state is not None:
             self.critic.load_state_dict(critic_state, strict=False)
         global_critic_state = state.get("global_critic")
+        global_critic_reward_compatible = True
         if global_critic_state is not None:
             saved_semantics = str(
                 state.get("global_critic_semantics")
@@ -5062,19 +6307,77 @@ class OnlineWmDreamerTrainer:
                     "run, or resume only from a checkpoint tagged "
                     f"global_critic_semantics={GLOBAL_CRITIC_SEMANTICS!r}."
                 )
-            self.global_critic.load_state_dict(global_critic_state, strict=True)
+            saved_reward_semantics = str(
+                state.get("global_reward_semantics")
+                or (state.get("cfg") or {}).get(
+                    "dreamer_global_reward_semantics"
+                )
+                or ""
+            )
+            global_critic_reward_compatible = (
+                saved_reward_semantics == GLOBAL_REWARD_SEMANTICS
+            )
+            if global_critic_reward_compatible:
+                self.global_critic.load_state_dict(
+                    global_critic_state,
+                    strict=True,
+                )
+            else:
+                print(
+                    "[online-wm-dreamer] resetting global critic while "
+                    "resuming: checkpoint reward semantics "
+                    f"{saved_reward_semantics or '<missing>'!r} != "
+                    f"{GLOBAL_REWARD_SEMANTICS!r}.",
+                    flush=True,
+                )
         if "flow_projector" in state:
             self.wm.flow_projector.load_state_dict(state["flow_projector"], strict=False)
         if "dynamics" in state:
             self.wm.dynamics.load_state_dict(state["dynamics"], strict=True)
+        active_count_readout_compatible = False
+        active_count_readout_state = state.get("active_count_readout")
+        if active_count_readout_state is not None:
+            saved_readout_semantics = str(
+                state.get("active_count_readout_semantics")
+                or (state.get("cfg") or {}).get(
+                    "dreamer_active_count_readout_semantics"
+                )
+                or ""
+            )
+            active_count_readout_compatible = (
+                saved_readout_semantics == ACTIVE_COUNT_READOUT_SEMANTICS
+            )
+            if active_count_readout_compatible:
+                self.wm_updater.active_count_readout.load_state_dict(
+                    active_count_readout_state,
+                    strict=True,
+                )
+            else:
+                print(
+                    "[online-wm-dreamer] resetting aggregate active-count "
+                    "readout while resuming: checkpoint semantics "
+                    f"{saved_readout_semantics or '<missing>'!r} != "
+                    f"{ACTIVE_COUNT_READOUT_SEMANTICS!r}.",
+                    flush=True,
+                )
         if "actor_optimizer" in state:
             self.actor_optimizer.load_state_dict(state["actor_optimizer"])
         if "critic_optimizer" in state:
             self.critic_optimizer.load_state_dict(state["critic_optimizer"])
-        if "global_critic_optimizer" in state:
+        if (
+            global_critic_reward_compatible
+            and "global_critic_optimizer" in state
+        ):
             self.global_critic_optimizer.load_state_dict(state["global_critic_optimizer"])
         if "wm_optimizer" in state:
             self.wm_updater.optimizer.load_state_dict(state["wm_optimizer"])
+        if (
+            active_count_readout_compatible
+            and "active_count_readout_optimizer" in state
+        ):
+            self.wm_updater.active_count_readout_optimizer.load_state_dict(
+                state["active_count_readout_optimizer"]
+            )
         if self.hdv_response_model is not None:
             od_route_checkpoint = state.get("hdv_response_od_route_checkpoint")
             has_embedded_od_route = (
@@ -5274,6 +6577,12 @@ class OnlineWmDreamerTrainer:
         dyn_state = dict(self._dynamics_checkpoint_state)
         dyn_state["dynamics"] = self.wm.dynamics.state_dict()
         dyn_state["flow_projector"] = self.wm.flow_projector.state_dict()
+        dyn_state[
+            "active_count_readout"
+        ] = self.wm_updater.active_count_readout.state_dict()
+        dyn_state[
+            "active_count_readout_semantics"
+        ] = ACTIVE_COUNT_READOUT_SEMANTICS
         dyn_state["online_ablation"] = "gretz_online_wm_dreamer_actor_critic"
         torch.save(dyn_state, dynamics_path)
         return projector_path, dynamics_path
@@ -5305,6 +6614,15 @@ class OnlineWmDreamerTrainer:
                 "global_critic_semantics": GLOBAL_CRITIC_SEMANTICS,
                 "global_reward_semantics": GLOBAL_REWARD_SEMANTICS,
                 "wm_optimizer": self.wm_updater.optimizer.state_dict(),
+                "active_count_readout": (
+                    self.wm_updater.active_count_readout.state_dict()
+                ),
+                "active_count_readout_optimizer": (
+                    self.wm_updater.active_count_readout_optimizer.state_dict()
+                ),
+                "active_count_readout_semantics": (
+                    ACTIVE_COUNT_READOUT_SEMANTICS
+                ),
                 "hdv_response_predictor": None
                 if self.hdv_response_model is None
                 else self.hdv_response_model.model.state_dict(),
@@ -5347,6 +6665,9 @@ class OnlineWmDreamerTrainer:
                 ),
                 "dreamer_global_critic_semantics": GLOBAL_CRITIC_SEMANTICS,
                 "dreamer_global_reward_semantics": GLOBAL_REWARD_SEMANTICS,
+                "dreamer_active_count_readout_semantics": (
+                    ACTIVE_COUNT_READOUT_SEMANTICS
+                ),
                 "dreamer_global_advantage_weight": float(self.cfg.ac_global_advantage_weight),
                 "dreamer_actor_advantage": "vehicle_plus_global_lambda_advantage",
                 "imagined_hdv_context_source": str(self.cfg.imagined_hdv_context_source),

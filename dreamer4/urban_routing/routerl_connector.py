@@ -805,9 +805,25 @@ class RouteRLConnector:
             bulk advance. This allows callers to preserve per-step arrival
             accounting while only materializing full traffic state on decision
             boundaries.
+
+        ``last_advance_active_vehicle_seconds`` records the exact SUMO
+        active-vehicle exposure over this call.  It is the per-tick active
+        vehicle count integrated over simulation time, including a vehicle's
+        final tick when it appears in the arrived list.  This lets callers
+        compute mean-travel-time rewards without materializing every full
+        traffic state.
         """
         n = max(int(n_steps), 0)
         arrival_events: List[Tuple[str, float]] = []
+        active_vehicle_seconds = 0.0
+        elapsed_seconds = 0.0
+        active_count_observed = False
+        previous_sim_time: Optional[float] = None
+        if TRACI_AVAILABLE:
+            try:
+                previous_sim_time = float(traci.simulation.getTime())
+            except Exception:
+                previous_sim_time = None
         for _ in range(n):
             try:
                 self._apply_incident_for_current_time()
@@ -823,6 +839,27 @@ class RouteRLConnector:
                 except Exception:
                     sim_time = float(self.current_step)
                     arrived_ids = []
+                delta_seconds = (
+                    float(sim_time - previous_sim_time)
+                    if previous_sim_time is not None
+                    else 1.0
+                )
+                if not np.isfinite(delta_seconds) or delta_seconds <= 0.0:
+                    delta_seconds = 1.0
+                previous_sim_time = float(sim_time)
+                elapsed_seconds += float(delta_seconds)
+                try:
+                    active_count = int(traci.vehicle.getIDCount())
+                    # SUMO removes arrivals from vehicle.getIDList() on the tick
+                    # where getArrivedIDList() reports them. Include that final
+                    # active tick so the occupancy integral matches trip time.
+                    active_count += int(len(arrived_ids))
+                    active_vehicle_seconds += float(max(active_count, 0)) * float(
+                        delta_seconds
+                    )
+                    active_count_observed = True
+                except Exception:
+                    pass
                 for veh_id in arrived_ids:
                     arrival_events.append((str(veh_id), sim_time))
                 try:
@@ -830,6 +867,12 @@ class RouteRLConnector:
                         break
                 except Exception:
                     pass
+            else:
+                elapsed_seconds += 1.0
+        self.last_advance_elapsed_seconds = float(elapsed_seconds)
+        self.last_advance_active_vehicle_seconds = (
+            float(active_vehicle_seconds) if active_count_observed else float("nan")
+        )
         return arrival_events
 
     def is_done(self) -> bool:

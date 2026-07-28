@@ -300,6 +300,11 @@ def test_routerl_bulk_advance_stops_when_sumo_has_no_expected_vehicles(monkeypat
         def getMinExpectedNumber(self):
             return 0 if self.step >= 2 else 1
 
+    class _FakeVehicle:
+        @staticmethod
+        def getIDCount():
+            return 3 if fake_sim.step == 1 else 1
+
     fake_sim = _FakeSimulation()
     fake_traci = type(
         "FakeTraci",
@@ -307,6 +312,7 @@ def test_routerl_bulk_advance_stops_when_sumo_has_no_expected_vehicles(monkeypat
         {
             "simulationStep": fake_sim.simulationStep,
             "simulation": fake_sim,
+            "vehicle": _FakeVehicle(),
         },
     )()
     monkeypatch.setattr(routerl_connector_module, "TRACI_AVAILABLE", True)
@@ -324,6 +330,9 @@ def test_routerl_bulk_advance_stops_when_sumo_has_no_expected_vehicles(monkeypat
     assert fake_sim.step == 2
     assert connector.current_step == 2
     assert arrivals == [("veh0", 2.0)]
+    assert connector.last_advance_elapsed_seconds == pytest.approx(2.0)
+    # At tick 2 the arrived vehicle still contributes its final active second.
+    assert connector.last_advance_active_vehicle_seconds == pytest.approx(5.0)
 
 
 def test_planned_av_edge_flow_encodes_future_route_pressure_not_current_occupancy():

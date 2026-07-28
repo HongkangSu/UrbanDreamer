@@ -126,6 +126,24 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--wm-grad-clip", type=float, default=10.0)
     parser.add_argument("--wm-transition-decoded-supervision-weight", type=float, default=1.0)
     parser.add_argument(
+        "--wm-active-count-supervision-weight",
+        type=float,
+        default=1.0,
+        help=(
+            "Weight for supervising nominal-step active exposure from exact "
+            "SUMO active-vehicle-seconds on real transitions."
+        ),
+    )
+    parser.add_argument(
+        "--wm-active-count-readout-lr",
+        type=float,
+        default=1e-3,
+        help=(
+            "Learning rate for the lightweight aggregate active-exposure "
+            "residual readout."
+        ),
+    )
+    parser.add_argument(
         "--wm-t-all-supervision-weight",
         type=float,
         default=0.2,
@@ -280,17 +298,19 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--global-advantage-weight",
         type=float,
-        default=0.0,
+        default=1.0,
         help=(
             "Weight of the state-only global-value lambda advantage in every vehicle actor sample. "
-            "Default 0 keeps the term disabled until the t_all readout passes held-out calibration."
+            "The default 1.0 enables the active-vehicle mean-travel-time objective."
         ),
     )
     parser.add_argument(
         "--global-reward-scale",
         type=float,
         default=1.0,
-        help="Scale applied to the objective-aligned t_all potential difference.",
+        help=(
+            "Scale applied to -N_active * transition_minutes / N_vehicles."
+        ),
     )
     parser.add_argument("--lr", type=float, default=2e-4, help="Vehicle actor learning rate.")
     parser.add_argument("--critic-lr", type=float, default=3e-4, help="Vehicle critic learning rate.")
@@ -464,6 +484,12 @@ def build_config(args: argparse.Namespace) -> OnlineWmDreamerConfig:
         "wm_lr": float(args.wm_lr),
         "wm_grad_clip": float(args.wm_grad_clip),
         "wm_transition_decoded_supervision_weight": float(args.wm_transition_decoded_supervision_weight),
+        "wm_active_count_supervision_weight": float(
+            args.wm_active_count_supervision_weight
+        ),
+        "wm_active_count_readout_lr": float(
+            args.wm_active_count_readout_lr
+        ),
         "wm_t_all_supervision_weight": float(args.wm_t_all_supervision_weight),
         "wm_hdv_policy_weight": float(args.wm_hdv_policy_weight),
         "wm_hdv_target_source": str(args.wm_hdv_target_source),
