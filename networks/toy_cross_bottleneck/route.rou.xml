@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<routes>
+  <vType id="Human" color="red" guiShape="passenger/sedan" />
+  <vType id="AV" color="yellow" guiShape="passenger/sedan" />
+  <route id="0_0_0" edges="A_in A_hold A_pre_X X X_to_M M M_to_A A_out" />
+  <route id="0_0_1" edges="A_in A_hold A_pre_Y Y Y_to_M M M_to_A A_out" />
+  <route id="0_0_2" edges="A_in A_hold A_to_R R_shared R_tail R_to_M M M_to_A A_out" />
+  <route id="0_0_3" edges="A_in A_hold A_pre_X X X_to_R R_tail R_to_M M M_to_A A_out" />
+  <route id="1_1_0" edges="B_in B_hold B_pre_Y Y Y_to_M M M_to_B B_out" />
+  <route id="1_1_1" edges="B_in B_hold B_pre_X X X_to_M M M_to_B B_out" />
+  <route id="1_1_2" edges="B_in B_hold B_to_R R_shared R_tail R_to_M M M_to_B B_out" />
+  <route id="1_1_3" edges="B_in B_hold B_pre_Y Y Y_to_R R_tail R_to_M M M_to_B B_out" />
+</routes>

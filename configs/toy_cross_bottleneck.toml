@@ -1,0 +1,40 @@
+# Fresh end-to-end reproduction run for the retained UrbanDreamer mainline.
+# The world model is initialized from this run's warmup replay; no historical
+# projector or dynamics checkpoint is loaded.
+
+[inputs]
+network_name = "toy_cross_bottleneck"
+network_dir = "../networks/toy_cross_bottleneck"
+route_artifacts_dir = "../networks/toy_cross_bottleneck"
+post_mutation_state = "../networks/toy_cross_bottleneck/post_mutation_state.json"
+initial_hdv_state = "../networks/toy_cross_bottleneck/initial_hdv_state.json"
+hdv_response_checkpoint = "../networks/toy_cross_bottleneck/hdv_response_predictor_v4.pt"
+
+[run]
+output_dir = "../outputs/toy_cross_bottleneck"
+device = "cuda:1"
+seed = 42
+warmup_episodes = 1
+world_model_initialization_steps = 1
+online_training_episodes = 150
+evaluation_episodes = 3
+
+[simulation]
+decision_intervals_per_episode = 60
+warmup_horizon_seconds = 1800
+warmup_completion_drain_seconds = 3000
+warmup_completion_patience_seconds = 0
+episode_wall_timeout_seconds = 3600.0
+training_completion_buffer_seconds = 3000
+evaluation_horizon_seconds = 4800
+incident_edge = "A_in"
+incident_start_seconds = 100000.0
+incident_end_seconds = 100001.0
+incident_speed_mps = 0.1
+sumo_extra_args = []
+
+[resources]
+world_model_initialization_batch_size = 1
+world_model_initialization_sequence_length = 8
+world_model_gradient_accumulation_steps = 1
+online_world_model_batch_size = 16

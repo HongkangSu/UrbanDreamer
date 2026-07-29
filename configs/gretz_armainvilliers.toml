@@ -1,0 +1,43 @@
+# Full from-scratch mainline profile for Gretz-Armainvilliers.
+# Relative paths are resolved from this file. Prepare the complete input
+# bundle under <repository>/networks/gretz_armainvilliers/ before running.
+
+[inputs]
+network_name = "gretz_armainvilliers"
+network_dir = "../networks/gretz_armainvilliers"
+route_artifacts_dir = "../networks/gretz_armainvilliers"
+post_mutation_state = "../networks/gretz_armainvilliers/post_mutation_state.json"
+initial_hdv_state = "../networks/gretz_armainvilliers/initial_hdv_state.json"
+hdv_response_checkpoint = "../networks/gretz_armainvilliers/hdv_response_predictor_v4.pt"
+
+[run]
+output_dir = "../outputs/gretz_armainvilliers"
+device = "cuda:0"
+seed = 42
+# Recreate the historical 50-episode warmup and 8,000-microbatch world-model
+# initialization before training a fresh policy/world model for 400 episodes.
+warmup_episodes = 50
+world_model_initialization_steps = 8000
+online_training_episodes = 150
+evaluation_episodes = 5
+
+[simulation]
+decision_intervals_per_episode = 60
+warmup_horizon_seconds = 1800
+# The reference strong-incident collection required a long completion drain.
+warmup_completion_drain_seconds = 7200
+warmup_completion_patience_seconds = 0
+episode_wall_timeout_seconds = 3600.0
+training_completion_buffer_seconds = 2000
+evaluation_horizon_seconds = 3800
+incident_edge = "-986733117#1"
+incident_start_seconds = 500.0
+incident_end_seconds = 2500.0
+incident_speed_mps = 0.1
+sumo_extra_args = ["--collision.action", "warn"]
+
+[resources]
+world_model_initialization_batch_size = 1
+world_model_initialization_sequence_length = 16
+world_model_gradient_accumulation_steps = 32
+online_world_model_batch_size = 4

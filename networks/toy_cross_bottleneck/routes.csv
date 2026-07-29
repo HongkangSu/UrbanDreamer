@@ -1,0 +1,9 @@
+origins,destinations,path,free_flow_time
+0,0,A_in A_hold A_pre_X X X_to_M M M_to_A A_out,1.4890808735301175
+0,0,A_in A_hold A_pre_Y Y Y_to_M M M_to_A A_out,1.5070794336453084
+0,0,A_in A_hold A_to_R R_shared R_tail R_to_M M M_to_A A_out,1.5507828727679203
+0,0,A_in A_hold A_pre_X X X_to_R R_tail R_to_M M M_to_A A_out,1.6657610415469193
+1,1,B_in B_hold B_pre_Y Y Y_to_M M M_to_B B_out,1.4890808735301175
+1,1,B_in B_hold B_pre_X X X_to_M M M_to_B B_out,1.5070794336453084
+1,1,B_in B_hold B_to_R R_shared R_tail R_to_M M M_to_B B_out,1.5507828727679203
+1,1,B_in B_hold B_pre_Y Y Y_to_R R_tail R_to_M M M_to_B B_out,1.6657610415469193

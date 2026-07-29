@@ -1,0 +1,11 @@
+# Standalone UrbanDreamer runtime.
+# Reference platform: CPython 3.12 on Linux x86-64.
+
+numpy==2.3.5
+torch==2.10.0
+routerlurb==1.0.0
+traci==1.21.0
+# Keep SUMO's Python helpers aligned with the reference 1.25 binary.
+sumolib==1.25.0
+# Other platforms may install the SUMO executable through the operating system.
+eclipse-sumo==1.25.0; platform_system == "Linux" and platform_machine == "x86_64" and python_version == "3.12"
