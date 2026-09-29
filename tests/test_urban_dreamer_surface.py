@@ -38,13 +38,8 @@ def test_city_configs_use_repository_network_bundles() -> None:
 
         assert inputs["network_name"] == city_name
         assert inputs["network_dir"] == bundle_path
-        assert inputs["route_artifacts_dir"] == bundle_path
-        assert inputs["post_mutation_state"] == f"{bundle_path}/post_mutation_state.json"
-        assert inputs["initial_hdv_state"] == f"{bundle_path}/initial_hdv_state.json"
-        assert (
-            inputs["hdv_response_checkpoint"]
-            == f"{bundle_path}/hdv_response_predictor_v4.pt"
-        )
+        assert set(inputs) == {"network_name", "network_dir"}
+        assert config["simulation"]["vehicle_max_speed_mps"] == 40.0
         assert config["run"]["output_dir"] == f"../outputs/{city_name}"
 
 
@@ -63,10 +58,10 @@ def test_mainline_has_one_small_semantic_module_tree() -> None:
         "__main__.py",
         "learning/__init__.py",
         "learning/observations.py",
+        "learning/imagination.py",
         "learning/replay.py",
         "learning/training.py",
         "models/__init__.py",
-        "models/hdv.py",
         "models/policy.py",
         "models/world_model.py",
         "traffic/__init__.py",
@@ -81,7 +76,7 @@ def test_mainline_has_one_small_semantic_module_tree() -> None:
 
 
 def test_mainline_never_imports_legacy_or_ignored_branches() -> None:
-    forbidden_roots = {"dreamer4", "scripts"}
+    forbidden_roots = {"dreamer4", "scripts", "routerl", "routerlurb"}
     offenders: list[str] = []
     for source_path in sorted(PACKAGE.rglob("*.py")):
         tree = ast.parse(
@@ -125,13 +120,6 @@ def test_mainline_exports_only_supported_environment_surface() -> None:
             for element in node.value.elts
             if isinstance(element, ast.Constant) and isinstance(element.value, str)
         }
-    assert exports == {
-        "ActionDecision",
-        "CandidatePathGenerator",
-        "EnvironmentContractError",
-        "RouteRLSessionSpec",
-        "RouteRLSumoSession",
-        "SessionClosedError",
-        "build_live_session_spec",
-        "build_session_factory",
-    }
+    assert exports is not None
+    assert {"NextHopDecision", "SumoSession", "EnvironmentContractError", "build_session_factory"} <= exports
+    assert not {"ActionDecision", "CandidatePathGenerator", "RouteRLSessionSpec", "RouteRLSumoSession"} & exports

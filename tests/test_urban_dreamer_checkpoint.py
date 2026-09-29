@@ -25,10 +25,9 @@ def _training_state() -> dict[str, object]:
         "models": {"world_model": {"weights": torch.tensor([1.0, 2.0])}},
         "optimizers": {"world_model": {"lr": 1e-3}},
         "replay": {"episodes": [1, 2, 3]},
-        "hdv": {"route_ids": ("a", "b")},
         "rng": {"torch_state": [1, 2, 3]},
         "metrics": {"losses": (1.0, 0.5)},
-        "caches": {"latent": {"shape": [4, 8]}},
+        "next_environment_episode": 4,
     }
 
 
@@ -62,7 +61,7 @@ def test_save_and_load_checkpoint_round_trip(tmp_path: Path) -> None:
     assert loaded.schema_version == CHECKPOINT_SCHEMA_VERSION
     assert loaded.phase is CheckpointPhase.WARMUP
     assert loaded.next_unit == 3
-    assert loaded.training_state["hdv"]["route_ids"] == ["a", "b"]
+    assert loaded.training_state["next_environment_episode"] == 4
     assert loaded.training_state["metrics"]["losses"] == [1.0, 0.5]
     assert loaded.training_state["models"]["world_model"]["weights"].device.type == "cpu"
     assert torch.equal(
@@ -164,7 +163,7 @@ def test_decide_output_directory_reports_fresh_completed_and_nonempty_invalid(
     [
         (lambda payload: payload.pop("input_hash"), "missing key"),
         (lambda payload: payload.__setitem__("unexpected", 1), "unexpected key"),
-        (lambda payload: payload.__setitem__("schema_version", 999), "unsupported checkpoint schema version"),
+        (lambda payload: payload.__setitem__("schema_version", 1), "unsupported checkpoint schema version"),
         (lambda payload: payload.__setitem__("phase", "unknown"), "invalid checkpoint phase"),
         (lambda payload: payload.__setitem__("next_unit", -1), "next_unit must be a non-negative integer"),
         (
@@ -245,7 +244,7 @@ def test_save_rejects_non_plain_objects(tmp_path: Path) -> None:
         value: int
 
     state = _training_state()
-    state["caches"] = {"path": Path("artifact.pt")}
+    state["metrics"] = {"path": Path("artifact.pt")}
     with pytest.raises(CheckpointError, match="must contain only arrays/CPU tensors"):
         save_checkpoint(
             output_dir=tmp_path / "path",
@@ -257,7 +256,7 @@ def test_save_rejects_non_plain_objects(tmp_path: Path) -> None:
         )
 
     state = _training_state()
-    state["caches"] = {"custom": Unsupported(1)}
+    state["metrics"] = {"custom": Unsupported(1)}
     with pytest.raises(CheckpointError, match="must contain only arrays/CPU tensors"):
         save_checkpoint(
             output_dir=tmp_path / "dataclass",
@@ -269,7 +268,7 @@ def test_save_rejects_non_plain_objects(tmp_path: Path) -> None:
         )
 
     state = _training_state()
-    state["caches"] = {"module": torch}
+    state["metrics"] = {"module": torch}
     with pytest.raises(CheckpointError, match="must contain only arrays/CPU tensors"):
         save_checkpoint(
             output_dir=tmp_path / "module",
@@ -319,3 +318,18 @@ def test_atomic_failure_leaves_old_latest_checkpoint_intact(
     assert loaded.phase is CheckpointPhase.WARMUP
     assert loaded.next_unit == 4
     assert list((output_dir / "checkpoints").glob("*.tmp.*")) == []
+
+
+@pytest.mark.parametrize('episode', [-1, True, 1.5])
+def test_environment_episode_cursor_is_nonnegative_integer(tmp_path: Path, episode: object) -> None:
+    state = _training_state()
+    state['next_environment_episode'] = episode
+    with pytest.raises(CheckpointError, match='next_environment_episode'):
+        save_checkpoint(
+            output_dir=tmp_path,
+            config_fingerprint='cfg-1',
+            input_hash='input-1',
+            phase=CheckpointPhase.WARMUP,
+            next_unit=0,
+            training_state=state,
+        )

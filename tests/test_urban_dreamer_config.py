@@ -13,10 +13,6 @@ def _write_config(path: Path, *, extra: str = "") -> Path:
 [inputs]
 network_name = "toy_network"
 network_dir = "network"
-route_artifacts_dir = "routes"
-post_mutation_state = "routes/post_mutation_state.json"
-initial_hdv_state = "routes/post_mutation_hdv_learning_state.json"
-hdv_response_checkpoint = "predictor.pt"
 
 [run]
 output_dir = "output"
@@ -28,7 +24,8 @@ online_training_episodes = 4
 evaluation_episodes = 5
 
 [simulation]
-decision_intervals_per_episode = 60
+vehicle_max_speed_mps = 40.0
+world_model_intervals_per_episode = 60
 warmup_horizon_seconds = 3600
 warmup_completion_drain_seconds = 7200
 warmup_completion_patience_seconds = 600
@@ -58,7 +55,6 @@ def test_load_config_resolves_paths_relative_to_toml(tmp_path: Path) -> None:
 
     assert config.inputs.network_name == "toy_network"
     assert config.inputs.network_dir == (tmp_path / "network").resolve()
-    assert config.inputs.route_artifacts_dir == (tmp_path / "routes").resolve()
     assert config.run.output_dir == (tmp_path / "output").resolve()
     assert config.run.device == "cpu"
     assert config.run.online_training_episodes == 4
@@ -138,4 +134,40 @@ def test_load_config_rejects_invalid_ranges(
     )
 
     with pytest.raises(ConfigError, match=message):
+        load_config(path)
+
+
+@pytest.mark.parametrize("argument", ["--step-length=2", "--step-length", "-c", "--configuration-file=x", "--route-files=x", "--net-file=x", "--begin=1", "--default.speeddev=1", "--default.speedfactor=2", "--additional-files=x"])
+def test_sumo_args_cannot_override_safety_contract(tmp_path: Path, argument: str) -> None:
+    path = _write_config(tmp_path / "mainline.toml")
+    path.write_text(path.read_text().replace('["--collision.action", "warn"]', f'["{argument}"]'))
+    with pytest.raises(ConfigError, match="reserved SUMO"):
+        load_config(path)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
+def test_speed_cap_must_be_finite_positive(tmp_path: Path, value: str) -> None:
+    path = _write_config(tmp_path / "mainline.toml")
+    path.write_text(path.read_text().replace("vehicle_max_speed_mps = 40.0", f"vehicle_max_speed_mps = {value}"))
+    with pytest.raises(ConfigError, match="vehicle_max_speed_mps"):
+        load_config(path)
+
+
+def test_rejects_old_interval_key(tmp_path: Path) -> None:
+    path = _write_config(tmp_path / 'mainline.toml')
+    path.write_text(path.read_text().replace('world_model_intervals_per_episode', 'decision_intervals_per_episode'))
+    with pytest.raises(ConfigError, match='unknown.*decision_intervals_per_episode'):
+        load_config(path)
+
+
+def test_one_transition_sequence_is_valid(tmp_path: Path) -> None:
+    path = _write_config(tmp_path / 'mainline.toml')
+    path.write_text(path.read_text().replace('world_model_initialization_sequence_length = 16', 'world_model_initialization_sequence_length = 1'))
+    assert load_config(path).resources.world_model_initialization_sequence_length == 1
+
+
+def test_incident_cannot_exceed_vehicle_speed_cap(tmp_path: Path) -> None:
+    path = _write_config(tmp_path / 'mainline.toml')
+    path.write_text(path.read_text().replace('incident_speed_mps = 0.1', 'incident_speed_mps = 41.0'))
+    with pytest.raises(ConfigError, match='incident_speed_mps.*vehicle_max_speed_mps'):
         load_config(path)

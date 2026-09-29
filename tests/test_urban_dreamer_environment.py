@@ -1,150 +1,122 @@
-from __future__ import annotations
+import pytest
 
-from typing import Any
-
-from urban_dreamer.traffic.environment import (
-    ActionDecision,
-    CandidatePathGenerator,
-    RouteRLSumoSession,
-)
+from urban_dreamer.traffic.environment import EnvironmentContractError, NextHopDecision, safe_microstep_seconds
 
 
-def test_candidate_path_generator_uses_fixed_k4_penalty_dijkstra_and_cache() -> None:
-    generator = CandidatePathGenerator(
-        adjacency=[[1, 2], [3], [3], []],
-        free_flow_costs=[1.0, 10.0, 2.0, 1.0],
-    )
-
-    first = generator.generate_paths(0, 3)
-    second = generator.generate_paths(0, 3)
-    other = generator.generate_paths(1, 3)
-    third = generator.generate_paths(0, 3)
-
-    assert [list(path) for path in first] == [
-        [0, 2, 3],
-        [0, 1, 3],
-        [0, 2, 3],
-        [0, 2, 3],
-    ]
-    assert second is first
-    assert [list(path) for path in other] == [[1, 3]] * 4
-    assert third is first
-    assert len(generator.state_dict()["cache"]) == 2
-
-    restored = CandidatePathGenerator(
-        adjacency=[[1, 2], [3], [3], []],
-        free_flow_costs=[1.0, 10.0, 2.0, 1.0],
-    )
-    restored.load_state_dict(generator.state_dict())
-    assert restored.state_dict() == generator.state_dict()
-    assert restored.generate_paths(0, 3) == first
+def test_microstep_divides_a_second_and_observes_short_edges():
+    assert safe_microstep_seconds([100., 80.], 40.) == 1.
+    assert safe_microstep_seconds([.1, 80.], 40.) == .001
+    value = safe_microstep_seconds([10.], 40.)
+    assert 1 / value == int(1 / value)
+    assert value <= 10 / 80
+    with pytest.raises(EnvironmentContractError, match='millisecond'):
+        safe_microstep_seconds([.01], 40.)
 
 
-def test_action_decision_builds_exact_one_hot_path_and_planned_flow() -> None:
-    decision = ActionDecision.build(
-        route_index=0,
-        candidate_paths=((0, 2, 3), (0, 1, 3), (0, 2, 3), (0, 2, 3)),
-        edge_order=(0, 1, 2, 3),
-        edge_travel_times=(1.0, 10.0, 2.0, 1.0),
-        decision_horizon_seconds=5.0,
-    )
-
-    assert decision.route_one_hot == (1, 0, 0, 0)
-    assert decision.selected_path == (0, 2, 3)
-    assert decision.planned_edge_flow == (0.0, 0.0, 1.0, 1.0)
+def test_next_hop_record_contains_only_executed_event():
+    decision = NextHopDecision('v', 2, 4, 30.)
+    assert set(vars(decision)) == {'vehicle_id', 'current_edge', 'next_edge', 'decision_time'}
 
 
-def test_route_rl_session_advances_and_closes_fake_backend() -> None:
-    class FakeBackend:
-        def __init__(self) -> None:
-            self.closed = 0
-            self.assigned_routes: dict[str, list[str]] = {}
-            self._state = {
-                "vehicles": {"veh-1": {"edge": "a"}},
-                "edges": {"a": {"vehicle_count": 1.0, "mean_speed": 10.0}},
-            }
+def test_boundary_departure_arrival_and_pending_decision_are_not_shifted():
+    from types import SimpleNamespace
+    import time
+    import numpy as np
+    from urban_dreamer.traffic.environment import SumoSession
+    from urban_dreamer.traffic.topology import TrafficTopology, EdgeNetwork
+    graph = ((1,), ())
+    network = EdgeNetwork(('a', 'b'), {'a': 0, 'b': 1}, np.ones((2, 4)), np.array([10., 10.]),
+                          np.ones(2), np.array([1000., 1000.]), np.array([[0., 1.], [0., 0.]]),
+                          graph, np.ones(2, dtype=bool), np.array([100., 100.]))
+    config = SimpleNamespace(simulation=SimpleNamespace(vehicle_max_speed_mps=40.,
+        episode_wall_timeout_seconds=120., incident_start_seconds=0., incident_end_seconds=0., incident_speed_mps=.1))
+    session = SumoSession(config, None, TrafficTopology(network, ('a',), ('b',), ()))
+    session._started_at = time.monotonic()
+    session._tc = SimpleNamespace(VAR_ROAD_ID=1, VAR_LANEPOSITION=2, VAR_LANE_ID=3)
+    def row(vehicle_id, current, departed):
+        return dict(vehicle_id=vehicle_id, current_edge=current, destination_edge=1, departed=departed,
+                    arrived=False, departure_time=0., actual_departure_time=0. if departed else None,
+                    observed_departure_time=0. if departed else None, committed_next_edge=None,
+                    pending_decision=False, in_junction=False, remaining_distance=1000.,
+                    junction_remaining_distance=0.)
+    session._vehicles = {'arriving': row('arriving', 1, True), 'departing': row('departing', 0, False)}
+    session._active.add('arriving')
+    class Simulation:
+        def getDepartedIDList(self):
+            return ['departing'] if session._time_ms == 30000 else []
+        def getArrivedIDList(self):
+            return ['arriving'] if session._time_ms == 30000 else []
+        def getStartingTeleportIDList(self):
+            return []
+        def getEndingTeleportIDList(self):
+            return []
+    class Vehicle:
+        def getDeparture(self, vehicle_id):
+            return 29.
+        def subscribe(self, *args):
+            pass
+        def getAllSubscriptionResults(self):
+            return {key: {1: network.edge_ids[value['current_edge']], 2: 0., 3: network.edge_ids[value['current_edge']]+'_0'}
+                    for key, value in session._vehicles.items() if value['departed'] and not value['arrived']}
+        def setRoute(self, vehicle_id, route):
+            assert vehicle_id == 'departing' and route == ['a', 'b']
+    session._connection = SimpleNamespace(simulation=Simulation(), vehicle=Vehicle(), simulationStep=lambda: None)
+    session._state = lambda: {'flow': np.zeros((2, 8)), 'vehicles': [dict(value) for value in session._vehicles.values()]}
+    def callback(rows, flow, now):
+        return [NextHopDecision(value['vehicle_id'], value['current_edge'], 1, now) for value in rows]
+    first = session.advance_window(callback)
+    assert first.decisions == ()
+    assert first.departure_counts.tolist() == [1., 0.]
+    assert first.active_vehicle_seconds == 31.
+    assert session._vehicles['departing']['pending_decision']
+    second = session.advance_window(callback)
+    assert len(second.decisions) == 1 and second.decisions[0].decision_time == 30.
+    assert second.departure_counts.sum() == 0
+    assert second.active_vehicle_seconds == 30.
+    third = session.advance_window(callback)
+    assert third.decisions == ()
+    assert session._vehicles['departing']['committed_next_edge'] == 1
 
-        def reset(self) -> dict[str, Any]:
-            return self._state
 
-        def get_traffic_state(self) -> dict[str, Any]:
-            return self._state
-
-        def is_done(self) -> bool:
-            return False
-
-        def travel_times_seconds(self) -> dict[str, float]:
-            return {"veh-1": 12.0}
-
-        def hdv_route_choices(self) -> dict[str, int]:
-            return {}
-
-        def travel_time_route_choices(self) -> dict[str, int]:
-            return {"veh-1": 1}
-
-        def hdv_learning_state(self) -> dict[str, Any]:
-            return {"version": 1, "route_policy": []}
-
-        def restore_hdv_learning_state(self, state: Any) -> None:
-            assert state is None
-
-        def update_hdv_learning(self, travel_times_seconds: Any = None) -> int:
-            assert travel_times_seconds is None
-            return 0
-
-        def set_vehicle_route(
-            self,
-            vehicle_id: str,
-            route_index: int,
-            route_edges: list[str],
-        ) -> None:
-            assert route_index == 1
-            if vehicle_id == "bad-veh":
-                raise RuntimeError("unsafe reroute")
-            self.assigned_routes[vehicle_id] = list(route_edges)
-
-        def advance(self, steps: int) -> None:
-            assert steps == 3
-
-        def get_active_vehicle_exposure(self) -> float:
-            return 6.0
-
-        def close(self) -> None:
-            self.closed += 1
-
-    fake_backend = FakeBackend()
-    session = RouteRLSumoSession(
-        edge_ids=("a", "b", "c"),
-        backend_factory=lambda: fake_backend,
-    )
-
-    decision = ActionDecision.build(
-        route_index=1,
-        candidate_paths=(
-            (0, 1),
-            (0, 2),
-            (0, 1),
-            (0, 2),
-        ),
-        edge_order=(0, 1, 2),
-        edge_travel_times=(1.0, 2.0, 1.0),
-        decision_horizon_seconds=4.0,
-    )
-
-    assert session.reset() == fake_backend.get_traffic_state()
-    assert session.is_done() is False
-    assert session.travel_times_seconds() == {"veh-1": 12.0}
-    assert session.hdv_route_choices() == {}
-    assert session.travel_time_route_choices() == {"veh-1": 1}
-    assert session.hdv_learning_state() == {"version": 1, "route_policy": []}
-    assert session.update_hdv_learning() == 0
-    session.set_routes_safely({"veh-1": decision, "bad-veh": decision})
-    session.advance(3)
-    assert session.get_traffic_state() == fake_backend.get_traffic_state()
-    session.close()
-
-    assert fake_backend.assigned_routes == {"veh-1": ["a", "c"]}
-    assert session.last_active_vehicle_exposure == 6.0
-    assert fake_backend.closed == 1
-    session.close()
-    assert fake_backend.closed == 1
+@pytest.mark.parametrize('scenario', ['boundary_entry', 'missed_edge', 'premature_arrival', 'internal_suffix'])
+def test_physical_observation_preserves_commitments_or_rejects_lost_events(scenario):
+    from types import SimpleNamespace
+    import numpy as np
+    from urban_dreamer.traffic.environment import SumoSession
+    session = object.__new__(SumoSession)
+    session._time_ms = 30000
+    session.max_speed = 40.
+    session._tc = SimpleNamespace(VAR_ROAD_ID=1, VAR_LANEPOSITION=2, VAR_LANE_ID=3)
+    session._active, session._pending = {'v'}, set()
+    session.travel_times = {}
+    row = dict(vehicle_id='v', current_edge=0, destination_edge=2, departed=True, arrived=False,
+               actual_departure_time=0., committed_next_edge=1, pending_decision=False,
+               in_junction=False, remaining_distance=0., junction_remaining_distance=0.)
+    session._vehicles = {'v': row}
+    session.network = SimpleNamespace(edge_to_index={'a': 0, 'b': 1, 'c': 2}, lengths_m=np.array([100., 100., 100.]),
+        external_lane_lengths_m={'b_1': 25.}, internal_lane_speeds_mps={':j_1_0': 7.},
+        internal_lane_remaining_lengths_m={':j_1_0': 12.})
+    observed = {1: 'b', 2: 2., 3: 'b_1'}
+    if scenario == 'missed_edge':
+        observed[1] = 'c'
+    elif scenario == 'internal_suffix':
+        observed = {1: ':j_1', 2: 2., 3: ':j_1_0'}
+    simulation = SimpleNamespace(getStartingTeleportIDList=lambda: (), getEndingTeleportIDList=lambda: (),
+                                 getDepartedIDList=lambda: (), getArrivedIDList=lambda: ('v',) if scenario == 'premature_arrival' else ())
+    session._connection = SimpleNamespace(simulation=simulation,
+        vehicle=SimpleNamespace(getAllSubscriptionResults=lambda: {'v': observed}))
+    departures = np.zeros(3)
+    if scenario in {'missed_edge', 'premature_arrival'}:
+        with pytest.raises(EnvironmentContractError):
+            session._observe(departures)
+    else:
+        session._observe(departures)
+        assert departures.sum() == 0
+        if scenario == 'boundary_entry':
+            assert row['remaining_distance'] == 23.
+            assert row['pending_decision'] and row['committed_next_edge'] is None
+            assert session._pending == {'v'}
+        else:
+            assert row['in_junction'] and not row['pending_decision']
+            assert row['committed_next_edge'] == 1
+            assert row['junction_remaining_distance'] == 10.

@@ -11,7 +11,7 @@ import numpy as np
 import torch
 
 
-CHECKPOINT_SCHEMA_VERSION = 1
+CHECKPOINT_SCHEMA_VERSION = 3
 LATEST_CHECKPOINT_FILENAME = "latest.pt"
 _ROOT_KEYS = frozenset(
     {
@@ -24,7 +24,7 @@ _ROOT_KEYS = frozenset(
     }
 )
 _TRAINING_STATE_KEYS = frozenset(
-    {"models", "optimizers", "replay", "hdv", "rng", "metrics", "caches"}
+    {"models", "optimizers", "replay", "rng", "metrics", "next_environment_episode"}
 )
 
 
@@ -253,6 +253,9 @@ def _normalize_training_state(value: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise CheckpointError("training_state must be an object")
     _validate_exact_keys(value, _TRAINING_STATE_KEYS, "training_state")
+    episode = value["next_environment_episode"]
+    if isinstance(episode, bool) or not isinstance(episode, int) or episode < 0:
+        raise CheckpointError("next_environment_episode must be a non-negative integer")
     return {key: _normalize_plain_value(value[key], path=f"training_state.{key}") for key in value}
 
 

@@ -13,10 +13,6 @@ def _write_config(path: Path) -> Path:
 [inputs]
 network_name = "toy"
 network_dir = "network"
-route_artifacts_dir = "routes"
-post_mutation_state = "routes/post.json"
-initial_hdv_state = "routes/hdv.json"
-hdv_response_checkpoint = "predictor.pt"
 
 [run]
 output_dir = "output"
@@ -28,7 +24,8 @@ online_training_episodes = 1
 evaluation_episodes = 1
 
 [simulation]
-decision_intervals_per_episode = 60
+vehicle_max_speed_mps = 40.0
+world_model_intervals_per_episode = 60
 warmup_horizon_seconds = 100
 warmup_completion_drain_seconds = 20
 warmup_completion_patience_seconds = 10

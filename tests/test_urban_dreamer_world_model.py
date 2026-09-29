@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import math
 from pathlib import Path
 
 import torch
@@ -36,26 +35,18 @@ class ConstantVelocityDynamics(torch.nn.Module):
     def __init__(self, value: float, *, edge_count: int) -> None:
         super().__init__()
         self.weight = torch.nn.Parameter(torch.tensor(float(value)))
-        self.logits = torch.nn.Parameter(torch.zeros((edge_count,), dtype=torch.float32))
 
     def forward(
         self,
         action: torch.Tensor,
         *,
-        depart: torch.Tensor,
         context: torch.Tensor,
         packed_latents: torch.Tensor,
-        hdv_context: torch.Tensor,
         flow_time: torch.Tensor,
     ) -> DynamicsOutput:
-        del action, depart, context, hdv_context, flow_time
+        del action, context, flow_time
         velocity = torch.ones_like(packed_latents) * self.weight
-        logits = self.logits.view(1, 1, -1).expand(
-            packed_latents.shape[0],
-            packed_latents.shape[1],
-            -1,
-        )
-        return DynamicsOutput(latent_velocity=velocity, hdv_edge_logits=logits)
+        return DynamicsOutput(latent_velocity=velocity)
 
 
 class IdentityDecodeProjector(torch.nn.Module):
@@ -69,35 +60,25 @@ def _build_graph(edge_count: int) -> tuple[torch.Tensor, torch.Tensor]:
     return adjacency, static_features
 
 
-def test_cfm_loss_vectorizes_all_t_minus_1_transitions_with_fixed_hdv_weight() -> None:
+def test_cfm_loss_vectorizes_all_explicit_transitions() -> None:
     dynamics = ConstantVelocityDynamics(0.0, edge_count=2)
     z_sequence = torch.tensor([0.0, 2.0, 4.0], dtype=torch.float32).view(1, 3, 1, 1).expand(1, 3, 2, 64).clone()
     action = torch.zeros((1, 2, 2), dtype=torch.float32)
-    depart = torch.zeros_like(action)
-    context = torch.zeros((1, 2, 3), dtype=torch.float32)
-    hdv_context = torch.zeros_like(action)
-    hdv_target = torch.tensor([[[1.0, 0.0], [0.0, 1.0]]], dtype=torch.float32)
+    context = torch.zeros((1, 2, 2), dtype=torch.float32)
 
     loss, aux = cfm_loss(
         dynamics,
         z_sequence=z_sequence,
         action=action,
-        depart=depart,
         context=context,
-        hdv_context=hdv_context,
-        hdv_target=hdv_target,
     )
     loss.backward()
 
-    expected_hdv_ce = math.log(2.0)
-    expected_loss = 4.0 + (0.05 * expected_hdv_ce)
-    assert torch.isclose(loss, torch.tensor(expected_loss))
+    assert torch.isclose(loss, torch.tensor(4.0))
     assert torch.isclose(aux["flow_mse"], torch.tensor(4.0))
     assert torch.isclose(aux["weighted_flow_mse"], torch.tensor(4.0))
-    assert torch.isclose(aux["hdv_policy_ce"], torch.tensor(expected_hdv_ce))
     assert dynamics.weight.grad is not None
     assert torch.isclose(dynamics.weight.grad, torch.tensor(-4.0))
-    assert dynamics.logits.grad is not None
 
 
 def test_fixed_loss_helpers_preserve_fixed_public_weights() -> None:
@@ -164,7 +145,10 @@ def test_world_model_fixed_architecture_chunk_profiles_and_nonpersistent_buffers
     assert model.flow_projector.input_proj.in_features == 8
     assert model.flow_projector.input_proj.out_features == 64
     assert len(model.flow_projector.gnn_layers) == 2
+    assert isinstance(model.dynamics.action_encoder, wm.ActionGNNEncoder)
     assert len(model.dynamics.action_encoder.action_gnn) == 2
+    assert model.dynamics.action_encoder.action_token.in_features == 3 * wm.ACTION_EDGE_DIM
+    assert model.dynamics.action_encoder.edge_conditioning.in_features == wm.ACTION_EDGE_DIM
     assert len(model.dynamics.transformer.layers) == 6
     assert tuple(model.dynamics.register_tokens.shape) == (4, 256)
     assert set(wm.__all__) == {
@@ -177,7 +161,9 @@ def test_world_model_fixed_architecture_chunk_profiles_and_nonpersistent_buffers
         "transition_decoded_supervision_loss",
     }
 
+    assert wm.ACTION_CONTEXT_DIM == 2
     keys = set(model.state_dict().keys())
+    assert all("hdv" not in key and "depart" not in key for key in keys)
     assert "flow_projector.adjacency" not in keys
     assert "dynamics.action_encoder.adjacency" not in keys
     assert "dynamics.action_encoder.static_features" not in keys
@@ -196,15 +182,74 @@ def test_world_model_fixed_architecture_chunk_profiles_and_nonpersistent_buffers
     decoded = model.decode(latent)
     output = model.dynamics(
         torch.zeros((1, 1, 2), dtype=torch.float32),
-        depart=torch.zeros((1, 1, 2), dtype=torch.float32),
-        context=torch.zeros((1, 1, 3), dtype=torch.float32),
+        context=torch.zeros((1, 1, 2), dtype=torch.float32),
         packed_latents=latent,
-        hdv_context=torch.zeros((1, 1, 2), dtype=torch.float32),
         flow_time=torch.tensor([[0.25]], dtype=torch.float32),
     )
 
     assert tuple(latent.shape) == (1, 1, 2, 64)
     assert tuple(decoded.shape) == (1, 1, 2, 4)
     assert tuple(output.latent_velocity.shape) == (1, 1, 2, 64)
-    assert tuple(output.hdv_edge_logits.shape) == (1, 1, 2)
     assert tuple(model.flow_projector.predict_t_all_from_z(latent[:, 0]).shape) == (1,)
+
+
+def test_cfm_conditions_each_source_target_pair_without_offset() -> None:
+    class ConditionedDynamics(torch.nn.Module):
+        def forward(self, action, *, context, packed_latents, flow_time):
+            assert torch.equal(action[0, :, 0], torch.tensor([2., 5.]))
+            assert torch.equal(context[0, :, 0], torch.tensor([11., 13.]))
+            return DynamicsOutput(action.unsqueeze(-1).expand_as(packed_latents))
+
+    states = torch.tensor([0., 2., 7.]).view(1, 3, 1, 1).expand(1, 3, 1, 64)
+    loss, _ = cfm_loss(
+        ConditionedDynamics(), z_sequence=states,
+        action=torch.tensor([[[2.], [5.]]]),
+        context=torch.tensor([[[11., 0.], [13., 0.]]]),
+    )
+    assert loss == 0
+
+
+def test_active_fraction_readout_trains_on_interval_exposure() -> None:
+    readout = ActiveVehicleFractionReadout()
+    latent = torch.zeros(1, 2, 64)
+    optimizer = torch.optim.SGD(readout.parameters(), lr=0.1)
+    target = torch.tensor([0.75])  # 45 active vehicle-seconds / (2 vehicles * 30s).
+    before = readout(latent, z_prev=latent, raw_decoder_fraction=0.25, transition_seconds=30.)
+    loss = torch.nn.functional.mse_loss(before, target)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    after = readout(latent, z_prev=latent, raw_decoder_fraction=0.25, transition_seconds=30.)
+    assert torch.abs(after - target) < torch.abs(before - target)
+    assert (-after * 30. / 60.) < (-before * 30. / 60.)
+
+
+def test_missing_window_speed_label_has_zero_gradient_but_other_fields_train():
+    prediction = torch.tensor([[[[.3, .5, .4, .3], [.3, .5, .4, .3]]]], requires_grad=True)
+    target = torch.tensor([[[[0., .8, 0., 0.], [0., 100., 0., 0.]]]])
+    mask = torch.tensor([[[True, False]]])
+    loss, _ = decoder_reconstruction_loss(decoded_dyn=prediction, flow_targets=target,
+                                           speed_target_mask=mask)
+    loss.backward()
+    assert prediction.grad[0, 0, 0, 1] != 0
+    assert prediction.grad[0, 0, 1, 1] == 0
+    assert prediction.grad[0, 0, 1, 0] != 0
+    changed = target.clone()
+    changed[0, 0, 1, 1] = .1
+    other, _ = decoder_reconstruction_loss(decoded_dyn=prediction, flow_targets=changed,
+                                            speed_target_mask=mask)
+    torch.testing.assert_close(loss, other)
+    transition, _ = transition_decoded_supervision_loss(z_pred_next=prediction,
+        flow_projector=IdentityDecodeProjector(), flow_target_next=target, speed_target_mask=mask)
+    torch.testing.assert_close(transition, loss / wm.DECODER_RECON_WEIGHT)
+
+
+def test_cfm_prediction_uses_only_action_context_and_latents():
+    past = torch.zeros(1, 2, 3, 64)
+    predicted = wm.cfm_predict_one_timestep(
+        ConstantVelocityDynamics(2., edge_count=3),
+        past_latents=past,
+        action=torch.zeros(1, 1, 3),
+        context=torch.zeros(1, 1, 2),
+    )
+    torch.testing.assert_close(predicted, torch.full((1, 1, 3, 64), 2.))

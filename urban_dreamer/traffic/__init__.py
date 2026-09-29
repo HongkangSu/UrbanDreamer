@@ -1,1 +1,1 @@
-"""Road-network preparation, path generation, and SUMO integration."""
+"""Passenger network topology and event-driven direct SUMO control."""

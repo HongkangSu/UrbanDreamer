@@ -3,7 +3,6 @@
 
 numpy==2.3.5
 torch==2.10.0
-routerlurb==1.0.0
 traci==1.21.0
 # Keep SUMO's Python helpers aligned with the reference 1.25 binary.
 sumolib==1.25.0

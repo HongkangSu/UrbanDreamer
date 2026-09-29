@@ -6,10 +6,6 @@
 [inputs]
 network_name = "ingolstadt_custom"
 network_dir = "../networks/ingolstadt_custom"
-route_artifacts_dir = "../networks/ingolstadt_custom"
-post_mutation_state = "../networks/ingolstadt_custom/post_mutation_state.json"
-initial_hdv_state = "../networks/ingolstadt_custom/initial_hdv_state.json"
-hdv_response_checkpoint = "../networks/ingolstadt_custom/hdv_response_predictor_v4.pt"
 
 [run]
 output_dir = "../outputs/ingolstadt_custom"
@@ -22,9 +18,10 @@ online_training_episodes = 150
 evaluation_episodes = 5
 
 [simulation]
-decision_intervals_per_episode = 60
+vehicle_max_speed_mps = 40.0
+world_model_intervals_per_episode = 60
 warmup_horizon_seconds = 1800
-# Random warmup routes can gridlock well beyond the trained-policy horizon.
+# Stochastic warmup decisions can gridlock well beyond the trained-policy horizon.
 # Preserve only complete replay episodes by allowing a 9,000-second total
 # warmup horizon (1,800 decision seconds + 7,200 completion seconds).
 warmup_completion_drain_seconds = 7200

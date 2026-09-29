@@ -3,7 +3,10 @@ from __future__ import annotations
 import ast
 import csv
 import json
-from dataclasses import dataclass
+import heapq
+import math
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -21,8 +24,7 @@ class VehicleDemand:
     vehicle_id: str
     origin_index: int
     destination_index: int
-    departure_second: int
-    is_automated: bool
+    departure_second: float
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,13 @@ class EdgeNetwork:
     adjacency_list: tuple[tuple[int, ...], ...]
     passenger_allowed: np.ndarray
     free_flow_travel_seconds: np.ndarray
+
+    connection_lengths_m: dict[tuple[int, int], float] = field(default_factory=dict)
+    connection_speeds_mps: dict[tuple[int, int], float] = field(default_factory=dict)
+    internal_lane_lengths_m: dict[str, float] = field(default_factory=dict)
+    internal_lane_speeds_mps: dict[str, float] = field(default_factory=dict)
+    internal_lane_remaining_lengths_m: dict[str, float] = field(default_factory=dict)
+    external_lane_lengths_m: dict[str, float] = field(default_factory=dict)
 
     @property
     def edge_count(self) -> int:
@@ -78,68 +87,155 @@ class TrafficTopology:
     origins: tuple[str, ...]
     destinations: tuple[str, ...]
     vehicles: tuple[VehicleDemand, ...]
-    od_pairs: tuple[tuple[int, int], ...]
-    route_paths: tuple[tuple[tuple[int, ...], ...], ...]
-    od_automated_counts: np.ndarray
-    od_human_counts: np.ndarray
-
-    @property
-    def route_count(self) -> int:
-        return len(self.route_paths[0])
-
-    @property
-    def od_to_index(self) -> dict[tuple[int, int], int]:
-        return {pair: index for index, pair in enumerate(self.od_pairs)}
 
 
 def load_traffic_topology(prepared: PreparedInputs) -> TrafficTopology:
-    network = _load_edge_network(prepared.edge_registry)
+    network = _load_connections(_load_edge_network(prepared.edge_registry), prepared.network_xml)
     origins, destinations = _load_od_edges(prepared.od_file)
-    unknown_od_edges = [
-        edge_id
-        for edge_id in (*origins, *destinations)
-        if edge_id not in network.edge_to_index
-    ]
-    if unknown_od_edges:
-        raise TopologyError(
-            "OD file references edges absent from edge_registry.json: "
-            + ", ".join(unknown_od_edges[:10])
-        )
-    machine_ids, human_ids = _load_fixed_roles(prepared.post_mutation_state)
-    vehicles = _load_vehicle_demand(
-        prepared.route_agents_csv,
-        machine_ids=machine_ids,
-        human_ids=human_ids,
-        origin_count=len(origins),
-        destination_count=len(destinations),
-    )
-    od_pairs, route_paths = _load_route_paths(
-        prepared.routes_csv,
-        edge_to_index=network.edge_to_index,
-        expected_route_count=prepared.route_count,
-    )
-    pair_to_index = {pair: index for index, pair in enumerate(od_pairs)}
-    automated_counts = np.zeros((len(od_pairs),), dtype=np.float32)
-    human_counts = np.zeros((len(od_pairs),), dtype=np.float32)
+    unknown = set((*origins, *destinations)) - set(network.edge_ids)
+    if unknown:
+        raise TopologyError(f"OD file references unknown edges: {sorted(unknown)}")
+    vehicles = _load_vehicle_demand(prepared.network_agents_csv,
+                                    origin_count=len(origins), destination_count=len(destinations))
+    candidates = NextHopCandidates(network)
     for vehicle in vehicles:
-        pair = (vehicle.origin_index, vehicle.destination_index)
-        if pair not in pair_to_index:
-            raise TopologyError(
-                f"vehicle {vehicle.vehicle_id!r} uses OD pair {pair} absent from routes.csv"
-            )
-        target = automated_counts if vehicle.is_automated else human_counts
-        target[pair_to_index[pair]] += 1.0
+        origin = network.edge_to_index[origins[vehicle.origin_index]]
+        destination = network.edge_to_index[destinations[vehicle.destination_index]]
+        if not network.passenger_allowed[origin] or not network.passenger_allowed[destination]:
+            raise TopologyError(f"vehicle {vehicle.vehicle_id} has a passenger-forbidden OD edge")
+        candidates.candidates(origin, destination)
+    return TrafficTopology(network, origins, destinations, vehicles)
 
-    return TrafficTopology(
-        network=network,
-        origins=origins,
-        destinations=destinations,
-        vehicles=vehicles,
-        od_pairs=od_pairs,
-        route_paths=route_paths,
-        od_automated_counts=automated_counts,
-        od_human_counts=human_counts,
-    )
+
+def _lane_allows_passenger(lane: ET.Element) -> bool:
+    allow, disallow = lane.get("allow", "").split(), lane.get("disallow", "").split()
+    return (not allow or "all" in allow or "passenger" in allow) and not ({"all", "passenger"} & set(disallow))
+
+
+def _load_connections(network: EdgeNetwork, path: Path) -> EdgeNetwork:
+    """Use actual passenger lane connections, not junction-sharing adjacency."""
+    root = ET.parse(path).getroot()
+    lanes = {lane.get("id"): lane for edge in root.findall("edge") for lane in edge.findall("lane")}
+    allowed_by_edge = {edge.get("id"): any(_lane_allows_passenger(lane) for lane in edge.findall("lane"))
+                       for edge in root.findall("edge")}
+    passenger_allowed = np.array([allowed_by_edge.get(name, False) for name in network.edge_ids], dtype=np.bool_)
+    lane_by_edge = {(edge.get("id"), lane.get("index")): lane
+                    for edge in root.findall("edge") for lane in edge.findall("lane")}
+    continuation = {(connection.get("from"), connection.get("fromLane")): connection.get("via")
+                    for connection in root.findall("connection") if connection.get("from", "").startswith(":")}
+    lengths, speeds = {}, {}
+    adjacency = np.zeros_like(network.adjacency)
+    for connection in root.findall("connection"):
+        source, target = connection.get("from"), connection.get("to")
+        if source not in network.edge_to_index or target not in network.edge_to_index:
+            continue
+        source_lane = lane_by_edge.get((source, connection.get("fromLane")))
+        target_lane = lane_by_edge.get((target, connection.get("toLane")))
+        if source_lane is None or target_lane is None or not all(map(_lane_allows_passenger, (source_lane, target_lane))):
+            continue
+        i, j = network.edge_to_index[source], network.edge_to_index[target]
+        if not passenger_allowed[i] or not passenger_allowed[j]:
+            continue
+        total, speed, via, seen = 0., float(target_lane.get("speed", "1")), connection.get("via"), set()
+        while via and via not in seen:
+            seen.add(via)
+            lane = lanes[via]
+            total += float(lane.get("length", "0"))
+            speed = min(speed, float(lane.get("speed", "1")))
+            internal_edge, lane_index = via.rsplit("_", 1)
+            via = continuation.get((internal_edge, lane_index))
+        pair = (i, j)
+        if pair not in lengths or total / max(speed, .1) < lengths[pair] / max(speeds[pair], .1):
+            lengths[pair], speeds[pair] = total, speed
+        adjacency[i, j] = 1.
+    internal = {name: lane for name, lane in lanes.items() if name.startswith(":")}
+    suffix_lengths = {}
+    for name in internal:
+        total, via, seen = 0., name, set()
+        while via and via not in seen:
+            seen.add(via)
+            total += float(lanes[via].get("length", "0"))
+            internal_edge, lane_index = via.rsplit("_", 1)
+            via = continuation.get((internal_edge, lane_index))
+        suffix_lengths[name] = total
+    return replace(network, adjacency=adjacency, passenger_allowed=passenger_allowed,
+                   adjacency_list=tuple(tuple(map(int, np.flatnonzero(row))) for row in adjacency),
+                   connection_lengths_m=lengths, connection_speeds_mps=speeds,
+                   external_lane_lengths_m={name: float(lane.get("length", "0")) for name, lane in lanes.items()
+                                            if not name.startswith(":") and _lane_allows_passenger(lane)},
+                   internal_lane_remaining_lengths_m=suffix_lengths,
+                   internal_lane_lengths_m={name: float(lane.get("length", "0")) for name, lane in internal.items()},
+                   internal_lane_speeds_mps={name: float(lane.get("speed", "1")) for name, lane in internal.items()})
+
+
+class NextHopCandidates:
+    """Destination-conditioned successors and reverse distance tables; no path cache."""
+
+    def __init__(self, network: EdgeNetwork):
+        self.network = network
+        self.max_candidates = max(1, max(map(len, network.adjacency_list), default=0))
+        self._distances: dict[tuple[int, bool], np.ndarray] = {}
+        self._predecessors = [[] for _ in network.edge_ids]
+        for source, targets in enumerate(network.adjacency_list):
+            for target in targets:
+                self._predecessors[target].append(source)
+
+    def _table(self, destination: int, seconds: bool) -> np.ndarray:
+        if not 0 <= destination < self.network.edge_count:
+            raise TopologyError(f"unknown destination edge {destination}")
+        key = (destination, seconds)
+        if key not in self._distances:
+            distances = np.full(self.network.edge_count, np.inf, dtype=np.float64)
+            distances[destination] = 0.
+            queue = [(0., destination)]
+            edge_costs = self.network.free_flow_travel_seconds if seconds else self.network.lengths_m
+            while queue:
+                distance, target = heapq.heappop(queue)
+                if distance != distances[target]:
+                    continue
+                for source in self._predecessors[target]:
+                    length, speed = self.junction(source, target)
+                    cost = distance + float(edge_costs[target]) + (length / speed if seconds else length)
+                    if cost < distances[source]:
+                        distances[source] = cost
+                        heapq.heappush(queue, (cost, source))
+            distances.setflags(write=False)
+            self._distances[key] = distances
+        return self._distances[key]
+
+    def distances(self, destination: int) -> np.ndarray:
+        return self._table(destination, False)
+
+    def costs(self, destination: int) -> np.ndarray:
+        return self._table(destination, True)
+
+    def candidates(self, current: int, destination: int) -> tuple[int, ...]:
+        if not 0 <= current < self.network.edge_count:
+            raise TopologyError(f"unknown current edge {current}")
+        distance = self.distances(destination)
+        if current == destination:
+            return ()
+        result = tuple(sorted(target for target in self.network.adjacency_list[current]
+                              if self.network.passenger_allowed[target] and math.isfinite(distance[target])))
+        if not result:
+            raise TopologyError(f"no destination-reachable successor from edge {current} to {destination}")
+        return result
+
+    def junction(self, current: int, target: int) -> tuple[float, float]:
+        return (self.network.connection_lengths_m.get((current, target), 0.),
+                max(.1, self.network.connection_speeds_mps.get((current, target), float(self.network.speed_limits_mps[target]))))
+
+    def temporary_route(self, current: int, next_edge: int, destination: int) -> tuple[int, ...]:
+        if next_edge not in self.candidates(current, destination):
+            raise TopologyError(f"invalid next edge {next_edge} from {current} to {destination}")
+        route = (current, next_edge)
+        if next_edge != destination:
+            costs = self.costs(destination)
+            placeholder = min(self.candidates(next_edge, destination),
+                              key=lambda target: (self.junction(next_edge, target)[0] / self.junction(next_edge, target)[1]
+                                                  + float(self.network.free_flow_travel_seconds[target]) + costs[target], target))
+            route += (placeholder,)
+        return route
 
 
 def _load_edge_network(path: Path) -> EdgeNetwork:
@@ -223,18 +319,9 @@ def _load_od_edges(path: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
     return origins, destinations
 
 
-def _load_fixed_roles(path: Path) -> tuple[set[str], set[str]]:
-    state = _read_json_object(path)
-    machine_ids = {str(value) for value in _required_list(state, "machine_agent_ids")}
-    human_ids = {str(value) for value in _required_list(state, "human_agent_ids")}
-    return machine_ids, human_ids
-
-
 def _load_vehicle_demand(
     path: Path,
     *,
-    machine_ids: set[str],
-    human_ids: set[str],
     origin_count: int,
     destination_count: int,
 ) -> tuple[VehicleDemand, ...]:
@@ -251,7 +338,7 @@ def _load_vehicle_demand(
             try:
                 origin = int(row["origin"])
                 destination = int(row["destination"])
-                departure = int(float(row["start_time"]))
+                departure = float(row["start_time"])
             except (TypeError, ValueError) as exc:
                 raise TopologyError(
                     f"invalid demand row for vehicle {vehicle_id!r}"
@@ -260,13 +347,9 @@ def _load_vehicle_demand(
                 raise TopologyError(
                     f"vehicle {vehicle_id!r} has out-of-range OD indices"
                 )
-            if departure < 0:
+            if not math.isfinite(departure) or departure < 0:
                 raise TopologyError(
                     f"vehicle {vehicle_id!r} has a negative departure time"
-                )
-            if vehicle_id not in machine_ids and vehicle_id not in human_ids:
-                raise TopologyError(
-                    f"vehicle {vehicle_id!r} has no fixed post-mutation role"
                 )
             vehicles.append(
                 VehicleDemand(
@@ -274,63 +357,13 @@ def _load_vehicle_demand(
                     origin_index=origin,
                     destination_index=destination,
                     departure_second=departure,
-                    is_automated=vehicle_id in machine_ids,
                 )
             )
     if not vehicles:
         raise TopologyError("agents.csv contains no vehicles")
+    if len({vehicle.vehicle_id for vehicle in vehicles}) != len(vehicles):
+        raise TopologyError("agents.csv contains duplicate vehicle IDs")
     return tuple(vehicles)
-
-
-def _load_route_paths(
-    path: Path,
-    *,
-    edge_to_index: Mapping[str, int],
-    expected_route_count: int,
-) -> tuple[
-    tuple[tuple[int, int], ...],
-    tuple[tuple[tuple[int, ...], ...], ...],
-]:
-    pair_order: list[tuple[int, int]] = []
-    grouped: dict[tuple[int, int], list[tuple[int, ...]]] = {}
-    with path.open("r", encoding="utf-8", newline="") as stream:
-        reader = csv.DictReader(stream)
-        required = {"origins", "destinations", "path"}
-        if reader.fieldnames is None or not required.issubset(reader.fieldnames):
-            raise TopologyError(
-                "routes.csv must contain origins,destinations,path"
-            )
-        for row in reader:
-            try:
-                pair = (int(row["origins"]), int(row["destinations"]))
-            except (TypeError, ValueError) as exc:
-                raise TopologyError("routes.csv contains invalid OD indices") from exc
-            if pair not in grouped:
-                pair_order.append(pair)
-                grouped[pair] = []
-            edge_names = str(row["path"]).split()
-            try:
-                edge_path = tuple(edge_to_index[name] for name in edge_names)
-            except KeyError as exc:
-                raise TopologyError(
-                    f"routes.csv references unknown edge {exc.args[0]!r}"
-                ) from exc
-            if not edge_path:
-                raise TopologyError("routes.csv contains an empty route")
-            grouped[pair].append(edge_path)
-
-    for pair, routes in grouped.items():
-        if len(routes) != expected_route_count:
-            raise TopologyError(
-                f"OD pair {pair} has {len(routes)} routes; "
-                f"expected {expected_route_count}"
-            )
-    if not pair_order:
-        raise TopologyError("routes.csv contains no routes")
-    return (
-        tuple(pair_order),
-        tuple(tuple(grouped[pair]) for pair in pair_order),
-    )
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:

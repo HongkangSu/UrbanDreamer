@@ -17,7 +17,7 @@ TRANSFORMER_DEPTH = 6
 TRANSFORMER_HEADS = 4
 REGISTER_TOKENS = 4
 GRAPH_LAYERS = 2
-ACTION_CONTEXT_DIM = 3
+ACTION_CONTEXT_DIM = 2
 ACTION_EDGE_DIM = 64
 FLOW_SPEED_INDEX = 1
 FLOW_VOLUME_INDEX = 2
@@ -26,7 +26,6 @@ DECODER_RECON_WEIGHT = 0.2
 TRANSITION_DECODED_WEIGHT = 1.0
 BPR_SUPERVISION_WEIGHT = 0.1
 T_ALL_SUPERVISION_WEIGHT = 0.2
-HDV_POLICY_CE_WEIGHT = 0.05
 
 INITIAL_SPACE_CHUNK = 1
 INITIAL_TIME_CHUNK = 256
@@ -39,7 +38,6 @@ ONLINE_MLP_CHUNK = 16384
 @dataclass(frozen=True)
 class DynamicsOutput:
     latent_velocity: torch.Tensor
-    hdv_edge_logits: torch.Tensor
 
 
 class EdgeGNNLayer(nn.Module):
@@ -91,13 +89,25 @@ def _transform_dynamic_targets(
     return pred_out, target_out
 
 
-def _dynamic_weighted_mse(pred_decoded: torch.Tensor, target_decoded: torch.Tensor) -> torch.Tensor:
+def _dynamic_weighted_mse(
+    pred_decoded: torch.Tensor,
+    target_decoded: torch.Tensor,
+    *,
+    speed_target_mask: torch.Tensor | None = None,
+) -> torch.Tensor:
     pred_eval, target_eval = _transform_dynamic_targets(pred_decoded, target_decoded)
     err2 = (pred_eval - target_eval).pow(2)
     feature_weight = torch.ones((FLOW_DYNAMIC_DIM,), device=err2.device, dtype=err2.dtype)
     feature_weight[FLOW_SPEED_INDEX] = 4.0
     feature_weight[FLOW_VOLUME_INDEX] = 2.0
-    return (err2 * feature_weight.view(1, *([1] * (err2.dim() - 2)), FLOW_DYNAMIC_DIM)).mean()
+    weighted = err2 * feature_weight.view(1, *([1] * (err2.dim() - 2)), FLOW_DYNAMIC_DIM)
+    if speed_target_mask is None:
+        return weighted.mean()
+    if speed_target_mask.shape != err2.shape[:-1] or speed_target_mask.dtype != torch.bool:
+        raise ValueError("speed_target_mask must be boolean with the decoded speed shape")
+    valid = torch.ones_like(err2)
+    valid[..., FLOW_SPEED_INDEX] = speed_target_mask.to(device=err2.device, dtype=err2.dtype)
+    return (weighted * valid).sum() / valid.sum().clamp_min(1.)
 
 
 def _validate_transition_tensor(
@@ -381,7 +391,7 @@ class FlowTimeEmbedder(nn.Module):
         return self.network(flow_time.unsqueeze(-1)).unsqueeze(2)
 
 
-class ActionDepartGNNEncoder(nn.Module):
+class ActionGNNEncoder(nn.Module):
     def __init__(
         self,
         *,
@@ -402,18 +412,14 @@ class ActionDepartGNNEncoder(nn.Module):
         self.register_buffer("static_features", static_features.float(), persistent=False)
 
         self.action_input = nn.Linear(1 + self.n_static, ACTION_EDGE_DIM)
-        self.depart_input = nn.Linear(1 + self.n_static, ACTION_EDGE_DIM)
-        self.hdv_input = nn.Linear(1 + self.n_static, ACTION_EDGE_DIM)
         self.action_gnn = nn.ModuleList([EdgeGNNLayer(ACTION_EDGE_DIM) for _ in range(GRAPH_LAYERS)])
-        self.depart_gnn = nn.ModuleList([EdgeGNNLayer(ACTION_EDGE_DIM) for _ in range(GRAPH_LAYERS)])
-        self.hdv_gnn = nn.ModuleList([EdgeGNNLayer(ACTION_EDGE_DIM) for _ in range(GRAPH_LAYERS)])
         self.context_mlp = nn.Sequential(
             nn.Linear(ACTION_CONTEXT_DIM, ACTION_EDGE_DIM),
             nn.SiLU(),
             nn.Linear(ACTION_EDGE_DIM, ACTION_EDGE_DIM),
         )
-        self.action_token = nn.Linear(5 * ACTION_EDGE_DIM, WORLD_MODEL_DIM)
-        self.edge_conditioning = nn.Linear(3 * ACTION_EDGE_DIM, WORLD_MODEL_DIM)
+        self.action_token = nn.Linear(3 * ACTION_EDGE_DIM, WORLD_MODEL_DIM)
+        self.edge_conditioning = nn.Linear(ACTION_EDGE_DIM, WORLD_MODEL_DIM)
 
     def _augment_with_static(self, values: torch.Tensor) -> torch.Tensor:
         batch, time_steps, edge_count = values.shape
@@ -432,12 +438,10 @@ class ActionDepartGNNEncoder(nn.Module):
         self,
         action: torch.Tensor,
         *,
-        depart: torch.Tensor,
         context: torch.Tensor,
-        hdv_context: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        if tuple(action.shape) != tuple(depart.shape) or tuple(action.shape) != tuple(hdv_context.shape):
-            raise ValueError("action, depart, and hdv_context must share shape (B, T, E)")
+        if action.dim() != 3:
+            raise ValueError("action must have shape (B, T, E)")
         if int(action.shape[-1]) != self.n_edges:
             raise ValueError(f"expected {self.n_edges} edge-aligned actions, got {int(action.shape[-1])}")
         if context.dim() != 3 or tuple(context.shape[:2]) != tuple(action.shape[:2]) or int(context.shape[-1]) != ACTION_CONTEXT_DIM:
@@ -446,22 +450,18 @@ class ActionDepartGNNEncoder(nn.Module):
             )
 
         action_hidden = self._run_stack(self.action_input, self.action_gnn, action)
-        depart_hidden = self._run_stack(self.depart_input, self.depart_gnn, depart)
-        hdv_hidden = self._run_stack(self.hdv_input, self.hdv_gnn, hdv_context)
         context_hidden = self.context_mlp(context)
 
         pooled = torch.cat(
             [
                 action_hidden.mean(dim=2),
                 action_hidden.max(dim=2).values,
-                depart_hidden.mean(dim=2),
-                hdv_hidden.mean(dim=2),
                 context_hidden,
             ],
             dim=-1,
         )
         action_token = self.action_token(pooled).unsqueeze(2)
-        edge_tokens = self.edge_conditioning(torch.cat([action_hidden, depart_hidden, hdv_hidden], dim=-1))
+        edge_tokens = self.edge_conditioning(action_hidden)
         return action_token, edge_tokens
 
 
@@ -474,18 +474,15 @@ class Dynamics(nn.Module):
     ) -> None:
         super().__init__()
         self.n_edges = int(adjacency.shape[0])
-        self.action_encoder = ActionDepartGNNEncoder(adjacency=adjacency, static_features=static_features)
+        self.action_encoder = ActionGNNEncoder(adjacency=adjacency, static_features=static_features)
         self.spatial_proj = nn.Linear(FLOW_LATENT_DIM, WORLD_MODEL_DIM)
         self.flow_time = FlowTimeEmbedder()
         self.register_tokens = nn.Parameter(torch.empty(REGISTER_TOKENS, WORLD_MODEL_DIM))
         nn.init.normal_(self.register_tokens, std=0.02)
 
         self.edge_action_proj = nn.Linear(2, WORLD_MODEL_DIM)
-        self.hdv_context_edge_proj = nn.Linear(2, WORLD_MODEL_DIM)
         nn.init.zeros_(self.edge_action_proj.weight)
         nn.init.zeros_(self.edge_action_proj.bias)
-        nn.init.normal_(self.hdv_context_edge_proj.weight, std=0.02)
-        nn.init.zeros_(self.hdv_context_edge_proj.bias)
 
         self.action_slice = slice(0, 1)
         self.flow_time_slice = slice(1, 2)
@@ -494,15 +491,8 @@ class Dynamics(nn.Module):
         self.transformer = BlockCausalTransformer(2 + self.n_edges + REGISTER_TOKENS)
 
         self.flow_head = nn.Linear(WORLD_MODEL_DIM, FLOW_LATENT_DIM)
-        self.hdv_policy_head = nn.Sequential(
-            nn.Linear(WORLD_MODEL_DIM, WORLD_MODEL_DIM),
-            nn.GELU(),
-            nn.Linear(WORLD_MODEL_DIM, 1),
-        )
         nn.init.zeros_(self.flow_head.weight)
         nn.init.zeros_(self.flow_head.bias)
-        nn.init.zeros_(self.hdv_policy_head[-1].weight)
-        nn.init.zeros_(self.hdv_policy_head[-1].bias)
 
         self.set_initial_chunk_profile()
 
@@ -551,10 +541,8 @@ class Dynamics(nn.Module):
         self,
         action: torch.Tensor,
         *,
-        depart: torch.Tensor,
         context: torch.Tensor,
         packed_latents: torch.Tensor,
-        hdv_context: torch.Tensor,
         flow_time: torch.Tensor,
     ) -> DynamicsOutput:
         if packed_latents.dim() != 4 or tuple(packed_latents.shape[-2:]) != (self.n_edges, FLOW_LATENT_DIM):
@@ -565,8 +553,6 @@ class Dynamics(nn.Module):
         batch, time_steps, _, _ = packed_latents.shape
         expected_edges = (batch, time_steps, self.n_edges)
         _validate_transition_tensor(action, name="action", expected_shape=expected_edges)
-        _validate_transition_tensor(depart, name="depart", expected_shape=expected_edges)
-        _validate_transition_tensor(hdv_context, name="hdv_context", expected_shape=expected_edges)
         if tuple(context.shape) != (batch, time_steps, ACTION_CONTEXT_DIM):
             raise ValueError(
                 f"context must have shape {(batch, time_steps, ACTION_CONTEXT_DIM)}, got {tuple(context.shape)}"
@@ -577,12 +563,9 @@ class Dynamics(nn.Module):
         spatial_tokens = self.spatial_proj(packed_latents)
         action_token, graph_edge_tokens = self.action_encoder(
             action,
-            depart=depart,
             context=context,
-            hdv_context=hdv_context,
         )
         spatial_tokens = self._inject_actions(spatial_tokens, action, self.edge_action_proj)
-        spatial_tokens = self._inject_actions(spatial_tokens, hdv_context, self.hdv_context_edge_proj)
         spatial_tokens = spatial_tokens + graph_edge_tokens
 
         register_tokens = self.register_tokens.view(1, 1, REGISTER_TOKENS, WORLD_MODEL_DIM)
@@ -593,7 +576,6 @@ class Dynamics(nn.Module):
         spatial_hidden = hidden[:, :, self.spatial_slice, :]
         return DynamicsOutput(
             latent_velocity=self.flow_head(spatial_hidden),
-            hdv_edge_logits=self.hdv_policy_head(spatial_hidden).squeeze(-1),
         )
 
 
@@ -705,9 +687,10 @@ def decoder_reconstruction_loss(
     *,
     decoded_dyn: torch.Tensor,
     flow_targets: torch.Tensor,
+    speed_target_mask: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     target_dyn = flow_targets[..., :FLOW_DYNAMIC_DIM].to(dtype=decoded_dyn.dtype)
-    weighted_mse = _dynamic_weighted_mse(decoded_dyn, target_dyn)
+    weighted_mse = _dynamic_weighted_mse(decoded_dyn, target_dyn, speed_target_mask=speed_target_mask)
     loss = DECODER_RECON_WEIGHT * weighted_mse
     return loss, {
         "decoder_recon_weighted_mse": weighted_mse.detach(),
@@ -720,10 +703,11 @@ def transition_decoded_supervision_loss(
     z_pred_next: torch.Tensor,
     flow_projector: FlowProjector | nn.Module,
     flow_target_next: torch.Tensor,
+    speed_target_mask: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     pred_next_decoded = flow_projector.decode(z_pred_next)  # type: ignore[attr-defined]
     target_dyn = flow_target_next[..., :FLOW_DYNAMIC_DIM].to(dtype=pred_next_decoded.dtype)
-    weighted_mse = _dynamic_weighted_mse(pred_next_decoded, target_dyn)
+    weighted_mse = _dynamic_weighted_mse(pred_next_decoded, target_dyn, speed_target_mask=speed_target_mask)
     loss = TRANSITION_DECODED_WEIGHT * weighted_mse
     return loss, {
         "pred_next_decoded_weighted_mse": weighted_mse.detach(),
@@ -800,10 +784,7 @@ def cfm_loss(
     *,
     z_sequence: torch.Tensor,
     action: torch.Tensor,
-    depart: torch.Tensor,
     context: torch.Tensor,
-    hdv_context: torch.Tensor,
-    hdv_target: torch.Tensor,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     if z_sequence.dim() != 4 or int(z_sequence.shape[-1]) != FLOW_LATENT_DIM or int(z_sequence.shape[1]) < 2:
         raise ValueError(
@@ -814,9 +795,6 @@ def cfm_loss(
     transition_steps = total_steps - 1
     edge_shape = (batch, transition_steps, edge_count)
     _validate_transition_tensor(action, name="action", expected_shape=edge_shape)
-    _validate_transition_tensor(depart, name="depart", expected_shape=edge_shape)
-    _validate_transition_tensor(hdv_context, name="hdv_context", expected_shape=edge_shape)
-    _validate_transition_tensor(hdv_target, name="hdv_target", expected_shape=edge_shape)
     if tuple(context.shape) != (batch, transition_steps, ACTION_CONTEXT_DIM):
         raise ValueError(
             f"context must have shape {(batch, transition_steps, ACTION_CONTEXT_DIM)}, got {tuple(context.shape)}"
@@ -830,26 +808,17 @@ def cfm_loss(
 
     output = dynamics(
         action,
-        depart=depart,
         context=context,
         packed_latents=x_t,
-        hdv_context=hdv_context,
         flow_time=flow_time,
     )
     error2 = (output.latent_velocity.float() - target_velocity.float()).pow(2)
     flow_mse = error2.mean()
 
-    target = hdv_target.to(device=z_sequence.device, dtype=torch.float32).clamp_min(0.0)
-    target_sum = target.sum(dim=-1, keepdim=True)
-    uniform = torch.full_like(target, 1.0 / float(target.shape[-1]))
-    target = torch.where(target_sum > 1e-8, target / target_sum.clamp_min(1e-8), uniform)
-    hdv_ce = -(target * F.log_softmax(output.hdv_edge_logits.float(), dim=-1)).sum(dim=-1).mean()
-
-    loss = flow_mse + HDV_POLICY_CE_WEIGHT * hdv_ce
+    loss = flow_mse
     return loss, {
         "flow_mse": flow_mse.detach(),
         "weighted_flow_mse": flow_mse.detach(),
-        "hdv_policy_ce": hdv_ce.detach(),
         "t_mean": flow_time.mean().detach(),
     }
 
@@ -859,9 +828,7 @@ def cfm_predict_one_timestep(
     *,
     past_latents: torch.Tensor,
     action: torch.Tensor,
-    depart: torch.Tensor,
     context: torch.Tensor,
-    hdv_context: torch.Tensor,
 ) -> torch.Tensor:
     if past_latents.dim() != 4 or int(past_latents.shape[-1]) != FLOW_LATENT_DIM or int(past_latents.shape[1]) < 1:
         raise ValueError(
@@ -872,17 +839,13 @@ def cfm_predict_one_timestep(
     batch, _, edge_count, _ = current.shape
     edge_shape = (batch, 1, edge_count)
     _validate_transition_tensor(action, name="action", expected_shape=edge_shape)
-    _validate_transition_tensor(depart, name="depart", expected_shape=edge_shape)
-    _validate_transition_tensor(hdv_context, name="hdv_context", expected_shape=edge_shape)
     if tuple(context.shape) != (batch, 1, ACTION_CONTEXT_DIM):
         raise ValueError(f"context must have shape {(batch, 1, ACTION_CONTEXT_DIM)}, got {tuple(context.shape)}")
 
     velocity = dynamics(
         action,
-        depart=depart,
         context=context,
         packed_latents=current,
-        hdv_context=hdv_context,
         flow_time=torch.zeros((batch, 1), device=current.device, dtype=torch.float32),
     ).latent_velocity
     return current + velocity

@@ -1,108 +1,63 @@
-from __future__ import annotations
-
+from types import SimpleNamespace
 import numpy as np
-
-from urban_dreamer.traffic.environment import ActionDecision
-from urban_dreamer.learning.observations import (
-    ACTOR_OBSERVATION_DIM,
-    advance_vehicle_on_path,
-    aggregate_planned_edge_flow,
-    build_actor_observations,
-)
+from urban_dreamer.learning.observations import build_actor_observations, build_vehicle_observations, aggregate_next_hop_actions
 
 
-def test_fixed_actor_observation_has_the_k4_33_feature_layout() -> None:
-    edge_features = np.asarray(
-        [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]],
-        dtype=np.float32,
-    )
-    candidate_paths = [
-        [[0, 1], [1, 2], [2], [0, 2]],
-        [[2], [1], [0], [0, 1]],
-    ]
-
-    observation = build_actor_observations(
-        policy_edge_features=edge_features,
-        candidate_paths=candidate_paths,
-        edge_travel_seconds=np.asarray([10.0, 20.0, 30.0], dtype=np.float32),
-        assigned_route_counts=np.asarray(
-            [1.0, 2.0, 0.0, 1.0],
-            dtype=np.float32,
-        ),
-        assigned_edge_pressure=np.asarray(
-            [0.5, 1.0, 0.0],
-            dtype=np.float32,
-        ),
-        episode_progress=0.25,
-        active_av_fraction=0.5,
-    )
-
-    assert ACTOR_OBSERVATION_DIM == 33
-    assert observation.shape == (2, ACTOR_OBSERVATION_DIM)
-    np.testing.assert_allclose(
-        observation[0, -3:],
-        [0.25, 0.5, 0.0],
-        atol=1e-6,
-    )
+class Candidates:
+    max_candidates = 3
+    network = SimpleNamespace(edge_count=4, lengths_m=np.array([10.,20.,30.,40.]), free_flow_travel_seconds=np.array([1.,2.,3.,4.]))
+    def candidates(self, current, destination):
+        return (1,2) if destination == 3 else (2,)
+    def distances(self, destination):
+        return np.array([70.,40.,40.,0.]) if destination == 3 else np.array([30.,30.,0.,np.inf])
+    def costs(self, destination):
+        return self.distances(destination)/10
+    def junction(self, current, successor):
+        return 0., 1.
 
 
-def test_actor_observation_rejects_non_mainline_route_count() -> None:
-    try:
-        build_actor_observations(
-            policy_edge_features=np.ones((2, 2), dtype=np.float32),
-            candidate_paths=[[[0], [1]]],
-            edge_travel_seconds=np.ones((2,), dtype=np.float32),
-            assigned_route_counts=np.ones((4,), dtype=np.float32),
-            assigned_edge_pressure=np.ones((2,), dtype=np.float32),
-            episode_progress=0.0,
-            active_av_fraction=1.0,
-        )
-    except ValueError as exc:
-        assert "exactly four" in str(exc)
-    else:  # pragma: no cover - protects the fixed mainline contract
-        raise AssertionError("non-K4 candidate paths were accepted")
+def test_candidate_features_use_destination_reachability_and_padding():
+    states = [dict(current_edge=0,destination_edge=3,remaining_distance=5),dict(current_edge=0,destination_edge=2,remaining_distance=5)]
+    result = build_actor_observations(policy_edge_features=np.ones((4,2)),vehicle_states=states,candidates=Candidates(),episode_progress=.2,active_vehicle_fraction=.5)
+    assert result.features.shape == (2,3,10)
+    np.testing.assert_array_equal(result.mask, [[True,True,False],[True,False,False]])
+    np.testing.assert_array_equal(result.edge_indices, [[1,2,-1],[2,-1,-1]])
+    np.testing.assert_allclose(result.features[0,:2,-2:], [[.2,.5],[.2,.5]])
+    assert np.isfinite(result.features).all()
 
 
-def test_aggregate_planned_edge_flow_means_over_controlled_vehicles() -> None:
-    decisions = [
-        ActionDecision.build(
-            route_index=0,
-            candidate_paths=[[0, 1, 2], [0, 2], [0, 1], [0, 2]],
-            edge_order=[0, 1, 2],
-            edge_travel_times=[40.0, 20.0, 20.0],
-            decision_horizon_seconds=30.0,
-        ),
-        ActionDecision.build(
-            route_index=1,
-            candidate_paths=[[1, 2], [1, 0], [1, 2], [1, 0]],
-            edge_order=[0, 1, 2],
-            edge_travel_times=[40.0, 20.0, 20.0],
-            decision_horizon_seconds=30.0,
-        ),
-    ]
-
-    aggregated = aggregate_planned_edge_flow(decisions, edge_count=3)
-
-    np.testing.assert_allclose(aggregated, [0.5, 0.0, 0.0], atol=1e-6)
+def test_critic_state_preserves_commitment_junction_and_future_departure():
+    state = dict(current_edge=0,destination_edge=3,remaining_distance=4,committed_next_edge=2,junction_remaining_distance=3,junction_speed=2,in_junction=True,departed=True,arrived=False,departure_time=0)
+    future = dict(state,departed=False,in_junction=False,departure_time=60)
+    result = build_vehicle_observations(policy_edge_features=np.ones((4,2)),vehicle_states=[state,future],candidates=Candidates(),episode_progress=.2,active_vehicle_fraction=.5,current_time=30)
+    assert result.shape == (2,14)
+    assert not np.array_equal(result[0],result[1])
+    assert np.isfinite(result).all()
 
 
-def test_advance_vehicle_on_path_preserves_remaining_edge_time() -> None:
-    vehicle = {
-        "current_edge": 0,
-        "remaining_edge_seconds": 5.0,
-        "arrived": False,
-    }
+def test_aggregate_counts_each_event_with_episode_denominator():
+    decisions=[SimpleNamespace(next_edge=1),SimpleNamespace(next_edge=2),SimpleNamespace(next_edge=1)]
+    np.testing.assert_array_equal(aggregate_next_hop_actions(decisions,edge_count=3,total_vehicle_count=2), [0,1,.5])
+    np.testing.assert_array_equal(aggregate_next_hop_actions([],edge_count=3,total_vehicle_count=2), [0,0,0])
 
-    advance_vehicle_on_path(
-        vehicle,
-        selected_path=[0, 1, 2],
-        edge_travel_seconds=np.asarray([10.0, 20.0, 30.0], dtype=np.float32),
-        interval_seconds=15.0,
-        edge_count=3,
-    )
 
-    assert vehicle == {
-        "current_edge": 1,
-        "remaining_edge_seconds": 10.0,
-        "arrived": False,
-    }
+def test_critic_represents_remaining_junction_time():
+    state = dict(current_edge=0,destination_edge=3,remaining_distance=0,
+                 committed_next_edge=2,junction_remaining_distance=6,
+                 junction_speed=1,in_junction=True,departed=True,arrived=False)
+    faster = dict(state,junction_speed=2)
+    result = build_vehicle_observations(policy_edge_features=np.ones((4,2)),
+        vehicle_states=[state,faster],candidates=Candidates(),
+        episode_progress=.2,active_vehicle_fraction=.5,current_time=30)
+    np.testing.assert_allclose(result[:,7],[.2,.1])
+
+
+def test_actor_static_cost_and_distance_include_initial_junction():
+    class LongerJunction(Candidates):
+        def junction(self, current, successor):
+            return (30., 3.) if successor == 1 else (0., 1.)
+    result = build_actor_observations(policy_edge_features=np.ones((4,2)),
+        vehicle_states=[dict(current_edge=0,destination_edge=3,remaining_distance=5)],
+        candidates=LongerJunction(),episode_progress=0.,active_vehicle_fraction=1.)
+    assert result.features[0,0,4] == np.float32(np.log1p(10.+2.+4.)/np.log1p(3600.))
+    assert result.features[0,0,5] == np.float32(np.log1p(30.+20.+40.)/np.log1p(10000.))

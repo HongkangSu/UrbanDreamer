@@ -26,10 +26,6 @@ def _config(tmp_path: Path) -> MainlineConfig:
         inputs=InputConfig(
             network_name="toy",
             network_dir=tmp_path / "network",
-            route_artifacts_dir=tmp_path / "routes",
-            post_mutation_state=tmp_path / "post.json",
-            initial_hdv_state=tmp_path / "hdv.json",
-            hdv_response_checkpoint=tmp_path / "predictor.pt",
         ),
         run=RunConfig(
             output_dir=tmp_path / "output",
@@ -41,7 +37,8 @@ def _config(tmp_path: Path) -> MainlineConfig:
             evaluation_episodes=2,
         ),
         simulation=SimulationConfig(
-            decision_intervals_per_episode=60,
+            world_model_intervals_per_episode=60,
+            vehicle_max_speed_mps=40.,
             warmup_horizon_seconds=100,
             warmup_completion_drain_seconds=20,
             warmup_completion_patience_seconds=10,
@@ -88,10 +85,9 @@ class _FakeTrainer:
             "models": {},
             "optimizers": {},
             "replay": {},
-            "hdv": {},
             "rng": {},
             "metrics": {"events": list(self.events)},
-            "caches": {},
+            "next_environment_episode": 0,
         }
 
     def load_state_dict(self, state: dict[str, Any]) -> None:

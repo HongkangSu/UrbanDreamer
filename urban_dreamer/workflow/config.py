@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import tomllib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping
+
+
+NONARRIVAL_PENALTY = -5000.0
 
 
 class ConfigError(ValueError):
@@ -16,10 +20,6 @@ class ConfigError(ValueError):
 class InputConfig:
     network_name: str
     network_dir: Path
-    route_artifacts_dir: Path
-    post_mutation_state: Path
-    initial_hdv_state: Path
-    hdv_response_checkpoint: Path
 
 
 @dataclass(frozen=True)
@@ -35,7 +35,8 @@ class RunConfig:
 
 @dataclass(frozen=True)
 class SimulationConfig:
-    decision_intervals_per_episode: int
+    vehicle_max_speed_mps: float
+    world_model_intervals_per_episode: int
     warmup_horizon_seconds: int
     warmup_completion_drain_seconds: int
     warmup_completion_patience_seconds: int
@@ -138,18 +139,7 @@ def _parse_inputs(raw: Mapping[str, Any], base_dir: Path) -> InputConfig:
     return InputConfig(
         network_name=_nonempty_string(raw, "network_name", "inputs"),
         network_dir=_resolved_path(raw, "network_dir", "inputs", base_dir),
-        route_artifacts_dir=_resolved_path(
-            raw, "route_artifacts_dir", "inputs", base_dir
-        ),
-        post_mutation_state=_resolved_path(
-            raw, "post_mutation_state", "inputs", base_dir
-        ),
-        initial_hdv_state=_resolved_path(
-            raw, "initial_hdv_state", "inputs", base_dir
-        ),
-        hdv_response_checkpoint=_resolved_path(
-            raw, "hdv_response_checkpoint", "inputs", base_dir
-        ),
+
     )
 
 
@@ -188,9 +178,31 @@ def _parse_simulation(raw: Mapping[str, Any]) -> SimulationConfig:
         isinstance(value, str) and value for value in sumo_extra_args
     ):
         raise ConfigError("[simulation].sumo_extra_args must be an array of strings")
+    reserved = {
+        "-c", "--configuration-file", "--configuration", "-n", "--net-file",
+        "-r", "--route-files", "--routes", "-a", "--additional-files", "--additional",
+        "--step-length", "--begin", "-b", "--end", "-e", "--seed", "--random",
+        "--default.speedfactor", "--default.speeddev", "--speed-factor",
+        "--default.action-step-length", "--default.departspeed", "--default.departpos",
+        "--load-state", "--route-steps", "--scale", "--device.rerouting.probability",
+        "--device.rerouting.explicit", "--remote-port", "--num-clients",
+    }
+    for argument in sumo_extra_args:
+        option = argument.split("=", 1)[0]
+        if option in reserved:
+            raise ConfigError(
+                f"[simulation].sumo_extra_args contains reserved SUMO option {option}"
+            )
+    vehicle_max_speed = _positive_number(raw, "vehicle_max_speed_mps", "simulation")
+    incident_speed = _positive_number(raw, "incident_speed_mps", "simulation")
+    if incident_speed > vehicle_max_speed:
+        raise ConfigError(
+            "[simulation].incident_speed_mps must not exceed vehicle_max_speed_mps"
+        )
     return SimulationConfig(
-        decision_intervals_per_episode=_positive_integer(
-            raw, "decision_intervals_per_episode", "simulation"
+        vehicle_max_speed_mps=vehicle_max_speed,
+        world_model_intervals_per_episode=_positive_integer(
+            raw, "world_model_intervals_per_episode", "simulation"
         ),
         warmup_horizon_seconds=_positive_integer(
             raw, "warmup_horizon_seconds", "simulation"
@@ -213,9 +225,7 @@ def _parse_simulation(raw: Mapping[str, Any]) -> SimulationConfig:
         incident_edge=_nonempty_string(raw, "incident_edge", "simulation"),
         incident_start_seconds=incident_start_seconds,
         incident_end_seconds=incident_end_seconds,
-        incident_speed_mps=_positive_number(
-            raw, "incident_speed_mps", "simulation"
-        ),
+        incident_speed_mps=incident_speed,
         sumo_extra_args=tuple(sumo_extra_args),
     )
 
@@ -227,10 +237,6 @@ def _parse_resources(raw: Mapping[str, Any]) -> ResourceConfig:
         "world_model_initialization_sequence_length",
         section,
     )
-    if sequence_length < 2:
-        raise ConfigError(
-            "[resources].world_model_initialization_sequence_length must be at least 2"
-        )
     return ResourceConfig(
         world_model_initialization_batch_size=_positive_integer(
             raw, "world_model_initialization_batch_size", section
@@ -256,6 +262,10 @@ def _semantic_fingerprint(
     run_values.pop("output_dir")
     run_values.pop("device")
     payload = {
+        "decoder_speed_target": "forward_endpoint_mean_v1",
+        "world_model_conditions": "action_context_only_v1",
+        "imagination_horizon": "eight_windows_full_episode_sampling_v1",
+        "nonarrival_penalty": NONARRIVAL_PENALTY,
         "network_name": inputs.network_name,
         "run": run_values,
         "simulation": asdict(simulation),
@@ -314,6 +324,8 @@ def _number(raw: Mapping[str, Any], key: str, section: str) -> float:
     value = raw[key]
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ConfigError(f"[{section}].{key} must be a number")
+    if not math.isfinite(float(value)):
+        raise ConfigError(f"[{section}].{key} must be finite")
     return float(value)
 
 

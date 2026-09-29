@@ -5,10 +5,6 @@
 [inputs]
 network_name = "toy_cross_bottleneck"
 network_dir = "../networks/toy_cross_bottleneck"
-route_artifacts_dir = "../networks/toy_cross_bottleneck"
-post_mutation_state = "../networks/toy_cross_bottleneck/post_mutation_state.json"
-initial_hdv_state = "../networks/toy_cross_bottleneck/initial_hdv_state.json"
-hdv_response_checkpoint = "../networks/toy_cross_bottleneck/hdv_response_predictor_v4.pt"
 
 [run]
 output_dir = "../outputs/toy_cross_bottleneck"
@@ -20,7 +16,8 @@ online_training_episodes = 150
 evaluation_episodes = 3
 
 [simulation]
-decision_intervals_per_episode = 60
+vehicle_max_speed_mps = 40.0
+world_model_intervals_per_episode = 60
 warmup_horizon_seconds = 1800
 warmup_completion_drain_seconds = 3000
 warmup_completion_patience_seconds = 0

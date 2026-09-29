@@ -1,296 +1,241 @@
-from __future__ import annotations
-
 from copy import deepcopy
-from typing import Any
 
 import numpy as np
+import pytest
 import torch
 
-from urban_dreamer.learning.replay import (
-    MAX_ONLINE_REPLAY_EPISODES,
-    OnlineReplayBuffer,
-    OnlineReplayTransition,
-    VehicleSnapshot,
-    WarmupReplayBuffer,
-    WarmupReplayRecord,
-)
+from urban_dreamer.learning.replay import MacroTransition, ReplayBuffer
 
 
-def _flow(value: float) -> torch.Tensor:
-    result = torch.zeros((2, 8), dtype=torch.float32)
-    result[:, 0] = float(value)
-    result[:, 1] = float(value) + 0.5
-    return result
-
-
-def _warmup_record(
-    *,
-    episode: int,
-    step: int,
-    terminal: bool = False,
-) -> WarmupReplayRecord:
-    return WarmupReplayRecord(
-        episode=episode,
-        step_index=step,
-        flow=_flow(float(step)),
-        planned_action=torch.tensor([float(step + 1), float(step + 2)]),
-        departure=torch.tensor([float(step + 10), float(step + 20)]),
-        context=torch.tensor(
-            [float(step + 100), float(step + 110), float(step + 120)]
-        ),
-        hdv_context=torch.tensor([float(step + 30), float(step + 40)]),
-        hdv_target=torch.tensor([float(step + 50), float(step + 60)]),
-        terminal=terminal,
+def transition(step, *, episode=0, terminal=False):
+    return MacroTransition(
+        flow=torch.full((2, 8), float(step)),
+        next_flow=torch.full((2, 8), float(step + 1)),
+        action=torch.tensor([float(step + 1), 0.]),
+        departure=torch.tensor([0., float(step)]),
+        context=torch.tensor([step / 10., 0.5]),
+        active_vehicle_fraction=0.25,
+        vehicles=({'vehicle_id': 'v', 'departure_time': 1.25, 'departed': True,
+                   'arrived': False, 'current_edge': 'a', 'destination_edge': 'b',
+                   'remaining_distance': 3.5, 'committed_next_edge': 'b',
+                   'pending_decision': False, 'junction_remaining_distance': 0.,
+                   'junction_speed': 10.},),
+        time=30. * step, episode=episode, step_index=step, terminal=terminal,
     )
 
 
-def _vehicles(step: int) -> VehicleSnapshot:
-    return VehicleSnapshot(
-        vehicle_ids=(f"veh-{step}",),
-        current_edges=torch.tensor([step % 2]),
-        destination_edges=torch.tensor([1]),
-        departure_steps=torch.tensor([step]),
-    )
-
-
-def _online_transition(
-    *,
-    episode: int,
-    step: int,
-    terminal: bool = False,
-) -> OnlineReplayTransition:
-    return OnlineReplayTransition(
-        episode=episode,
-        step_index=step,
-        flow=_flow(float(step)),
-        action=torch.tensor([float(step + 1), float(step + 2)]),
-        next_flow=_flow(float(step + 1)),
-        departure=torch.tensor([float(step + 10), float(step + 20)]),
-        context=torch.tensor(
-            [float(step + 100), float(step + 110), float(step + 120)]
-        ),
-        hdv_context=torch.tensor([float(step + 30), float(step + 40)]),
-        hdv_target=torch.tensor([float(step + 50), float(step + 60)]),
-        vehicles=_vehicles(step),
-        active_vehicle_seconds=float(step + 12),
-        transition_seconds=30.0,
-        terminal=terminal,
-    )
-
-
-def _assert_plain(value: Any) -> None:
-    if value is None or isinstance(value, (str, int, float, bool, torch.Tensor)):
-        return
-    if isinstance(value, list):
-        for item in value:
-            _assert_plain(item)
-        return
-    if isinstance(value, dict):
-        assert all(isinstance(key, str) for key in value)
-        for item in value.values():
-            _assert_plain(item)
-        return
-    raise AssertionError(f"non-plain replay state: {type(value)!r}")
-
-
-def _assert_equal(left: Any, right: Any) -> None:
-    assert type(left) is type(right)
-    if isinstance(left, torch.Tensor):
-        torch.testing.assert_close(left, right)
-    elif isinstance(left, dict):
-        assert left.keys() == right.keys()
-        for key in left:
-            _assert_equal(left[key], right[key])
-    elif isinstance(left, list):
-        assert len(left) == len(right)
-        for lhs, rhs in zip(left, right):
-            _assert_equal(lhs, rhs)
-    else:
-        assert left == right
-
-
-def _assert_batch_equal(left: Any, right: Any) -> None:
-    for field_name in left.__dataclass_fields__:
-        lhs = getattr(left, field_name)
-        rhs = getattr(right, field_name)
-        if isinstance(lhs, tuple) and lhs and isinstance(lhs[0], VehicleSnapshot):
-            assert len(lhs) == len(rhs)
-            for lhs_snapshot, rhs_snapshot in zip(lhs, rhs):
-                _assert_equal(
-                    lhs_snapshot.state_dict(),
-                    rhs_snapshot.state_dict(),
-                )
-        else:
-            _assert_equal(lhs, rhs)
-
-
-def test_warmup_sequence_shifts_conditioning_once_and_keeps_state_order() -> None:
-    replay = WarmupReplayBuffer(sequence_length=3)
-    assert replay.append_episode(
-        [
-            _warmup_record(episode=7, step=0),
-            _warmup_record(episode=7, step=1),
-            _warmup_record(episode=7, step=2),
-            _warmup_record(episode=7, step=3, terminal=True),
-        ],
-        total_travel_minutes=42.0,
-    )
-
+def test_explicit_transitions_preserve_alignment_and_seed():
+    replay = ReplayBuffer(sequence_length=2)
+    assert replay.append_episode([transition(0), transition(1, terminal=True)], total_travel_minutes=1.)
     batch = replay.sample_batch(batch_size=1, rng=np.random.default_rng(0))
-
-    assert tuple(batch.flow.shape) == (1, 3, 2, 8)
-    torch.testing.assert_close(batch.flow[0, :, 0, 0], torch.tensor([0.0, 1.0, 2.0]))
-    torch.testing.assert_close(batch.action[0, :, 0], torch.tensor([0.0, 1.0, 2.0]))
-    torch.testing.assert_close(
-        batch.departure[0, :, 0],
-        torch.tensor([0.0, 10.0, 11.0]),
-    )
-    torch.testing.assert_close(
-        batch.context[0, :, 0],
-        torch.tensor([0.0, 100.0, 101.0]),
-    )
-    torch.testing.assert_close(
-        batch.hdv_context[0, :, 0],
-        torch.tensor([0.0, 30.0, 31.0]),
-    )
-    torch.testing.assert_close(
-        batch.hdv_target[0, :, 0],
-        torch.tensor([51.0, 52.0]),
-    )
-    assert batch.terminal.shape == (1, 2)
-    assert batch.total_travel_minutes.tolist() == [42.0]
+    assert batch.flow.shape == (1, 3, 2, 8)
+    assert batch.context.shape == (1, 2, 2)
+    torch.testing.assert_close(batch.flow[0, :, 0, 0], torch.tensor([0., 1., 2.]))
+    torch.testing.assert_close(batch.action[0, :, 0], torch.tensor([1., 2.]))
+    torch.testing.assert_close(batch.departure[0, :, 1], torch.tensor([0., 1.]))
+    assert batch.vehicles[0][0]['departure_time'] == 1.25
+    assert batch.vehicles[0][0]['committed_next_edge'] == 'b'
+    assert batch.vehicles[0][0]['remaining_distance'] == 3.5
+    assert batch.terminal.tolist() == [[False, True]]
+    assert batch.episode_complete.tolist() == [True]
 
 
-def test_online_replay_preserves_explicit_pairs_and_vehicle_seed_without_shift() -> None:
-    replay = OnlineReplayBuffer()
-    assert replay.append_episode(
-        [
-            _online_transition(episode=5, step=0),
-            _online_transition(episode=5, step=1, terminal=True),
-        ],
-        total_travel_minutes=12.5,
-    )
+def test_failed_or_incomplete_episode_cannot_enter_replay():
+    replay = ReplayBuffer(sequence_length=1)
+    assert not replay.append_episode([transition(0)], total_travel_minutes=1., require_complete=True)
+    assert replay.episodes == ()
+    with pytest.raises(ValueError, match='continu'):
+        replay.append_episode([transition(0), transition(2, terminal=True)], total_travel_minutes=1.)
 
+
+def test_zero_action_window_is_retained_and_multihop_counts_not_normalized():
+    replay = ReplayBuffer(sequence_length=1)
+    record = transition(0, terminal=True)
+    record.action.zero_()
+    assert replay.append_episode([record], total_travel_minutes=1.)
+    assert replay.sample_batch(batch_size=1, rng=np.random.default_rng(0)).action.sum() == 0
+    assert transition(4).action.sum() == 5
+
+
+def test_replay_restore_preserves_sampler_and_rolls_capacity():
+    replay = ReplayBuffer(sequence_length=1, max_episodes=2)
+    for episode in range(3):
+        replay.append_episode([transition(0, episode=episode), transition(1, episode=episode, terminal=True)], total_travel_minutes=1.)
+    assert [rows[0].episode for rows in replay.episodes] == [1, 2]
+    rng = np.random.default_rng(31)
+    replay.sample_batch(batch_size=1, rng=rng)
+    restored = ReplayBuffer(sequence_length=1, max_episodes=2)
+    restored.load_state_dict(deepcopy(replay.state_dict()))
+    rng2 = np.random.default_rng()
+    rng2.bit_generator.state = deepcopy(rng.bit_generator.state)
+    left = replay.sample_batch(batch_size=7, rng=rng)
+    right = restored.sample_batch(batch_size=7, rng=rng2)
+    for field in ('flow', 'action', 'departure', 'context', 'episode', 'start_index', 'time'):
+        torch.testing.assert_close(getattr(left, field), getattr(right, field))
+    assert left.vehicles == right.vehicles
+
+
+def test_old_replay_schema_is_rejected():
+    with pytest.raises(ValueError, match='schema'):
+        ReplayBuffer(sequence_length=1).load_state_dict({'kind': 'warmup'})
+
+
+def test_transition_validates_shapes_and_fraction():
+    values = transition(0).state_dict()
+    values['context'] = torch.zeros(3)
+    with pytest.raises(ValueError, match='context'):
+        MacroTransition(**values)
+    values = transition(0).state_dict()
+    values['active_vehicle_fraction'] = 1.1
+    with pytest.raises(ValueError, match='fraction'):
+        MacroTransition(**values)
+
+
+def test_short_completed_episode_uses_actual_transitions_without_padding():
+    replay = ReplayBuffer(sequence_length=8)
+    replay.append_episode([transition(0, terminal=True)], total_travel_minutes=1.)
     batch = replay.sample_batch(batch_size=2, rng=np.random.default_rng(0))
-
-    sampled = {
-        (
-            int(batch.step_index[index]),
-            float(batch.action[index, 0]),
-            float(batch.flow[index, 0, 0]),
-            float(batch.next_flow[index, 0, 0]),
-            batch.vehicles[index].vehicle_ids,
-            float(batch.total_travel_minutes[index]),
-        )
-        for index in range(2)
-    }
-    assert sampled == {
-        (0, 1.0, 0.0, 1.0, ("veh-0",), 12.5),
-        (1, 2.0, 1.0, 2.0, ("veh-1",), 12.5),
-    }
+    assert batch.flow.shape == (2, 2, 2, 8)
+    assert batch.action.shape == (2, 1, 2)
+    assert batch.terminal.tolist() == [[True], [True]]
 
 
-def test_warmup_rejects_incomplete_episode_but_online_keeps_valid_prefix() -> None:
-    warmup = WarmupReplayBuffer(sequence_length=2)
-    online = OnlineReplayBuffer()
-
-    assert not warmup.append_episode(
-        [
-            _warmup_record(episode=1, step=0),
-            _warmup_record(episode=1, step=1),
-        ],
-        total_travel_minutes=1.0,
-    )
-    assert online.append_episode(
-        [
-            _online_transition(episode=1, step=0),
-            _online_transition(episode=1, step=1),
-        ],
-        total_travel_minutes=1.0,
-    )
-    assert warmup.episodes == ()
-    assert len(online.episodes) == 1
-    assert [transition.terminal for transition in online.episodes[0]] == [
-        False,
-        False,
-    ]
-
-    restored = OnlineReplayBuffer()
-    restored.load_state_dict(online.state_dict())
-
-    assert len(restored.episodes) == 1
-    assert [transition.terminal for transition in restored.episodes[0]] == [
-        False,
-        False,
-    ]
+def test_snapshot_remains_exact_across_state_and_batch_copies():
+    replay = ReplayBuffer(sequence_length=1)
+    record = transition(0, terminal=True)
+    replay.append_episode([record], total_travel_minutes=1.)
+    state = replay.state_dict()
+    restored = ReplayBuffer(sequence_length=1)
+    restored.load_state_dict(state)
+    state['episodes'][0]['transitions'][0]['vehicles'][0]['remaining_distance'] = 999.
+    batch = restored.sample_batch(batch_size=1, rng=np.random.default_rng(0))
+    assert batch.vehicles[0][0]['remaining_distance'] == 3.5
+    batch.vehicles[0][0]['remaining_distance'] = 555.
+    assert restored.episodes[0][0].vehicles[0]['remaining_distance'] == 3.5
 
 
-def test_warmup_replay_keeps_all_complete_episodes_and_online_replay_rolls() -> None:
-    warmup = WarmupReplayBuffer(sequence_length=2)
-    online = OnlineReplayBuffer()
-
-    for episode in range(MAX_ONLINE_REPLAY_EPISODES + 1):
-        warmup.append_episode(
-            [
-                _warmup_record(episode=episode, step=0),
-                _warmup_record(episode=episode, step=1, terminal=True),
-            ],
-            total_travel_minutes=float(episode + 1),
-        )
-        online.append_episode(
-            [_online_transition(episode=episode, step=0, terminal=True)],
-            total_travel_minutes=float(episode + 1),
-        )
-
-    assert len(warmup.episodes) == MAX_ONLINE_REPLAY_EPISODES + 1
-    assert len(online.episodes) == MAX_ONLINE_REPLAY_EPISODES
-    assert [episode[0].episode for episode in warmup.episodes] == list(range(9))
-    assert [episode[0].episode for episode in online.episodes] == list(range(1, 9))
+def test_valid_horizon_truncation_can_be_sampled_and_restored():
+    replay = ReplayBuffer(sequence_length=2)
+    assert replay.append_episode([transition(0), transition(1)], total_travel_minutes=1.)
+    restored = ReplayBuffer(sequence_length=2)
+    restored.load_state_dict(replay.state_dict())
+    batch = restored.sample_batch(batch_size=1, rng=np.random.default_rng(0))
+    assert batch.terminal.tolist() == [[False, False]]
+    assert batch.episode_complete.tolist() == [False]
+    assert batch.flow.shape == (1, 3, 2, 8)
+    assert batch.active_vehicle_fraction.tolist() == [[0.25, 0.25]]
 
 
-def test_replay_state_roundtrip_preserves_sampling_cursor_and_vehicle_state() -> None:
-    warmup = WarmupReplayBuffer(sequence_length=2)
-    online = OnlineReplayBuffer()
-    for episode in (10, 11):
-        warmup.append_episode(
-            [
-                _warmup_record(episode=episode, step=0),
-                _warmup_record(episode=episode, step=1),
-                _warmup_record(episode=episode, step=2, terminal=True),
-            ],
-            total_travel_minutes=float(episode),
-        )
-        online.append_episode(
-            [
-                _online_transition(episode=episode, step=0),
-                _online_transition(episode=episode, step=1, terminal=True),
-            ],
-            total_travel_minutes=float(episode),
-        )
+def active_transition(step, *, active=False, fraction=0., snapshot=False, terminal=False):
+    values = transition(step, terminal=terminal).state_dict()
+    values['context'] = torch.tensor([step / 10., float(active)])
+    values['active_vehicle_fraction'] = fraction
+    values['action'] = torch.zeros(2)
+    values['departure'] = torch.zeros(2)
+    if not snapshot:
+        values['vehicles'] = ()
+    return MacroTransition(**values)
 
-    rng = np.random.default_rng(123)
-    warmup.sample_batch(batch_size=1, rng=rng)
-    online.sample_batch(batch_size=1, rng=rng)
-    warmup_state = warmup.state_dict()
-    online_state = online.state_dict()
-    _assert_plain(warmup_state)
-    _assert_plain(online_state)
 
-    restored_warmup = WarmupReplayBuffer(sequence_length=2)
-    restored_online = OnlineReplayBuffer()
-    restored_warmup.load_state_dict(deepcopy(warmup_state))
-    restored_online.load_state_dict(deepcopy(online_state))
-    _assert_equal(restored_warmup.state_dict(), warmup_state)
-    _assert_equal(restored_online.state_dict(), online_state)
+def test_active_only_excludes_empty_windows_but_retains_complete_episode():
+    replay = ReplayBuffer(sequence_length=3, active_only=True)
+    rows = [active_transition(index, active=index in (1, 2, 5),
+                              fraction=0.25 if index == 4 else 0., terminal=index == 6)
+            for index in range(7)]
+    replay.append_episode(rows, total_travel_minutes=1.)
+    assert len(replay) == 7
+    assert replay.has_samples
+    batch = replay.sample_batch(4, np.random.default_rng(3))
+    assert set(batch.start_index.tolist()) == {1, 2, 4, 5}
+    assert batch.action.sum() == 0  # Long-edge windows with no decisions still train.
+    assert batch.flow.shape == (4, 2, 2, 8)
+    for index, start in enumerate(batch.start_index.tolist()):
+        assert batch.time[index] == start * 30.
+        assert batch.flow[index, :, 0, 0].tolist() == [start, start + 1]
 
-    rng_state = deepcopy(rng.bit_generator.state)
-    restored_rng = np.random.default_rng()
-    restored_rng.bit_generator.state = deepcopy(rng_state)
-    _assert_batch_equal(
-        warmup.sample_batch(batch_size=3, rng=rng),
-        restored_warmup.sample_batch(batch_size=3, rng=restored_rng),
-    )
-    _assert_batch_equal(
-        online.sample_batch(batch_size=3, rng=rng),
-        restored_online.sample_batch(batch_size=3, rng=restored_rng),
-    )
+
+def test_active_sequences_do_not_stitch_across_empty_gaps():
+    replay = ReplayBuffer(sequence_length=4, active_only=True)
+    replay.append_episode([active_transition(i, active=i in (1, 2, 4, 5, 6), terminal=i == 7)
+                           for i in range(8)], total_travel_minutes=1.)
+    rng = np.random.default_rng(41)
+    lengths = {}
+    for _ in range(5):
+        batch = replay.sample_batch(1, rng)
+        start = batch.start_index.item()
+        length = batch.action.shape[1]
+        lengths[start] = length
+        assert batch.flow[0, :, 0, 0].tolist() == list(range(start, start + length + 1))
+        assert batch.context.shape[1] == length
+    assert lengths == {1: 2, 2: 1, 4: 3, 5: 2, 6: 1}
+
+
+def test_active_only_empty_replay_and_snapshot_activity():
+    replay = ReplayBuffer(sequence_length=2, active_only=True)
+    assert not replay.has_samples
+    replay.append_episode([active_transition(0, terminal=True)], total_travel_minutes=0.)
+    assert len(replay) == 1
+    assert not replay.has_samples
+    with pytest.raises(ValueError, match='empty'):
+        replay.sample_batch(1, np.random.default_rng(0))
+    replay.append_episode([active_transition(0, snapshot=True, terminal=True)], total_travel_minutes=1.)
+    assert replay.has_samples
+
+
+def test_active_only_sampler_restores_exactly_and_rejects_previous_schema():
+    replay = ReplayBuffer(sequence_length=3, active_only=True)
+    replay.append_episode([active_transition(i, active=i in (2, 3, 5, 6), terminal=i == 7)
+                           for i in range(8)], total_travel_minutes=1.)
+    rng = np.random.default_rng(73)
+    replay.sample_batch(1, rng)
+    state = deepcopy(replay.state_dict())
+    restored = ReplayBuffer(sequence_length=3, active_only=True)
+    restored.load_state_dict(state)
+    rng2 = np.random.default_rng()
+    rng2.bit_generator.state = deepcopy(rng.bit_generator.state)
+    for _ in range(3):
+        left, right = replay.sample_batch(3, rng), restored.sample_batch(3, rng2)
+        for name in ('flow', 'action', 'context', 'start_index', 'time'):
+            torch.testing.assert_close(getattr(left, name), getattr(right, name))
+    with pytest.raises(ValueError, match='configuration'):
+        ReplayBuffer(sequence_length=3).load_state_dict(state)
+    state['schema_version'] = 2
+    with pytest.raises(ValueError, match='schema'):
+        restored.load_state_dict(state)
+
+
+def test_imagination_seeds_require_active_start_snapshots_without_consuming_sampler():
+    replay = ReplayBuffer(sequence_length=3, active_only=True)
+    rows = [active_transition(0, fraction=0.1), active_transition(1, snapshot=True),
+            active_transition(2), active_transition(3, snapshot=True, terminal=True)]
+    replay.append_episode(rows, total_travel_minutes=1.)
+    assert replay.has_active_seeds
+    rng = np.random.default_rng(71)
+    replay.sample_batch(1, rng)
+    before = deepcopy(replay.state_dict())
+    seeds = replay.sample_active_seeds(50, rng)
+    assert set(seeds.start_index.tolist()) == {1, 3}
+    assert all(vehicles[0]['departed'] and not vehicles[0]['arrived'] for vehicles in seeds.vehicles)
+    after = replay.state_dict()
+    assert before['sample_order'] == after['sample_order']
+    assert before['sample_cursor'] == after['sample_cursor']
+    restored = ReplayBuffer(sequence_length=3, active_only=True)
+    restored.load_state_dict(after)
+    rng2 = np.random.default_rng()
+    rng2.bit_generator.state = deepcopy(rng.bit_generator.state)
+    left, right = replay.sample_active_seeds(7, rng), restored.sample_active_seeds(7, rng2)
+    torch.testing.assert_close(left.start_index, right.start_index)
+    torch.testing.assert_close(left.flow, right.flow)
+
+
+def test_exposure_without_active_start_snapshot_is_not_an_imagination_seed():
+    replay = ReplayBuffer(sequence_length=1, active_only=True)
+    future = active_transition(0, fraction=0.1, snapshot=True).state_dict()
+    future['vehicles'][0]['departed'] = False
+    arrived = active_transition(1, fraction=0.1, snapshot=True, terminal=True).state_dict()
+    arrived['vehicles'][0]['arrived'] = True
+    replay.append_episode([MacroTransition(**future), MacroTransition(**arrived)], total_travel_minutes=1.)
+    assert replay.has_samples
+    assert not replay.has_active_seeds
+    with pytest.raises(ValueError, match='active vehicle'):
+        replay.sample_active_seeds(1, np.random.default_rng(0))

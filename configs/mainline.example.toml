@@ -3,10 +3,6 @@
 # expects one prepared bundle at <repository>/networks/example_network/.
 network_name = "example_network"
 network_dir = "../networks/example_network"
-route_artifacts_dir = "../networks/example_network"
-post_mutation_state = "../networks/example_network/post_mutation_state.json"
-initial_hdv_state = "../networks/example_network/initial_hdv_state.json"
-hdv_response_checkpoint = "../networks/example_network/hdv_response_predictor_v4.pt"
 
 [run]
 # Use a fresh directory, or one containing a matching checkpoints/latest.pt.
@@ -20,8 +16,9 @@ online_training_episodes = 1
 evaluation_episodes = 1
 
 [simulation]
-# One decision interval is fixed at 30 simulation seconds.
-decision_intervals_per_episode = 60
+vehicle_max_speed_mps = 40.0
+# One world-model interval is fixed at 30 simulation seconds.
+world_model_intervals_per_episode = 60
 warmup_horizon_seconds = 1800
 warmup_completion_drain_seconds = 3000
 warmup_completion_patience_seconds = 0
