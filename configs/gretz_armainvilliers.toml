@@ -10,14 +10,16 @@ network_dir = "../networks/gretz_armainvilliers"
 output_dir = "../outputs/gretz_armainvilliers"
 device = "cuda:0"
 seed = 42
-# Recreate the historical 50-episode warmup and 8,000-microbatch world-model
-# initialization before training a fresh policy/world model for 400 episodes.
+# Collect 50 episodes, then traverse the replay for 5 shuffled epochs.
+# Epoch budgets are explicit; they are not a conversion of historical step counts.
 warmup_episodes = 50
-world_model_initialization_steps = 8000
+world_model_initialization_epochs = 5
 online_training_episodes = 150
 evaluation_episodes = 5
 
 [simulation]
+# Homogeneous Poisson arrivals per OD; counts in agents.csv define expected demand.
+demand_duration_seconds = 1800.0
 vehicle_max_speed_mps = 40.0
 world_model_intervals_per_episode = 60
 warmup_horizon_seconds = 1800

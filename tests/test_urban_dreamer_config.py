@@ -19,7 +19,7 @@ output_dir = "output"
 device = "cpu"
 seed = 42
 warmup_episodes = 2
-world_model_initialization_steps = 3
+world_model_initialization_epochs = 3
 online_training_episodes = 4
 evaluation_episodes = 5
 
@@ -170,4 +170,30 @@ def test_incident_cannot_exceed_vehicle_speed_cap(tmp_path: Path) -> None:
     path = _write_config(tmp_path / 'mainline.toml')
     path.write_text(path.read_text().replace('incident_speed_mps = 0.1', 'incident_speed_mps = 41.0'))
     with pytest.raises(ConfigError, match='incident_speed_mps.*vehicle_max_speed_mps'):
+        load_config(path)
+
+
+@pytest.mark.parametrize('value', ['0', '-1', 'nan', 'inf'])
+def test_poisson_demand_duration_must_be_positive_and_finite(tmp_path: Path, value: str) -> None:
+    path = _write_config(tmp_path / 'mainline.toml')
+    path.write_text(path.read_text().replace('[simulation]', f'[simulation]\ndemand_duration_seconds = {value}'))
+    with pytest.raises(ConfigError, match='demand_duration_seconds'):
+        load_config(path)
+
+
+def test_demand_duration_changes_semantics_without_extending_simulation(tmp_path: Path) -> None:
+    path = _write_config(tmp_path / 'mainline.toml')
+    baseline = load_config(path)
+    path.write_text(path.read_text().replace('[simulation]', '[simulation]\ndemand_duration_seconds = 420.0'))
+    poisson = load_config(path)
+    assert poisson.simulation.demand_duration_seconds == 420.
+    assert baseline.simulation.world_model_intervals_per_episode == poisson.simulation.world_model_intervals_per_episode
+    assert baseline.semantic_fingerprint != poisson.semantic_fingerprint
+
+
+def test_legacy_step_budget_is_rejected(tmp_path):
+    path = _write_config(tmp_path / "legacy.toml")
+    path.write_text(path.read_text().replace('world_model_initialization_epochs',
+                                            'world_model_initialization_steps'))
+    with pytest.raises(ConfigError, match='unknown.*world_model_initialization_steps'):
         load_config(path)

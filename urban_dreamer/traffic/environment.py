@@ -108,7 +108,7 @@ class SumoSession:
 
     @property
     def done(self) -> bool:
-        return bool(self._vehicles) and len(self.travel_times) == len(self._vehicles)
+        return self._connection is not None and len(self.travel_times) == len(self._vehicles)
 
     def reset(self) -> dict[str, Any]:
         if self._closed or self._connection is not None:

@@ -150,3 +150,22 @@ def test_vehicle_speed_cap_applies_to_new_and_seeded_junctions():
     assert newly_entered['junction_remaining_distance'] == 60.
     assert seeded['junction_remaining_distance'] == 40.
     assert len(result.decisions) == 1
+
+
+def test_physical_cost_segments_preserve_counts_and_exact_suffix_cost():
+    states = [vehicle('first', current_edge=2, remaining_distance=5., pending_decision=False),
+              vehicle('second', current_edge=2, remaining_distance=12., pending_decision=False)]
+    result = run(states)
+    assert [(s.start_time, s.end_time, s.active_count) for s in result.cost_segments] == [
+        (0., 5., 2), (5., 12., 1), (12., 30., 0)]
+    assert result.active_vehicle_seconds == 17.
+    assert result.end_time == 30.
+    assert sum((s.end_time-s.start_time)*s.active_count for s in result.cost_segments) == 17.
+
+
+def test_stop_when_empty_reports_actual_terminal_time_without_padded_tail():
+    result = advance_imagined_window([vehicle(current_edge=2, remaining_distance=7., pending_decision=False)],
+        candidates=Candidates(), edge_speeds_mps=np.ones(3), frozen_flow=np.zeros((3,8)),
+        start_time=0., total_vehicle_count=1, decide=decide, stop_when_empty=True)
+    assert result.end_time == 7. and result.active_vehicle_seconds == 7.
+    assert [(s.start_time, s.end_time, s.active_count) for s in result.cost_segments] == [(0., 7., 1)]

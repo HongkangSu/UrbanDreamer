@@ -8,12 +8,21 @@ import numpy as np
 
 
 @dataclass(frozen=True)
+class ActiveCostSegment:
+    start_time: float
+    end_time: float
+    active_count: int
+
+
+@dataclass(frozen=True)
 class ImaginedWindow:
     action: np.ndarray
     departure: np.ndarray
     decisions: tuple[Any, ...]
     arrivals: dict[str, float]
     active_vehicle_seconds: float
+    cost_segments: tuple[ActiveCostSegment, ...]
+    end_time: float
 
 
 def advance_imagined_window(
@@ -24,6 +33,7 @@ def advance_imagined_window(
     interval_seconds: float = 30.0,
     observation_step_seconds: float = 0.001,
     vehicle_max_speed_mps: float | None = None,
+    stop_when_empty: bool = False,
 ) -> ImaginedWindow:
     """Advance physical events through a window; policy events at its end stay pending.
 
@@ -58,6 +68,7 @@ def advance_imagined_window(
     decisions: list[Any] = []
     arrivals: dict[str, float] = {}
     active_seconds = 0.0
+    cost_segments: list[ActiveCostSegment] = []
     time, end = float(start_time), float(start_time + interval_seconds)
     tolerance = 1e-9
     # An undeparted seed is physically absent at S_t even when its scheduled
@@ -119,6 +130,8 @@ def advance_imagined_window(
                         enter_successor(state)
         if time >= end - tolerance:
             break
+        if stop_when_empty and all(state.get('arrived', False) for state in states):
+            break
 
         pending = [s for s in states if active(s) and s.get('pending_decision', False)]
         if pending:
@@ -157,8 +170,27 @@ def advance_imagined_window(
                 if any(float(network.lengths_m[int(s['current_edge'])]) <= 0 for s in states if active(s)):
                     raise ValueError('zero-length external edges cannot be advanced safely')
                 continue
+            # A residual distance within one tolerance-step of completing its
+            # edge or junction traversal (distance <= speed * tolerance) is
+            # invisible to the physical pass but still stalls the clock; snap
+            # it to completion. Runs that never raised never enter this branch.
+            repaired = False
+            for state in states:
+                if not active(state):
+                    continue
+                in_junction = bool(state.get('in_junction', False))
+                key = 'junction_remaining_distance' if in_junction else 'remaining_distance'
+                speed = float(state['junction_speed'] if in_junction else speeds[int(state['current_edge'])])
+                distance = float(state[key])
+                if 0. < distance and speed > 0 and distance / speed <= tolerance:
+                    state[key] = 0.
+                    repaired = True
+            if repaired:
+                continue
             raise ValueError('imagined vehicle clock failed to advance')
-        active_seconds += sum(active(s) for s in states) * duration
+        active_count = sum(active(s) for s in states)
+        cost_segments.append(ActiveCostSegment(time, min(time + duration, end), active_count))
+        active_seconds += active_count * duration
         for state in states:
             if not active(state):
                 continue
@@ -169,4 +201,5 @@ def advance_imagined_window(
         time = min(time + duration, end)
 
     return ImaginedWindow(action / total_vehicle_count, departure / total_vehicle_count,
-                          tuple(decisions), arrivals, float(active_seconds))
+                          tuple(decisions), arrivals, float(active_seconds),
+                          tuple(cost_segments), time)

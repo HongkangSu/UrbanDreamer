@@ -28,7 +28,7 @@ def grouped_metrics(records):
         groups[(record["phase"], record["policy"], record["episode"])].append(record)
     return [dict(phase=phase, policy=policy, episode=episode, seeds=[r["seed"] for r in rows],
                  **{metric: stats([r.get(metric) for r in rows]) for metric in
-                    ("mean_travel_seconds", "reward_per_vehicle", "completion_rate", "branch_entropy")})
+                    ("mean_travel_seconds", "reward_per_vehicle", "global_reward_sum", "vehicle_timeout_penalty_sum", "selection_score", "completion_rate", "branch_entropy")})
             for (phase, policy, episode), rows in sorted(groups.items())]
 
 
@@ -44,6 +44,7 @@ def uniform_branch_entropy(record):
 
 
 def summarize(records, protocol):
+    fixed_global = protocol.get("reward_mode") in {"global_only", "global_with_individual_timeout"}
     train = sorted((r for r in records if r["phase"] == "train"), key=lambda r: r["episode"])
     groups = grouped_metrics([r for r in records if r["phase"] != "train"])
     evaluation = [g for g in groups if g["phase"] == "evaluation" and g["policy"] == "deterministic"]
@@ -52,23 +53,34 @@ def summarize(records, protocol):
     last_three = complete_evaluation[-3:]
     intended = protocol["args"]["episodes"]
     last = train[-1]["episode"] if train else 0
-    holdouts = [g for g in groups if g["phase"] == "holdout_final" and g["episode"] == intended]
+    holdouts = [g for g in groups if g["phase"] == "holdout_final" and g["episode"] == last]
     best_holdouts = [g for g in groups if g["phase"] == "holdout_best"]
-    complete = (last >= intended and len(holdouts) == 4
+    expected_policies = set(protocol.get('evaluation_policies', ['random', 'shortest', 'deterministic']))
+    if not fixed_global:
+        expected_policies.add("stochastic")
+    complete = (last >= intended and {g["policy"] for g in holdouts} == expected_policies
                 and all(len(set(g["seeds"])) == expected_seeds for g in holdouts)
                 and any(len(set(g["seeds"])) == expected_seeds for g in best_holdouts))
-    local_weight = protocol.get("local_reward_weight", protocol["args"].get("local_reward_weight", 1.))
-    gradient_keys = ("actor_gradient_norm", "critic_gradient_norm") if local_weight else ("actor_gradient_norm",)
+    if fixed_global:
+        gradient_keys = ("actor_gradient_norm", "global_critic_gradient_norm")
+    else:
+        local_weight = protocol.get("local_reward_weight", protocol["args"].get("local_reward_weight", 1.))
+        gradient_keys = ("actor_gradient_norm", "critic_gradient_norm") if local_weight else ("actor_gradient_norm",)
     gradients = [r.get(key) for r in train for key in gradient_keys]
-    gradients.extend(r["global_critic_gradient_norm"] for r in train if "global_critic_gradient_norm" in r)
+    if not fixed_global:
+        gradients.extend(r["global_critic_gradient_norm"] for r in train if "global_critic_gradient_norm" in r)
+    global_keys = ["global_critic_loss", "global_critic_gradient_norm", "global_explained_variance",
+                   "global_advantage_std", "window_count", "global_reward_sum", "vehicle_timeout_penalty_sum", "selection_score"]
+    if not fixed_global:
+        global_keys.append("local_advantage_std")
     return dict(status="completed" if complete else "incomplete", world_model=False,
+                reward_quantity="global_reward_sum" if fixed_global else "reward_per_vehicle",
+                training_policy=protocol.get("training_policy", protocol["args"].get("training_policy", "stochastic")),
                 intended_training_episodes=intended, completed_training_episodes=len(train),
                 last_training_episode=last, groups=groups,
                 train_first_20_travel=stats([r.get("mean_travel_seconds") for r in train[:20]]),
                 train_last_20_travel=stats([r.get("mean_travel_seconds") for r in train[-20:]]),
-                train_last_20_global={key: stats([r.get(key) for r in train[-20:]]) for key in
-                                      ("global_critic_loss", "global_explained_variance", "global_advantage_std",
-                                       "local_advantage_std", "window_count", "global_reward_sum")},
+                train_last_20_global={key: stats([r.get(key) for r in train[-20:]]) for key in global_keys},
                 recent_evaluation_episodes=[g["episode"] for g in last_three],
                 recent_evaluation_travel=stats([g["mean_travel_seconds"]["mean"] for g in last_three]),
                 last_20_entropy_deficit=stats([
@@ -81,12 +93,14 @@ def summarize(records, protocol):
 
 
 def plot(records, summary, output):
+    fixed_global = summary["reward_quantity"] == "global_reward_sum"
     train = sorted((r for r in records if r["phase"] == "train"), key=lambda r: r["episode"])
     x = [r["episode"] for r in train]
-    fig, axes = plt.subplots(3, 2, figsize=(14, 12), constrained_layout=True)
+    fig, axes = plt.subplots(4 if fixed_global else 3, 2,
+                             figsize=(14, 16 if fixed_global else 12), constrained_layout=True)
     ax = axes[0, 0]
     travel = np.asarray([r.get("mean_travel_seconds") if r.get("mean_travel_seconds") is not None else np.nan for r in train])
-    ax.plot(x, travel, alpha=.3, label="Stochastic training episodes")
+    ax.plot(x, travel, alpha=.3, label=f"{summary['training_policy'].capitalize()} training episodes")
     rolling = [float(np.mean(travel[max(0, i-9):i+1])) for i in range(len(travel))]
     ax.plot(x, rolling, label="Trailing mean (up to 10 episodes)")
     ax.set(title="Training travel time (arrived vehicles only)", ylabel="seconds")
@@ -104,12 +118,20 @@ def plot(records, summary, output):
             ax.axhline(group["mean_travel_seconds"]["mean"], linestyle="--", label=labels[group["policy"]])
     ax.set(title="Evaluation travel time (arrived vehicles only)", ylabel="seconds")
     ax.legend(fontsize=8)
-    for ax, key, title, unit in (
+    diagnostics = (
+        (axes[1, 0], "global_reward_sum", "Team episode reward", "reward"),
+        (axes[1, 1], "global_critic_loss", "Global critic regression loss", "MSE"),
+        (axes[2, 0], "global_explained_variance", "Global critic explained variance", "fraction"),
+        (axes[2, 1], "branch_entropy", "Branch entropy of underlying policy distribution", "nats"),
+        (axes[3, 0], "actor_gradient_norm", "Actor gradient norm", "norm"),
+        (axes[3, 1], "global_critic_gradient_norm", "Global critic gradient norm", "norm"),
+    ) if fixed_global else (
         (axes[1, 0], "reward_per_vehicle", "Local episode reward per vehicle (diagnostic)", "reward"),
         (axes[1, 1], "critic_loss", "Critic regression loss", "MSE"),
         (axes[2, 0], "explained_variance", "Critic explained variance", "fraction"),
         (axes[2, 1], "branch_entropy", "Branch entropy of underlying policy distribution", "nats"),
-    ):
+    )
+    for ax, key, title, unit in diagnostics:
         if any(key in r for r in train):
             ax.plot(x, [r.get(key, np.nan) for r in train])
         elif key in ("critic_loss", "explained_variance"):
@@ -122,7 +144,7 @@ def plot(records, summary, output):
             axes[2, 1].lines[0].set_label("Observed policy entropy")
         axes[2, 1].plot(x, ceiling, linestyle="--", label="Uniform upper bound for branch mix")
         axes[2, 1].legend(fontsize=8)
-    if any("global_critic_loss" in r for r in train):
+    if not fixed_global and any("global_critic_loss" in r for r in train):
         if axes[1, 1].lines:
             axes[1, 1].lines[0].set_label("Vehicle critic")
         axes[1, 1].plot(x, [r.get("global_critic_loss", np.nan) for r in train], label="Global critic")
@@ -134,7 +156,7 @@ def plot(records, summary, output):
     for ax in axes.flat:
         ax.set_xlabel("Training episode")
         ax.grid(alpha=.2)
-    fig.suptitle(f"Toy real-SUMO Actor–Critic · no world model · {summary['status']}")
+    fig.suptitle(f"Real-SUMO Actor–Critic · no world model · {summary['status']}")
     fig.savefig(output / "learning_curves.png", dpi=160)
     plt.close(fig)
 
@@ -144,34 +166,53 @@ def number(value):
 
 
 def reward_label(protocol):
+    if protocol.get("reward_mode") == "global_with_individual_timeout":
+        return "Global traffic + individual timeout"
+    if protocol.get("reward_mode") in {"global_only", "global_with_individual_timeout"}:
+        return "Global-only"
     local = protocol.get("local_reward_weight", protocol["args"].get("local_reward_weight", 1.))
     global_ = protocol.get("global_reward_weight", protocol["args"].get("global_reward_weight", 0.))
     return "Global-only" if global_ and not local else "Local + global" if global_ else "Local only"
 
 
 def report(summary, protocol):
+    fixed_global = protocol.get("reward_mode") in {"global_only", "global_with_individual_timeout"}
     first, last = summary["train_first_20_travel"], summary["train_last_20_travel"]
     recent = summary["recent_evaluation_travel"]
     weight = protocol.get("global_reward_weight", protocol["args"].get("global_reward_weight", 0.))
-    local_weight = protocol.get("local_reward_weight", protocol["args"].get("local_reward_weight", 1.))
-    reward_mode = (f"{reward_label(protocol)} advantage (local weight {local_weight}, global weight {weight}); learned global critic. "
-                   f"Global reward: `{protocol.get('global_reward', '-active_seconds/(N*60)')}`. "
-                   f"Global critic observation: {protocol.get('global_critic_observation', 'not recorded')}."
-                   if weight else "Local reward only; no learned macro critic.")
-    lines = ["# Toy real-SUMO Actor–Critic diagnostic", "",
+    if protocol.get("reward_mode") == "global_with_individual_timeout":
+        reward_mode = (f"Global traffic reward: `{protocol['global_reward']}`. The global critic uses traffic costs only. "
+                       "Individual timeout returns apply only to unfinished vehicles' own actions. "
+                       "The summed penalty and selection_score are diagnostics, not a shared training reward.")
+    elif fixed_global:
+        reward_mode = (f"Global-only advantage; learned global critic. Team reward: `{protocol['global_reward']}`. "
+                       f"Global critic observation: {protocol.get('global_critic_observation', 'not recorded')}.")
+    elif weight:
+        local_weight = protocol.get("local_reward_weight", protocol["args"].get("local_reward_weight", 1.))
+        reward_mode = (f"{reward_label(protocol)} advantage (local weight {local_weight}, global weight {weight}); learned global critic. "
+                       f"Global reward: `{protocol.get('global_reward', '-active_seconds/(N*60)')}`. "
+                       f"Global critic observation: {protocol.get('global_critic_observation', 'not recorded')}.")
+    else:
+        reward_mode = "Local reward only; no learned macro critic."
+    reward_heading = "Team reward" if fixed_global else "Reward"
+    demand = protocol.get('demand')
+    population = (f"expected vehicles: {demand['expected_vehicle_count']:g} (Poisson)" if demand
+                  else f"vehicles: {protocol['vehicle_count']}")
+    lines = ["# Real-SUMO Actor–Critic diagnostic", "",
              f"Status: **{summary['status']}**. Logged {summary['completed_training_episodes']} training episodes; "
              f"requested {summary['intended_training_episodes']}. This report is a snapshot of the available log.", "",
-             f"Training seed: {protocol['args']['seed']}; vehicles: {protocol['vehicle_count']}; "
+             f"Training seed: {protocol['args']['seed']}; {population}; "
              f"deadline: {protocol['deadline_seconds']} seconds. No world model or imagination. {reward_mode}", "",
              f"Reward: `{protocol['reward']}`; gamma={protocol['gamma']}, lambda={protocol['lambda_return']}.", "",
              f"Advantage normalization: `{protocol.get('advantage_normalization', 'center_and_scale')}`.", "",
+             f"Training policy: {summary['training_policy']}; evaluation policy: {protocol.get('evaluation_policy', 'argmax')}.", "",
              "## Baseline, evaluation, and holdout results", "",
              "Travel statistics below use arrived vehicles only. SD is population SD across SUMO evaluation seeds, "
              "not uncertainty across independent training runs. Holdout seeds differ from checkpoint-selection seeds.", "",
-             "| Phase | Policy | Checkpoint episode | Runs | Travel seconds mean ± SD | Reward mean ± SD | Completion mean |",
+             f"| Phase | Policy | Checkpoint episode | Runs | Travel seconds mean ± SD | {reward_heading} mean ± SD | Completion mean |",
              "|---|---|---:|---:|---:|---:|---:|"]
     for g in summary["groups"]:
-        t, r = g["mean_travel_seconds"], g["reward_per_vehicle"]
+        t, r = g["mean_travel_seconds"], g[summary["reward_quantity"]]
         lines.append(f"| {g['phase']} | {g['policy']} | {g['episode']} | {len(g['seeds'])} | "
                      f"{number(t['mean'])} ± {number(t['std'])} | {number(r['mean'])} ± {number(r['std'])} | "
                      f"{number(g['completion_rate']['mean'])} |")
@@ -200,11 +241,14 @@ def report(summary, protocol):
     if summary["status"] != "completed":
         lines += ["", "**Run incomplete:** training or the full final/best holdout suite is missing from this snapshot. "
                   "Regenerate the report after the runner completes before drawing final conclusions."]
-    if weight:
+    if fixed_global or weight:
         lines += ["", "## Global reward diagnostics", "",
-                  "Means below cover the last up to 20 logged training episodes. Reward per vehicle above remains "
+                  "Means below cover the last up to 20 logged training episodes. " +
+                  ("Team reward above is the shared global episode reward. Training uses the global critic."
+                   if fixed_global else
+                  "Reward per vehicle above remains "
                   "the local episodic reward as a comparable travel metric; it contributes to policy updates only when "
-                  "local reward weight is nonzero. Global-only runs do not train a vehicle critic.", ""]
+                  "local reward weight is nonzero. Global-only runs do not train a vehicle critic."), ""]
         lines.extend(f"- {key}: {number(value['mean'])} ({value['count']} episodes)."
                      for key, value in summary["train_last_20_global"].items())
     return "\n".join(lines) + "\n"
@@ -235,6 +279,7 @@ def compare_runs(baseline_records, baseline_protocol, records, protocol):
     matched = [grouped_metrics([index[key] for key in shared]) for index in by_key]
     return {"status": "completed" if all(s["status"] == "completed" for s in summaries) else "incomplete",
             "baseline_reward_mode": reward_label(baseline_protocol), "current_reward_mode": reward_label(protocol),
+            "reward_quantities": [s["reward_quantity"] for s in summaries],
             "training_seeds": [p["args"]["seed"] for p in (baseline_protocol, protocol)],
             "same_training_seed": baseline_protocol["args"]["seed"] == protocol["args"]["seed"],
             "advantage_normalization": [p.get("advantage_normalization", "center_and_scale")
@@ -278,15 +323,17 @@ def write_comparison(baseline_records, baseline_protocol, records, protocol, out
              "![Reward comparison](comparison.png)", "", "## Holdout results", "",
              "Holdouts below are listed separately for each run. Best checkpoints may have different episode numbers. "
              "Compare final policies on the same holdout seeds; best checkpoint selection uses evaluation seeds.", "",
-             "| Run | Phase | Policy | Episode | Seeds | Travel seconds mean ± SD | Local reward mean | Completion |",
+             "Reward quantities follow each run's protocol: shared team reward for the fixed global setting, "
+             "and the archived local diagnostic reward for historical runs.", "",
+             "| Run | Phase | Policy | Episode | Seeds | Travel seconds mean ± SD | Logged reward mean | Completion |",
              "|---|---|---|---:|---|---:|---:|---:|"]
-    for label, key in ((comparison["baseline_reward_mode"], "baseline_holdouts"),
-                       (comparison["current_reward_mode"], "current_holdouts")):
+    for label, key, quantity in ((comparison["baseline_reward_mode"], "baseline_holdouts", comparison["reward_quantities"][0]),
+                                (comparison["current_reward_mode"], "current_holdouts", comparison["reward_quantities"][1])):
         for g in comparison[key]:
             travel = g["mean_travel_seconds"]
             lines.append(f"| {label} | {g['phase']} | {g['policy']} | {g['episode']} | {g['seeds']} | "
                          f"{number(travel['mean'])} ± {number(travel['std'])} | "
-                         f"{number(g['reward_per_vehicle']['mean'])} | {number(g['completion_rate']['mean'])} |")
+                         f"{number(g[quantity]['mean'])} | {number(g['completion_rate']['mean'])} |")
     if comparison["status"] != "completed":
         lines += ["", "**Partial snapshot:** final training and/or holdout results are missing. No final conclusion is warranted."]
     if comparison["advantage_normalization"][0] != comparison["advantage_normalization"][1]:

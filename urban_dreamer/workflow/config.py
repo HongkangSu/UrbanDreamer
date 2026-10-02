@@ -4,7 +4,7 @@ import hashlib
 import json
 import math
 import tomllib
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -28,7 +28,7 @@ class RunConfig:
     device: str
     seed: int
     warmup_episodes: int
-    world_model_initialization_steps: int
+    world_model_initialization_epochs: int
     online_training_episodes: int
     evaluation_episodes: int
 
@@ -48,6 +48,7 @@ class SimulationConfig:
     incident_end_seconds: float
     incident_speed_mps: float
     sumo_extra_args: tuple[str, ...]
+    demand_duration_seconds: float = 1800.0
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,21 @@ class ResourceConfig:
 
 
 @dataclass(frozen=True)
+class MethodConfig:
+    low_frequency_rank: int = 16
+    prior_noise_scale: float = 0.1
+    prior_loss_weight: float = 0.1
+    fm_steps: int = 2
+    fm_solver: str = 'euler'
+    picard_iterations: int = 2
+    supervision_horizon: int = 3
+    supervision_increment_updates: int = 100
+    disagreement_samples: int = 3
+    disagreement_weight: float = 0.1
+    evaluation_demand_seed: int = 314159
+
+
+@dataclass(frozen=True)
 class MainlineConfig:
     inputs: InputConfig
     run: RunConfig
@@ -66,6 +82,7 @@ class MainlineConfig:
     resources: ResourceConfig
     semantic_fingerprint: str
     source_path: Path
+    method: MethodConfig = field(default_factory=MethodConfig)
 
     def resolved_snapshot(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -79,6 +96,7 @@ _SECTION_FIELDS: dict[str, frozenset[str]] = {
     "run": frozenset(RunConfig.__dataclass_fields__),
     "simulation": frozenset(SimulationConfig.__dataclass_fields__),
     "resources": frozenset(ResourceConfig.__dataclass_fields__),
+    "method": frozenset(MethodConfig.__dataclass_fields__),
 }
 
 
@@ -96,11 +114,13 @@ def load_config(path: str | Path) -> MainlineConfig:
     run = _parse_run(raw["run"], base_dir)
     simulation = _parse_simulation(raw["simulation"])
     resources = _parse_resources(raw["resources"])
+    method = _parse_method(raw.get('method', {}))
     semantic_fingerprint = _semantic_fingerprint(
         inputs=inputs,
         run=run,
         simulation=simulation,
         resources=resources,
+        method=method,
     )
     return MainlineConfig(
         inputs=inputs,
@@ -109,6 +129,7 @@ def load_config(path: str | Path) -> MainlineConfig:
         resources=resources,
         semantic_fingerprint=semantic_fingerprint,
         source_path=source_path,
+        method=method,
     )
 
 
@@ -118,10 +139,13 @@ def _validate_exact_schema(raw: Mapping[str, Any]) -> None:
         names = ", ".join(sorted(unknown_sections))
         raise ConfigError(f"unknown top-level section(s): {names}")
     missing_sections = set(_SECTION_FIELDS) - set(raw)
+    missing_sections.discard('method')
     if missing_sections:
         names = ", ".join(sorted(missing_sections))
         raise ConfigError(f"missing top-level section(s): {names}")
     for section_name, expected_fields in _SECTION_FIELDS.items():
+        if section_name == 'method' and section_name not in raw:
+            continue
         section = raw[section_name]
         if not isinstance(section, dict):
             raise ConfigError(f"[{section_name}] must be a TOML table")
@@ -130,6 +154,10 @@ def _validate_exact_schema(raw: Mapping[str, Any]) -> None:
             names = ", ".join(sorted(unknown_fields))
             raise ConfigError(f"unknown [{section_name}] field(s): {names}")
         missing_fields = set(expected_fields) - set(section)
+        if section_name == 'simulation':
+            missing_fields.discard('demand_duration_seconds')
+        if section_name == 'method':
+            missing_fields.clear()
         if missing_fields:
             names = ", ".join(sorted(missing_fields))
             raise ConfigError(f"missing [{section_name}] field(s): {names}")
@@ -149,8 +177,8 @@ def _parse_run(raw: Mapping[str, Any], base_dir: Path) -> RunConfig:
         device=_nonempty_string(raw, "device", "run"),
         seed=_integer(raw, "seed", "run"),
         warmup_episodes=_positive_integer(raw, "warmup_episodes", "run"),
-        world_model_initialization_steps=_positive_integer(
-            raw, "world_model_initialization_steps", "run"
+        world_model_initialization_epochs=_positive_integer(
+            raw, "world_model_initialization_epochs", "run"
         ),
         online_training_episodes=_positive_integer(
             raw, "online_training_episodes", "run"
@@ -227,6 +255,9 @@ def _parse_simulation(raw: Mapping[str, Any]) -> SimulationConfig:
         incident_end_seconds=incident_end_seconds,
         incident_speed_mps=incident_speed,
         sumo_extra_args=tuple(sumo_extra_args),
+        demand_duration_seconds=_positive_number(
+            {"demand_duration_seconds": raw.get("demand_duration_seconds", 1800.)},
+            "demand_duration_seconds", "simulation"),
     )
 
 
@@ -257,19 +288,29 @@ def _semantic_fingerprint(
     run: RunConfig,
     simulation: SimulationConfig,
     resources: ResourceConfig,
+    method: MethodConfig,
 ) -> str:
     run_values = asdict(run)
     run_values.pop("output_dir")
     run_values.pop("device")
     payload = {
+        "world_model_initialization": "finite_shuffled_sequence_epochs_v1",
         "decoder_speed_target": "forward_endpoint_mean_v1",
-        "world_model_conditions": "action_context_only_v1",
+        "world_model_conditions": "edge_actions_only_no_global_action_token_or_context_v3",
+        "world_model_transition": "noisy_low_frequency_prior_cached_fm_recursive_v1",
         "imagination_horizon": "eight_windows_full_episode_sampling_v1",
         "nonarrival_penalty": NONARRIVAL_PENALTY,
+        "reward_mode": "global_with_individual_timeout",
+        "global_reward": "event_reward_to_go_exact_seed_cohort_minutes_endpoint_latent_risk_v2",
+        "nonarrival_penalty_scope": "own_vehicle_terminal_mc_return_v1",
+        "policy_execution": "train_stochastic_evaluation_argmax_v1",
+        "advantage_normalization": "global_scale_only_std_floor_1_then_individual_timeout_clip_2_5",
+        "mainline_demand": "independent_od_poisson_counts_uniform_times_v1",
         "network_name": inputs.network_name,
         "run": run_values,
         "simulation": asdict(simulation),
         "resources": asdict(resources),
+        "method": asdict(method),
     }
     encoded = json.dumps(
         _json_compatible(payload),
@@ -277,6 +318,23 @@ def _semantic_fingerprint(
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _parse_method(raw: Mapping[str, Any]) -> MethodConfig:
+    values = {**asdict(MethodConfig()), **raw}
+    integer_fields = ('low_frequency_rank', 'fm_steps', 'picard_iterations',
+                      'supervision_horizon', 'supervision_increment_updates',
+                      'disagreement_samples')
+    parsed = {name: _positive_integer(values, name, 'method') for name in integer_fields}
+    if parsed['disagreement_samples'] < 2:
+        raise ConfigError('[method].disagreement_samples must be at least two')
+    for name in ('prior_noise_scale', 'prior_loss_weight', 'disagreement_weight'):
+        parsed[name] = _nonnegative_number(values, name, 'method')
+    parsed['evaluation_demand_seed'] = _nonnegative_integer(values, 'evaluation_demand_seed', 'method')
+    parsed['fm_solver'] = _nonempty_string(values, 'fm_solver', 'method')
+    if parsed['fm_solver'] not in {'euler', 'picard'}:
+        raise ConfigError('[method].fm_solver must be euler or picard')
+    return MethodConfig(**parsed)
 
 
 def _resolved_path(

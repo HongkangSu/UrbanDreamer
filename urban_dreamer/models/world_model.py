@@ -17,7 +17,6 @@ TRANSFORMER_DEPTH = 6
 TRANSFORMER_HEADS = 4
 REGISTER_TOKENS = 4
 GRAPH_LAYERS = 2
-ACTION_CONTEXT_DIM = 2
 ACTION_EDGE_DIM = 64
 FLOW_SPEED_INDEX = 1
 FLOW_VOLUME_INDEX = 2
@@ -38,6 +37,81 @@ ONLINE_MLP_CHUNK = 16384
 @dataclass(frozen=True)
 class DynamicsOutput:
     latent_velocity: torch.Tensor
+
+
+@dataclass(frozen=True)
+class ConditionEncoding:
+    """A solve-local cache. Never reuse after an optimizer update."""
+
+    edge_tokens: torch.Tensor
+    reference_tokens: torch.Tensor | None = None
+
+
+class LowFrequencyGraphPrior(nn.Module):
+    """Directed message prediction, projected onto a symmetric graph spectrum."""
+
+    def __init__(self, adjacency: torch.Tensor, *, rank: int = 16, noise_scale: float = 0.1) -> None:
+        super().__init__()
+        if rank < 1 or not math.isfinite(noise_scale) or noise_scale < 0:
+            raise ValueError("rank must be positive and noise_scale finite and nonnegative")
+        graph = adjacency.detach().float().cpu()
+        if not bool(torch.isfinite(graph).all()) or bool((graph < 0).any()):
+            raise ValueError("adjacency must be finite and nonnegative")
+        edges = int(graph.shape[0])
+        if edges < 1:
+            raise ValueError("graph must contain at least one edge")
+        # Use the supplied traffic adjacency weights (including its normalization),
+        # symmetrized only for the spectral operator; message passing stays directed.
+        symmetric = (graph + graph.T) / 2
+        degree = symmetric.sum(-1)
+        inv_sqrt = degree.clamp_min(1e-12).rsqrt()
+        laplacian = torch.diag((degree > 0).float()) - inv_sqrt[:, None] * symmetric * inv_sqrt[None, :]
+        selected_rank = min(int(rank), max(1, edges - 1))
+        # Bound eigensolver work for large road graphs instead of forming M eigenvectors.
+        if edges > 128 and selected_rank * 3 < edges:
+            generator = torch.Generator().manual_seed(0)
+            initial = torch.randn(edges, selected_rank, generator=generator)
+            _, basis = torch.lobpcg(laplacian, X=initial, k=selected_rank, largest=False, niter=100, tol=1e-6)
+        else:
+            _, vectors = torch.linalg.eigh(laplacian)
+            basis = vectors[:, :selected_rank]
+        basis = torch.linalg.qr(basis, mode="reduced").Q
+        self.rank = selected_rank
+        self.noise_scale = float(noise_scale)
+        # Preserve exact noise coordinates across checkpoint resumes, including signs
+        # and rotations within repeated-eigenvalue subspaces.
+        self.register_buffer("basis", basis)
+        self.register_buffer("adjacency", graph, persistent=False)
+        self.state_proj = nn.Linear(FLOW_LATENT_DIM, FLOW_LATENT_DIM)
+        self.upstream_proj = nn.Linear(FLOW_LATENT_DIM, FLOW_LATENT_DIM, bias=False)
+        self.downstream_proj = nn.Linear(FLOW_LATENT_DIM, FLOW_LATENT_DIM, bias=False)
+        self.condition_proj = nn.Linear(WORLD_MODEL_DIM, FLOW_LATENT_DIM)
+        self.output = nn.Linear(FLOW_LATENT_DIM, FLOW_LATENT_DIM)
+        nn.init.zeros_(self.output.weight)
+        nn.init.zeros_(self.output.bias)
+
+    def project(self, values: torch.Tensor) -> torch.Tensor:
+        basis = self.basis.to(device=values.device, dtype=values.dtype)
+        return torch.matmul(basis, torch.matmul(basis.T, values))
+
+    def forward(self, z: torch.Tensor, condition: ConditionEncoding) -> torch.Tensor:
+        graph = self.adjacency.to(device=z.device, dtype=z.dtype)
+        downstream = graph / graph.sum(-1, keepdim=True).clamp_min(1e-12)
+        upstream = graph.T / graph.T.sum(-1, keepdim=True).clamp_min(1e-12)
+        hidden = self.state_proj(z)
+        hidden = hidden + torch.matmul(downstream, self.downstream_proj(z))
+        hidden = hidden + torch.matmul(upstream, self.upstream_proj(z))
+        hidden = hidden + self.condition_proj(condition.edge_tokens)
+        return self.project(self.output(F.silu(hidden)))
+
+    def sample_noise(self, z: torch.Tensor, noise: torch.Tensor | None = None) -> torch.Tensor:
+        shape = (*z.shape[:-2], self.rank, FLOW_LATENT_DIM)
+        if noise is None:
+            noise = torch.randn(shape, device=z.device, dtype=z.dtype)
+        if tuple(noise.shape) != shape:
+            raise ValueError(f"noise must have low-frequency coefficient shape {shape}")
+        basis = self.basis.to(device=z.device, dtype=z.dtype)
+        return self.noise_scale * torch.matmul(basis, noise.to(device=z.device, dtype=z.dtype))
 
 
 class EdgeGNNLayer(nn.Module):
@@ -413,12 +487,6 @@ class ActionGNNEncoder(nn.Module):
 
         self.action_input = nn.Linear(1 + self.n_static, ACTION_EDGE_DIM)
         self.action_gnn = nn.ModuleList([EdgeGNNLayer(ACTION_EDGE_DIM) for _ in range(GRAPH_LAYERS)])
-        self.context_mlp = nn.Sequential(
-            nn.Linear(ACTION_CONTEXT_DIM, ACTION_EDGE_DIM),
-            nn.SiLU(),
-            nn.Linear(ACTION_EDGE_DIM, ACTION_EDGE_DIM),
-        )
-        self.action_token = nn.Linear(3 * ACTION_EDGE_DIM, WORLD_MODEL_DIM)
         self.edge_conditioning = nn.Linear(ACTION_EDGE_DIM, WORLD_MODEL_DIM)
 
     def _augment_with_static(self, values: torch.Tensor) -> torch.Tensor:
@@ -434,35 +502,13 @@ class ActionGNNEncoder(nn.Module):
             hidden = layer(hidden, adjacency)
         return hidden
 
-    def forward(
-        self,
-        action: torch.Tensor,
-        *,
-        context: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, action: torch.Tensor) -> torch.Tensor:
         if action.dim() != 3:
             raise ValueError("action must have shape (B, T, E)")
         if int(action.shape[-1]) != self.n_edges:
             raise ValueError(f"expected {self.n_edges} edge-aligned actions, got {int(action.shape[-1])}")
-        if context.dim() != 3 or tuple(context.shape[:2]) != tuple(action.shape[:2]) or int(context.shape[-1]) != ACTION_CONTEXT_DIM:
-            raise ValueError(
-                f"context must have shape (B, T, {ACTION_CONTEXT_DIM}), got {tuple(context.shape)}"
-            )
-
         action_hidden = self._run_stack(self.action_input, self.action_gnn, action)
-        context_hidden = self.context_mlp(context)
-
-        pooled = torch.cat(
-            [
-                action_hidden.mean(dim=2),
-                action_hidden.max(dim=2).values,
-                context_hidden,
-            ],
-            dim=-1,
-        )
-        action_token = self.action_token(pooled).unsqueeze(2)
-        edge_tokens = self.edge_conditioning(action_hidden)
-        return action_token, edge_tokens
+        return self.edge_conditioning(action_hidden)
 
 
 class Dynamics(nn.Module):
@@ -471,11 +517,15 @@ class Dynamics(nn.Module):
         *,
         adjacency: torch.Tensor,
         static_features: torch.Tensor,
+        low_frequency_rank: int = 16,
+        prior_noise_scale: float = 0.1,
     ) -> None:
         super().__init__()
         self.n_edges = int(adjacency.shape[0])
         self.action_encoder = ActionGNNEncoder(adjacency=adjacency, static_features=static_features)
+        self.graph_prior = LowFrequencyGraphPrior(adjacency, rank=low_frequency_rank, noise_scale=prior_noise_scale)
         self.spatial_proj = nn.Linear(FLOW_LATENT_DIM, WORLD_MODEL_DIM)
+        self.reference_proj = nn.Linear(FLOW_LATENT_DIM, WORLD_MODEL_DIM, bias=False)
         self.flow_time = FlowTimeEmbedder()
         self.register_tokens = nn.Parameter(torch.empty(REGISTER_TOKENS, WORLD_MODEL_DIM))
         nn.init.normal_(self.register_tokens, std=0.02)
@@ -484,11 +534,10 @@ class Dynamics(nn.Module):
         nn.init.zeros_(self.edge_action_proj.weight)
         nn.init.zeros_(self.edge_action_proj.bias)
 
-        self.action_slice = slice(0, 1)
-        self.flow_time_slice = slice(1, 2)
-        self.spatial_slice = slice(2, 2 + self.n_edges)
-        self.register_slice = slice(2 + self.n_edges, 2 + self.n_edges + REGISTER_TOKENS)
-        self.transformer = BlockCausalTransformer(2 + self.n_edges + REGISTER_TOKENS)
+        self.flow_time_slice = slice(0, 1)
+        self.spatial_slice = slice(1, 1 + self.n_edges)
+        self.register_slice = slice(1 + self.n_edges, 1 + self.n_edges + REGISTER_TOKENS)
+        self.transformer = BlockCausalTransformer(1 + self.n_edges + REGISTER_TOKENS)
 
         self.flow_head = nn.Linear(WORLD_MODEL_DIM, FLOW_LATENT_DIM)
         nn.init.zeros_(self.flow_head.weight)
@@ -541,9 +590,9 @@ class Dynamics(nn.Module):
         self,
         action: torch.Tensor,
         *,
-        context: torch.Tensor,
         packed_latents: torch.Tensor,
         flow_time: torch.Tensor,
+        condition: ConditionEncoding | None = None,
     ) -> DynamicsOutput:
         if packed_latents.dim() != 4 or tuple(packed_latents.shape[-2:]) != (self.n_edges, FLOW_LATENT_DIM):
             raise ValueError(
@@ -553,30 +602,136 @@ class Dynamics(nn.Module):
         batch, time_steps, _, _ = packed_latents.shape
         expected_edges = (batch, time_steps, self.n_edges)
         _validate_transition_tensor(action, name="action", expected_shape=expected_edges)
-        if tuple(context.shape) != (batch, time_steps, ACTION_CONTEXT_DIM):
-            raise ValueError(
-                f"context must have shape {(batch, time_steps, ACTION_CONTEXT_DIM)}, got {tuple(context.shape)}"
-            )
         if tuple(flow_time.shape) != (batch, time_steps):
             raise ValueError(f"flow_time must have shape {(batch, time_steps)}, got {tuple(flow_time.shape)}")
 
         spatial_tokens = self.spatial_proj(packed_latents)
-        action_token, graph_edge_tokens = self.action_encoder(
-            action,
-            context=context,
-        )
-        spatial_tokens = self._inject_actions(spatial_tokens, action, self.edge_action_proj)
-        spatial_tokens = spatial_tokens + graph_edge_tokens
+        if condition is None:
+            condition = self.encode_condition(action)
+        spatial_tokens = spatial_tokens + condition.edge_tokens
+        if condition.reference_tokens is not None:
+            spatial_tokens = spatial_tokens + condition.reference_tokens
 
         register_tokens = self.register_tokens.view(1, 1, REGISTER_TOKENS, WORLD_MODEL_DIM)
         register_tokens = register_tokens.expand(batch, time_steps, -1, -1)
         time_token = self.flow_time(flow_time.to(dtype=spatial_tokens.dtype))
-        tokens = torch.cat([action_token, time_token, spatial_tokens, register_tokens], dim=2)
+        tokens = torch.cat([time_token, spatial_tokens, register_tokens], dim=2)
         hidden = self.transformer(add_sinusoidal_positions(tokens))
         spatial_hidden = hidden[:, :, self.spatial_slice, :]
         return DynamicsOutput(
             latent_velocity=self.flow_head(spatial_hidden),
         )
+
+    def encode_condition(self, action: torch.Tensor) -> ConditionEncoding:
+        edge_tokens = self.action_encoder(action)
+        edge_tokens = self._inject_actions(edge_tokens, action, self.edge_action_proj)
+        return ConditionEncoding(edge_tokens)
+
+    def prior_start(
+        self, z: torch.Tensor, condition: ConditionEncoding, noise: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, ConditionEncoding]:
+        increment = self.graph_prior(z, condition)
+        coarse = z + increment
+        cached = ConditionEncoding(condition.edge_tokens, self.reference_proj(coarse))
+        return coarse + self.graph_prior.sample_noise(z, noise), increment, cached
+
+    def solve(
+        self, start: torch.Tensor, action: torch.Tensor, condition: ConditionEncoding,
+        *, steps: int = 2, solver: str = "euler", picard_iterations: int | None = None,
+    ) -> torch.Tensor:
+        if steps < 1 or int(steps) != steps:
+            raise ValueError("steps must be a positive integer")
+        if solver not in {"euler", "picard"}:
+            raise ValueError("solver must be 'euler' or 'picard'")
+        batch, intervals, edges, width = start.shape
+        if solver == "euler":
+            state = start
+            for node in range(steps):
+                time = torch.full((batch, intervals), node / steps, device=start.device, dtype=start.dtype)
+                velocity = self(action, packed_latents=state, flow_time=time,
+                                condition=condition).latent_velocity
+                state = state + velocity / steps
+            return state
+        iterations = steps if picard_iterations is None else picard_iterations
+        if iterations < 1 or int(iterations) != iterations:
+            raise ValueError("picard_iterations must be a positive integer")
+
+        def repeat_nodes(value: torch.Tensor) -> torch.Tensor:
+            # ODE nodes are independent batch members, never causal physical-time tokens.
+            return value.unsqueeze(0).expand(steps, *value.shape).reshape(steps * batch, *value.shape[1:])
+
+        repeated_condition = ConditionEncoding(
+            repeat_nodes(condition.edge_tokens),
+            None if condition.reference_tokens is None else repeat_nodes(condition.reference_tokens),
+        )
+        time = torch.arange(steps, device=start.device, dtype=start.dtype) / steps
+        time = time[:, None, None].expand(steps, batch, intervals).reshape(steps * batch, intervals)
+        repeated_action = repeat_nodes(action)
+        trajectory = start.unsqueeze(0).expand(steps + 1, *start.shape)
+        for _ in range(iterations):
+            velocity = self(repeated_action,
+                            packed_latents=trajectory[:-1].reshape(steps * batch, intervals, edges, width),
+                            flow_time=time, condition=repeated_condition).latent_velocity
+            velocity = velocity.reshape(steps, *start.shape)
+            trajectory = torch.cat([start.unsqueeze(0), start.unsqueeze(0) + velocity.cumsum(0) / steps], dim=0)
+        return trajectory[-1]
+
+    def transition(
+        self, z: torch.Tensor, action: torch.Tensor, *, noise: torch.Tensor | None = None,
+        steps: int = 2, solver: str = "euler", picard_iterations: int | None = None,
+    ) -> torch.Tensor:
+        squeezed = z.dim() == 3
+        if squeezed:
+            z, action = z.unsqueeze(1), action.unsqueeze(1)
+            if noise is not None:
+                noise = noise.unsqueeze(1)
+        if z.dim() != 4 or tuple(z.shape[-2:]) != (self.n_edges, FLOW_LATENT_DIM):
+            raise ValueError("z must have shape (B, E, 64) or (B, T, E, 64)")
+        _validate_transition_tensor(action, name="action", expected_shape=tuple(z.shape[:-1]))
+        condition = self.encode_condition(action)
+        start, _, condition = self.prior_start(z, condition, noise)
+        result = self.solve(start, action, condition, steps=steps, solver=solver,
+                            picard_iterations=picard_iterations)
+        return result.squeeze(1) if squeezed else result
+
+    def latent_disagreement(
+        self, z: torch.Tensor, action: torch.Tensor, *, n_samples: int = 2,
+        noise: torch.Tensor | None = None, steps: int = 2, solver: str = "euler",
+        picard_iterations: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if n_samples < 2 or int(n_samples) != n_samples:
+            raise ValueError("latent disagreement requires at least two samples")
+        squeezed = z.dim() == 3
+        if squeezed:
+            z, action = z.unsqueeze(1), action.unsqueeze(1)
+            if noise is not None:
+                noise = noise.unsqueeze(2)
+        if z.dim() != 4 or tuple(z.shape[-2:]) != (self.n_edges, FLOW_LATENT_DIM):
+            raise ValueError("z must have shape (B, E, 64) or (B, T, E, 64)")
+        _validate_transition_tensor(action, name="action", expected_shape=tuple(z.shape[:-1]))
+        condition = self.encode_condition(action)
+        increment = self.graph_prior(z, condition)
+        coarse = z + increment
+
+        def repeat_samples(value: torch.Tensor) -> torch.Tensor:
+            return value.unsqueeze(0).expand(n_samples, *value.shape).reshape(n_samples * z.shape[0], *value.shape[1:])
+
+        repeated_z = repeat_samples(z)
+        if noise is not None:
+            expected = (n_samples, *z.shape[:-2], self.graph_prior.rank, FLOW_LATENT_DIM)
+            if tuple(noise.shape) != expected:
+                raise ValueError(f"noise must have shape {expected}")
+            noise = noise.reshape(n_samples * z.shape[0], *noise.shape[2:])
+        starts = repeat_samples(coarse) + self.graph_prior.sample_noise(repeated_z, noise)
+        repeated_condition = ConditionEncoding(
+            repeat_samples(condition.edge_tokens), repeat_samples(self.reference_proj(coarse)))
+        samples = self.solve(starts, repeat_samples(action), repeated_condition,
+                             steps=steps, solver=solver, picard_iterations=picard_iterations)
+        samples = samples.reshape(n_samples, *z.shape)
+        if squeezed:
+            samples = samples.squeeze(2)
+        edge_variance = samples.float().var(dim=0, unbiased=True).mean(dim=-1)
+        return samples, edge_variance.mean(dim=-1), edge_variance
 
 
 class ActiveVehicleFractionReadout(nn.Module):
@@ -664,10 +819,12 @@ class ActiveVehicleFractionReadout(nn.Module):
 
 
 class UrbanDreamerWorldModel(nn.Module):
-    def __init__(self, *, adjacency: torch.Tensor, static_features: torch.Tensor) -> None:
+    def __init__(self, *, adjacency: torch.Tensor, static_features: torch.Tensor,
+                 low_frequency_rank: int = 16, prior_noise_scale: float = 0.1) -> None:
         super().__init__()
         self.flow_projector = FlowProjector(adjacency=adjacency)
-        self.dynamics = Dynamics(adjacency=adjacency, static_features=static_features)
+        self.dynamics = Dynamics(adjacency=adjacency, static_features=static_features,
+                                 low_frequency_rank=low_frequency_rank, prior_noise_scale=prior_noise_scale)
         self.active_vehicle_fraction_readout = ActiveVehicleFractionReadout()
 
     def encode(self, flow_features: torch.Tensor) -> torch.Tensor:
@@ -675,6 +832,13 @@ class UrbanDreamerWorldModel(nn.Module):
 
     def decode(self, latent_edges: torch.Tensor) -> torch.Tensor:
         return self.flow_projector.decode(latent_edges)
+
+    def transition(self, z: torch.Tensor, action: torch.Tensor, **kwargs) -> torch.Tensor:
+        return self.dynamics.transition(z, action, **kwargs)
+
+    def latent_disagreement(self, z: torch.Tensor, action: torch.Tensor,
+                            **kwargs) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return self.dynamics.latent_disagreement(z, action, **kwargs)
 
     def set_initial_chunk_profile(self) -> None:
         self.dynamics.set_initial_chunk_profile()
@@ -779,13 +943,78 @@ def episode_t_all_supervision_loss(
     }
 
 
+def recursive_fm_loss(
+    dynamics: Dynamics, *, z_sequence: torch.Tensor, action: torch.Tensor,
+    steps: int = 2, solver: str = "euler", picard_iterations: int | None = None,
+    prior_weight: float = 0.1, depth_weights: torch.Tensor | None = None,
+    noise: torch.Tensor | None = None, flow_time: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
+    """Recorded-condition recursion; later losses retain gradients through earlier solves.
+
+    Reference encodings, prior increment targets and target velocities are detached.
+    Predicted stochastic endpoints have no endpoint reconstruction/MSE objective.
+    """
+    if z_sequence.dim() != 4 or tuple(z_sequence.shape[-2:]) != (dynamics.n_edges, FLOW_LATENT_DIM):
+        raise ValueError("z_sequence must have shape (B, H+1, E, 64)")
+    batch, total_steps, edges, _ = z_sequence.shape
+    horizon = total_steps - 1
+    if horizon < 1:
+        raise ValueError("recursive supervision requires at least one transition")
+    _validate_transition_tensor(action, name="action", expected_shape=(batch, horizon, edges))
+    if not math.isfinite(prior_weight) or prior_weight < 0:
+        raise ValueError("prior_weight must be finite and nonnegative")
+    if flow_time is None:
+        flow_time = torch.rand(batch, horizon, device=z_sequence.device, dtype=z_sequence.dtype)
+    _validate_transition_tensor(flow_time, name="flow_time", expected_shape=(batch, horizon))
+    if bool(((flow_time < 0) | (flow_time > 1) | ~torch.isfinite(flow_time)).any()):
+        raise ValueError("flow_time must be finite and lie in [0, 1]")
+    if noise is not None:
+        _validate_transition_tensor(noise, name="noise",
+            expected_shape=(batch, horizon, dynamics.graph_prior.rank, FLOW_LATENT_DIM))
+    if depth_weights is None:
+        weights = torch.ones(horizon, device=z_sequence.device, dtype=torch.float32)
+    else:
+        weights = torch.as_tensor(depth_weights, device=z_sequence.device, dtype=torch.float32).detach()
+    if tuple(weights.shape) != (horizon,) or bool((~torch.isfinite(weights) | (weights < 0)).any()) or weights.sum() <= 0:
+        raise ValueError("depth_weights must be nonnegative finite horizon weights with positive sum")
+    current = z_sequence[:, :1]
+    references = z_sequence[:, 1:].detach()
+    flow_losses, prior_losses, predictions = [], [], []
+    for index in range(horizon):
+        step_action = action[:, index:index+1]
+        condition = dynamics.encode_condition(step_action)
+        step_noise = None if noise is None else noise[:, index:index+1]
+        start, increment, condition = dynamics.prior_start(current, condition, step_noise)
+        target = references[:, index:index+1]
+        tau = flow_time[:, index:index+1]
+        interpolated = (1 - tau[..., None, None]) * start + tau[..., None, None] * target
+        target_velocity = (target - start).detach()
+        velocity = dynamics(step_action, packed_latents=interpolated,
+                            flow_time=tau, condition=condition).latent_velocity
+        flow_losses.append((velocity.float() - target_velocity.float()).square().mean())
+        prior_target = dynamics.graph_prior.project(target - current).detach()
+        prior_losses.append((increment.float() - prior_target.float()).square().mean())
+        current = dynamics.solve(start, step_action, condition, steps=steps, solver=solver,
+                                 picard_iterations=picard_iterations)
+        predictions.append(current)
+    flow_mse = (torch.stack(flow_losses) * weights).sum() / weights.sum()
+    prior_mse = (torch.stack(prior_losses) * weights).sum() / weights.sum()
+    loss = flow_mse + prior_weight * prior_mse
+    return loss, {"flow_mse": flow_mse.detach(), "weighted_flow_mse": flow_mse.detach(),
+                  "prior_mse": prior_mse.detach(), "prior_loss": (prior_weight * prior_mse).detach(),
+                  "t_mean": flow_time.mean().detach(),
+                  "supervision_horizon": torch.tensor(horizon, device=z_sequence.device)}, torch.cat(predictions, dim=1)
+
+
 def cfm_loss(
     dynamics: Dynamics | nn.Module,
     *,
     z_sequence: torch.Tensor,
     action: torch.Tensor,
-    context: torch.Tensor,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    if isinstance(dynamics, Dynamics):
+        loss, metrics, _ = recursive_fm_loss(dynamics, z_sequence=z_sequence, action=action)
+        return loss, metrics
     if z_sequence.dim() != 4 or int(z_sequence.shape[-1]) != FLOW_LATENT_DIM or int(z_sequence.shape[1]) < 2:
         raise ValueError(
             "z_sequence must have shape (B, T, E, 64) with T >= 2, "
@@ -795,11 +1024,6 @@ def cfm_loss(
     transition_steps = total_steps - 1
     edge_shape = (batch, transition_steps, edge_count)
     _validate_transition_tensor(action, name="action", expected_shape=edge_shape)
-    if tuple(context.shape) != (batch, transition_steps, ACTION_CONTEXT_DIM):
-        raise ValueError(
-            f"context must have shape {(batch, transition_steps, ACTION_CONTEXT_DIM)}, got {tuple(context.shape)}"
-        )
-
     source_z = z_sequence[:, :-1].contiguous()
     target_z = z_sequence[:, 1:].contiguous()
     flow_time = torch.rand(batch, transition_steps, device=z_sequence.device, dtype=torch.float32)
@@ -808,7 +1032,6 @@ def cfm_loss(
 
     output = dynamics(
         action,
-        context=context,
         packed_latents=x_t,
         flow_time=flow_time,
     )
@@ -828,7 +1051,6 @@ def cfm_predict_one_timestep(
     *,
     past_latents: torch.Tensor,
     action: torch.Tensor,
-    context: torch.Tensor,
 ) -> torch.Tensor:
     if past_latents.dim() != 4 or int(past_latents.shape[-1]) != FLOW_LATENT_DIM or int(past_latents.shape[1]) < 1:
         raise ValueError(
@@ -839,12 +1061,11 @@ def cfm_predict_one_timestep(
     batch, _, edge_count, _ = current.shape
     edge_shape = (batch, 1, edge_count)
     _validate_transition_tensor(action, name="action", expected_shape=edge_shape)
-    if tuple(context.shape) != (batch, 1, ACTION_CONTEXT_DIM):
-        raise ValueError(f"context must have shape {(batch, 1, ACTION_CONTEXT_DIM)}, got {tuple(context.shape)}")
+    if isinstance(dynamics, Dynamics):
+        return dynamics.transition(current, action)
 
     velocity = dynamics(
         action,
-        context=context,
         packed_latents=current,
         flow_time=torch.zeros((batch, 1), device=current.device, dtype=torch.float32),
     ).latent_velocity
@@ -855,6 +1076,7 @@ __all__ = [
     "UrbanDreamerWorldModel",
     "cfm_loss",
     "cfm_predict_one_timestep",
+    "recursive_fm_loss",
     "decoder_bpr_supervision_loss",
     "decoder_reconstruction_loss",
     "episode_t_all_supervision_loss",

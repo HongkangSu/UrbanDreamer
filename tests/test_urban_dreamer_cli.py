@@ -19,7 +19,7 @@ output_dir = "output"
 device = "cpu"
 seed = 42
 warmup_episodes = 1
-world_model_initialization_steps = 1
+world_model_initialization_epochs = 1
 online_training_episodes = 1
 evaluation_episodes = 1
 

@@ -12,7 +12,7 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from tools.train_toy_actor_critic import RealActorCritic
+from tools.train_toy_actor_critic import CHECKPOINT_FORMAT, RealActorCritic
 from urban_dreamer.traffic.environment import SumoSession
 
 
@@ -24,46 +24,45 @@ def main():
     args = parser.parse_args()
     output = args.input_dir.resolve()
     checkpoint = torch.load(output / args.checkpoint, map_location='cpu', weights_only=False)
+    if checkpoint.get('format') != CHECKPOINT_FORMAT:
+        raise ValueError(f'unsupported checkpoint format; expected {CHECKPOINT_FORMAT}')
     options = argparse.Namespace(**checkpoint['args'])
     options.device = 'cpu'
     runner = RealActorCritic(options)
     runner.actor.load_state_dict(checkpoint['actor'])
-    if runner.critic is not None:
-        runner.critic.load_state_dict(checkpoint['critic'])
-    traces = []
-    original = SumoSession._apply_decisions
-    def observe(session, callback, flow):
-        decisions = original(session, callback, flow)
-        for decision in decisions:
-            vehicle = session._vehicles[decision.vehicle_id]
-            traces.append(dict(vehicle_id=decision.vehicle_id, current_edge=decision.current_edge,
-                next_edge=decision.next_edge, time=decision.decision_time,
-                actual_departure_time=vehicle['actual_departure_time']))
-        return decisions
+    session_class = runner.session_factory.func if runner.session_factory is not None else SumoSession
+    paths = defaultdict(list)
+    travel_times = {}
+    original = session_class._observe
+    original_close = session_class.close
+    def capture_close(session):
+        travel_times.update(session.travel_times)
+        return original_close(session)
+    def observe(session, departure_counts):
+        original(session, departure_counts)
+        for vehicle_id, vehicle in session._vehicles.items():
+            if vehicle['departed']:
+                path = paths[vehicle_id]
+                edge = vehicle['current_edge']
+                if not path or path[-1] != edge:
+                    path.append(edge)
     result = {'checkpoint_episode': checkpoint['episode'], 'seed': args.seed, 'policies': {}}
-    SumoSession._apply_decisions = observe
+    session_class._observe = observe
+    session_class.close = capture_close
     try:
         for policy in ('deterministic', 'stochastic'):
-            traces.clear()
-            rows, metrics = runner.run_episode(policy=policy, seed=args.seed, collect=True)
+            paths.clear()
+            travel_times.clear()
+            _, metrics = runner.run_episode(policy=policy, seed=args.seed)
             if metrics['unfinished']:
                 raise ValueError('route travel-time analysis requires complete trips')
-            grouped = defaultdict(list)
-            for event in traces:
-                grouped[event['vehicle_id']].append(event)
-            event_reward = defaultdict(float)
-            for row in rows:
-                event_reward[runner.topology.vehicles[row['vehicle_id']].vehicle_id] += row['reward']
             records = []
-            for vehicle in runner.topology.vehicles:
-                decisions = grouped[vehicle.vehicle_id]
+            for vehicle in runner.episode_topology.vehicles:
                 origin = runner.network.edge_to_index[runner.topology.origins[vehicle.origin_index]]
                 destination = runner.network.edge_to_index[runner.topology.destinations[vehicle.destination_index]]
-                path = [origin]
-                for decision in decisions:
-                    if decision['current_edge'] != path[-1]:
-                        raise AssertionError('discontinuous executed route trace')
-                    path.append(decision['next_edge'])
+                path = paths[vehicle.vehicle_id]
+                if not path or path[0] != origin or path[-1] != destination:
+                    raise AssertionError('incomplete observed route trace')
                 lengths = [runner.candidates.junction(a,b)[0] for a,b in zip(path,path[1:])]
                 times = [runner.candidates.junction(a,b)[0]/runner.candidates.junction(a,b)[1] for a,b in zip(path,path[1:])]
                 distance = float(sum(runner.network.lengths_m[e] for e in path) + sum(lengths))
@@ -74,8 +73,7 @@ def main():
                 category = ('X_to_R' if 'X_to_R' in edge_names else 'Y_to_R' if 'Y_to_R' in edge_names
                             else 'direct_R' if any(e in edge_names for e in ('A_to_R','B_to_R'))
                             else 'X_to_M' if 'X_to_M' in edge_names else 'Y_to_M')
-                # All Toy trips complete in this diagnostic; account for departure-observation lag.
-                observed_trip = -30. * event_reward[vehicle.vehicle_id] + decisions[0]['time'] - decisions[0]['actual_departure_time']
+                observed_trip = travel_times[vehicle.vehicle_id]
                 records.append(dict(vehicle_id=vehicle.vehicle_id, category=category, edges=edge_names,
                     repeated_edge=len(path)!=len(set(path)), destination_reached=path[-1]==destination,
                     distance_m=distance, shortest_distance_m=min_distance, extra_distance_m=distance-min_distance,
@@ -95,7 +93,8 @@ def main():
             print(json.dumps(dict(policy=policy, checkpoint_episode=checkpoint['episode'], groups=groups,
                 repeated_edges=result['policies'][policy]['repeated_edge_count'])), flush=True)
     finally:
-        SumoSession._apply_decisions = original
+        session_class._observe = original
+        session_class.close = original_close
     path = output / f'route_diagnostic_episode_{checkpoint["episode"]}.json'
     path.write_text(json.dumps(result, indent=2))
     print(str(path), flush=True)

@@ -1,0 +1,24 @@
+{
+  "task": "UrbanDreamer noisy low-frequency graph prior and event global returns",
+  "status": "completed",
+  "verification": "294 passed; real Toy paired demands; real naturally zero population; compile/diff and all TOML configurations passed",
+  "source_thread_id": "01a0f845-d143-73c0-b6a0-3ef89c628b9f",
+  "fork_thread_id": "01a0f847-316d-7660-be3a-877d90f95a0a",
+  "fork_behavior": "History fork created without a second competing implementation turn; implementation continued in the user-requested fresh context with bounded native helpers.",
+  "tmux_session": "urban_dreamer_fm_prior",
+  "workspace": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer",
+  "preservation": "Existing uncommitted Poisson demand, realized episode population, next-hop, baseline and recovery changes retained; other concurrently added files left untouched.",
+  "implementation": [
+    "Supervised directed graph increment projected into a symmetric low-frequency spectrum; Gaussian noise restricted to the same spectrum",
+    "Shared FM transition API with solve-local invariant-condition cache, few-step Euler and batched-node Picard",
+    "Recorded-condition recursive FM/prior supervision with detached reference targets and retained gradients through earlier solves",
+    "Same-condition unbiased latent sample variance with frozen model parameters during policy update",
+    "Exact active seed cohort vehicle-time costs and event timestamp global reward-to-go, endpoint risk once per complete interval",
+    "Actual originating episode N retained, no future explicit vehicles in imagination, zero-demand episodes retained",
+    "Fixed independent evaluation demand/SUMO seeds, persisted demand hashes, episode and vehicle weighted travel-time summaries",
+    "Method semantic fingerprint, persisted spectrum, RNG and update-count curriculum checkpoint restoration"
+  ],
+  "real_sumo_report": "outputs/fm_prior_verification_20261001/report.json",
+  "solver_benchmark": "outputs/fm_prior_verification_20261001/solver_benchmark.json",
+  "full_suite_report": "outputs/fm_prior_verification_20261001/verification.json"
+}

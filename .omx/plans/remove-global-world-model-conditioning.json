@@ -1,0 +1,15 @@
+{
+  "scope": "Remove global action token and context from world-model conditioning only",
+  "status": "completed",
+  "verification_artifact": "outputs/fm_prior_no_global_context_20261001/verification.json",
+  "authorized_behavior_change": "FM dynamics and graph prior depend on latent state, edge-aligned actions, graph/static features and FM integration time; episode progress and active fraction are no longer explicit world-model inputs",
+  "preserve": ["actor/critic context", "physical clocks and deadlines", "actual episode N normalization", "replay context for policies", "edge-aligned action injection", "FM time", "low-frequency prior/noise", "Euler/Picard and recursive gradient contracts"],
+  "passes": [
+    "Run existing model, event, imagination and integration regressions before removal",
+    "Delete global action/context encoder branches and token slot; simplify condition cache and all FM APIs",
+    "Update mainline training callers, checkpoint semantic fingerprint and stale documentation",
+    "Verify removed API/parameters, retained action/time gradients, context-independent world loss, checkpoint incompatibility, physical event contracts and real Toy lifecycle"
+  ],
+  "dependencies": "No added dependencies",
+  "review": "Independent final read-only review of deletion completeness and preserved policy context"
+}

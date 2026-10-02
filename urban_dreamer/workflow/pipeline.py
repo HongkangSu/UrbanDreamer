@@ -22,10 +22,19 @@ class MainlineRunError(RuntimeError):
     """Raised when the single supported run cannot safely start or resume."""
 
 
+# Units between full boundary checkpoints per phase; None saves only at phase end.
+_CHECKPOINT_SAVE_INTERVALS: dict[CheckpointPhase, int | None] = {
+    CheckpointPhase.WARMUP: 1,
+    CheckpointPhase.WORLD_MODEL_INITIALIZATION: 1,
+    CheckpointPhase.ONLINE_TRAINING: 100,
+    CheckpointPhase.FINAL_EVALUATION: 1,
+}
+
+
 class MainlineTrainerProtocol(Protocol):
     def collect_warmup_episode(self, episode_index: int) -> dict[str, Any]: ...
 
-    def initialize_world_model_step(self, step_index: int) -> dict[str, Any]: ...
+    def initialize_world_model_epoch(self, epoch_index: int) -> dict[str, Any]: ...
 
     def train_online_episode(self, episode_index: int) -> dict[str, Any]: ...
 
@@ -125,13 +134,8 @@ class MainlinePipeline:
             ),
             (
                 CheckpointPhase.WORLD_MODEL_INITIALIZATION,
-                (
-                    self.config.run.world_model_initialization_steps
-                    + self.config.resources.world_model_gradient_accumulation_steps
-                    - 1
-                )
-                // self.config.resources.world_model_gradient_accumulation_steps,
-                trainer.initialize_world_model_step,
+                self.config.run.world_model_initialization_epochs,
+                trainer.initialize_world_model_epoch,
             ),
             (
                 CheckpointPhase.ONLINE_TRAINING,
@@ -156,13 +160,20 @@ class MainlinePipeline:
                     f"checkpoint cursor {cursor} exceeds {current_phase.value} "
                     f"target {target_units}"
                 )
+            save_interval = _CHECKPOINT_SAVE_INTERVALS[current_phase]
             for unit_index in range(cursor, target_units):
                 execute_unit(unit_index)
-                self._save_boundary(
-                    trainer,
-                    phase=current_phase,
-                    next_unit=unit_index + 1,
-                )
+                # A full boundary checkpoint serializes the entire replay and
+                # is saved after each initialization epoch. Online training
+                # checkpoints sparsely; the final unit of every
+                # phase is always saved (followed by the next-phase boundary).
+                if (save_interval is not None and (unit_index + 1) % save_interval == 0) \
+                        or unit_index + 1 == target_units:
+                    self._save_boundary(
+                        trainer,
+                        phase=current_phase,
+                        next_unit=unit_index + 1,
+                    )
             next_phase = (
                 stages[index + 1][0]
                 if index + 1 < len(stages)

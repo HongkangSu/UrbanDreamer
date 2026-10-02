@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, fields
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 import numpy as np
 import torch
 
 
-REPLAY_SCHEMA_VERSION = 3
+REPLAY_SCHEMA_VERSION = 4
 
 
 def _tensor(value: Any, *, name: str, shape: tuple[int, ...] | None = None) -> torch.Tensor:
@@ -104,6 +104,7 @@ class SequenceBatch:
     episode_complete: torch.Tensor
     episode: torch.Tensor
     start_index: torch.Tensor
+    total_vehicle_count: torch.Tensor
 
 
 class ReplayBuffer:
@@ -151,18 +152,25 @@ class ReplayBuffer:
 
     def append_episode(
         self, transitions: Sequence[MacroTransition], *, total_travel_minutes: float,
+        total_vehicle_count: int,
         require_complete: bool = False,
     ) -> bool:
         rows = tuple(row if isinstance(row, MacroTransition) else MacroTransition(**row) for row in transitions)
         if not rows:
             return False
+        if (isinstance(total_vehicle_count, bool) or not isinstance(total_vehicle_count, (int, np.integer))
+                or total_vehicle_count < 0):
+            raise ValueError('total_vehicle_count must be a non-negative integer')
+        if total_vehicle_count == 0 and any(self._is_active(row) for row in rows):
+            raise ValueError('zero-population episodes cannot contain active traffic')
         self._validate_episode(rows)
         if require_complete and not rows[-1].terminal:
             return False
         total = float(total_travel_minutes)
         if not np.isfinite(total) or total < 0:
             raise ValueError('total_travel_minutes must be finite and non-negative')
-        self._episodes.append({'storage_id': self._next_storage_id, 'transitions': rows, 'total_travel_minutes': total})
+        self._episodes.append({'storage_id': self._next_storage_id, 'transitions': rows,
+                               'total_travel_minutes': total, 'total_vehicle_count': int(total_vehicle_count)})
         self._next_storage_id += 1
         if self.max_episodes is not None:
             self._episodes = self._episodes[-self.max_episodes:]
@@ -208,6 +216,21 @@ class ReplayBuffer:
         picks = [candidates[int(index)] for index in rng.integers(len(candidates), size=batch_size)]
         return self._batch_from_picks(picks)
 
+    def iter_epoch(self, batch_size: int, rng: np.random.Generator) -> Iterator[SequenceBatch]:
+        """Visit each eligible sequence start once, retaining a final partial batch.
+
+        Independent of the cycling online sampler. Epoch-boundary checkpoints
+        restore the RNG before creating the next permutation.
+        """
+        batch_size = _positive_integer(batch_size, 'batch_size')
+        candidates = self._candidates()
+        if not candidates:
+            raise ValueError('cannot iterate an empty replay buffer')
+        order = rng.permutation(len(candidates))
+        for start in range(0, len(order), batch_size):
+            yield self._batch_from_picks([candidates[int(index)]
+                                          for index in order[start:start + batch_size]])
+
     def sample_batch(self, batch_size: int, rng: np.random.Generator) -> SequenceBatch:
         batch_size = _positive_integer(batch_size, 'batch_size')
         candidates = self._candidates()
@@ -240,6 +263,7 @@ class ReplayBuffer:
             episode_complete=torch.tensor([by_id[key]['transitions'][-1].terminal for key, _ in picks], dtype=torch.bool),
             episode=torch.tensor([rows[0].episode for rows in windows]),
             start_index=torch.tensor([start for _, start in picks]),
+            total_vehicle_count=torch.tensor([by_id[key]['total_vehicle_count'] for key, _ in picks], dtype=torch.long),
         )
 
     def state_dict(self) -> dict[str, Any]:
@@ -248,6 +272,7 @@ class ReplayBuffer:
             'sequence_length': self.sequence_length, 'max_episodes': self.max_episodes,
             'active_only': self.active_only,
             'episodes': [{'storage_id': episode['storage_id'], 'total_travel_minutes': episode['total_travel_minutes'],
+                          'total_vehicle_count': episode['total_vehicle_count'],
                           'transitions': [row.state_dict() for row in episode['transitions']]} for episode in self._episodes],
             'next_storage_id': self._next_storage_id,
             'sample_order': [list(key) for key in self._sample_order], 'sample_cursor': self._sample_cursor,
@@ -262,8 +287,11 @@ class ReplayBuffer:
             raise ValueError('replay configuration mismatch')
         restored = ReplayBuffer(self.sequence_length, self.max_episodes, active_only=self.active_only)
         for raw in state['episodes']:
+            if set(raw) != {'storage_id', 'total_travel_minutes', 'total_vehicle_count', 'transitions'}:
+                raise ValueError('replay episode has an invalid population schema')
             rows = tuple(MacroTransition.from_state_dict(row) for row in raw['transitions'])
-            if not restored.append_episode(rows, total_travel_minutes=raw['total_travel_minutes']):
+            if not restored.append_episode(rows, total_travel_minutes=raw['total_travel_minutes'],
+                                           total_vehicle_count=raw['total_vehicle_count']):
                 raise ValueError('replay contains an empty episode')
             restored._episodes[-1]['storage_id'] = raw['storage_id']
         ids = [episode['storage_id'] for episode in restored._episodes]

@@ -1,0 +1,13 @@
+{
+  "status": "stopped_by_user",
+  "preserved_episodes": 5806,
+  "preservation_record": "outputs/city_baseline_dataset_5000ep_20261001_182056/preservation_and_stop.json",
+  "user_intent": "Run Online AC, GNAC, Dreamer, MBPO and random in parallel for5000episodes each in Ingolstadt, Gretz and Fontenay; save real episodes for city world models; migrate model warmup to batch+epochs",
+  "output_root": "outputs/city_baseline_dataset_5000ep_20261001_182056",
+  "manifest": "outputs/city_baseline_dataset_5000ep_20261001_182056/manifest.json",
+  "live_status": "outputs/city_baseline_dataset_5000ep_20261001_182056/status.json",
+  "verification": "outputs/city_baseline_dataset_5000ep_20261001_182056/verification.json",
+  "world_model_epochs_code": "complete",
+  "actions_aggregation": "existing aggregation retained; raw events archived for possible future representation changes",
+  "next_monitoring": "Read live status, process logs and compaction_status.json; do not interpret startup or first archives as completion of all5000episodes"
+}

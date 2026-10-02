@@ -1,0 +1,402 @@
+"""Event-driven SUMO control: fixed-length steps and fork-only decisions.
+
+Unlike :class:`urban_dreamer.traffic.environment.SumoSession`, which forces a
+decision on every traversed edge and microsteps so no edge can be crossed
+unobserved, this session advances SUMO with a fixed step (default 1.0 s) and
+asks the policy only when a vehicle enters an edge whose
+destination-conditioned candidate set has more than one entry. Vehicles always
+carry complete routes to their destination (``NextHopCandidates.full_route``),
+so an edge crossed inside a single step — or never observed at all — is simply
+followed from the existing route instead of invalidating the episode.
+"""
+from __future__ import annotations
+
+import math
+import shutil
+import time
+import uuid
+from pathlib import Path
+from typing import Any, Callable
+
+import numpy as np
+
+from .environment import (EnvironmentContractError, NextHopDecision, SessionClosedError,
+                          WindowResult)
+from .topology import NextHopCandidates
+
+__all__ = ["SumoEventSession"]
+
+WINDOW_SECONDS = 30.
+
+
+def _edge_state_vars() -> tuple[int, ...]:
+    import traci.constants as tc
+    return (tc.LAST_STEP_OCCUPANCY, tc.LAST_STEP_MEAN_SPEED,
+            tc.LAST_STEP_VEHICLE_NUMBER, tc.LAST_STEP_VEHICLE_HALTING_NUMBER)
+
+
+_EDGE_STATE_VARS = _edge_state_vars()
+
+
+class SumoEventSession:
+    """Fixed-step TraCI control where only multi-candidate edge entries decide."""
+
+    def __init__(self, config: Any, prepared_inputs: Any, topology: Any, episode_index: int = 0,
+                 *, step_seconds: float = 1.0, backend: str = 'traci'):
+        self.config, self.prepared_inputs, self.topology = config, prepared_inputs, topology
+        self.network, self.candidates = topology.network, NextHopCandidates(topology.network)
+        self.episode_index = episode_index
+        if backend not in ('traci', 'libsumo'):
+            raise EnvironmentContractError(f"unknown SUMO backend {backend!r}")
+        self.backend = backend
+        if not math.isfinite(step_seconds) or step_seconds <= 0:
+            raise EnvironmentContractError("step_seconds must be finite and positive")
+        self._step_ms = round(step_seconds * 1000)
+        if self._step_ms < 1 or abs(step_seconds * 1000 - self._step_ms) > 1e-6:
+            raise EnvironmentContractError("step_seconds must be a whole number of milliseconds")
+        if 30000 % self._step_ms:
+            raise EnvironmentContractError("the 30-second window must be a whole number of steps")
+        self.microstep_seconds = float(step_seconds)
+        self.max_speed = float(config.simulation.vehicle_max_speed_mps)
+        self._connection = None
+        self._closed = False
+        self._invalid = False
+        self._time_ms = 0
+        self._vehicles: dict[str, dict[str, Any]] = {}
+        self.travel_times: dict[str, float] = {}
+        self.metrics = {"microstep_seconds": self.microstep_seconds, "microsteps": 0,
+                        "events": 0, "wall_seconds": 0., "active_vehicle_seconds": 0.}
+        self._incident_lanes: dict[str, float] = {}
+        self._incident_active = False
+        self._active: set[str] = set()
+        self._pending: set[str] = set()
+        self._flow_cache: tuple[int, np.ndarray] | None = None
+
+    @property
+    def step_length_seconds(self) -> float:
+        return self.microstep_seconds
+
+    @property
+    def microstep_count(self) -> int:
+        return self.metrics["microsteps"]
+
+    @property
+    def done(self) -> bool:
+        return self._connection is not None and len(self.travel_times) == len(self._vehicles)
+
+    def _needs_decision(self, edge: int, destination: int) -> bool:
+        return edge != destination and len(self.candidates.candidates(edge, destination)) > 1
+
+    def reset(self) -> dict[str, Any]:
+        if self._closed or self._connection is not None:
+            raise SessionClosedError("a SUMO session can only be reset once")
+        import traci.constants as tc
+        self._tc = tc
+        binary = shutil.which("sumo")
+        if binary is None:
+            import sys
+            candidate = Path(sys.executable).parent / "sumo"
+            if not candidate.exists():
+                raise EnvironmentContractError("SUMO executable is not available")
+            binary = str(candidate)
+        args = list(self.config.simulation.sumo_extra_args)
+        # These overrides invalidate event visibility or inject uncontrolled vehicles.
+        forbidden = ("--step-length", "--route-files", "--additional-files", "--net-file", "--begin", "--end", "--scale", "--device.rerouting", "--default.speeddev")
+        if any(any(arg == key or arg.startswith(key + "=") or (key == "--device.rerouting" and arg.startswith(key)) for key in forbidden) for arg in args):
+            raise EnvironmentContractError("SUMO extra arguments override the controlled simulation contract")
+        start_args = [binary, "--net-file", str(self.prepared_inputs.network_xml),
+                      "--step-length", str(self.microstep_seconds), "--seed", str(self.config.run.seed + self.episode_index),
+                      "--no-step-log", "true", "--duration-log.disable", "true", "--time-to-teleport", "-1", *args]
+        if self.backend == 'libsumo':
+            # libsumo embeds SUMO in-process: no socket, no connection labels,
+            # one simulation at a time per Python process.
+            import libsumo
+            libsumo.start(start_args)
+            self._connection = libsumo
+        else:
+            import traci
+            label = "urban-dreamer-event-" + uuid.uuid4().hex
+            traci.start(start_args, label=label)
+            self._connection = traci.getConnection(label)
+        self._started_at = time.monotonic()
+        try:
+            self._connection.vehicletype.copy("DEFAULT_VEHTYPE", "urban_cav")
+            self._connection.vehicletype.setMaxSpeed("urban_cav", self.max_speed)
+            self._connection.vehicletype.setSpeedFactor("urban_cav", 1.)
+            self._connection.vehicletype.setSpeedDeviation("urban_cav", 0.)
+            for index, demand in enumerate(sorted(self.topology.vehicles, key=lambda vehicle: (vehicle.departure_second, vehicle.vehicle_id))):
+                origin = self.network.edge_to_index[self.topology.origins[demand.origin_index]]
+                destination = self.network.edge_to_index[self.topology.destinations[demand.destination_index]]
+                choices = self.candidates.candidates(origin, destination)
+                if choices:
+                    costs = self.candidates.costs(destination)
+                    initial = min(choices, key=lambda edge: (self.network.free_flow_travel_seconds[edge] + costs[edge], edge))
+                    route = self.candidates.full_route(origin, initial, destination)
+                else:
+                    route = (origin,)
+                route_id = f"urban_initial_{index}"
+                self._connection.route.add(route_id, [self.network.edge_ids[edge] for edge in route])
+                self._connection.vehicle.add(demand.vehicle_id, route_id, typeID="urban_cav",
+                                             depart=str(demand.departure_second), departPos="0", departSpeed="0")
+                self._vehicles[demand.vehicle_id] = {
+                    "vehicle_id": demand.vehicle_id, "current_edge": origin, "destination_edge": destination,
+                    "departure_time": float(demand.departure_second), "actual_departure_time": None,
+                    "observed_departure_time": None, "departed": False, "arrived": False,
+                    "remaining_distance": float(self.network.lengths_m[origin]), "committed_next_edge": None,
+                    "pending_decision": False, "in_junction": False, "junction_remaining_distance": 0.,
+                    "junction_speed": 0., "junction_connection": None,
+                }
+            for edge in str(self.config.simulation.incident_edge).split(","):
+                if not edge.strip():
+                    continue
+                if edge not in self.network.edge_to_index:
+                    raise EnvironmentContractError(f"unknown incident edge {edge!r}")
+                for lane_index in range(self._connection.edge.getLaneNumber(edge)):
+                    lane_id = f"{edge}_{lane_index}"
+                    self._incident_lanes[lane_id] = self._connection.lane.getMaxSpeed(lane_id)
+            # Socket TraCI benefits from a batched pull. In-process libsumo
+            # reads only at window boundaries, avoiding subscription updates
+            # for every edge on every simulation step.
+            if self.backend == 'traci':
+                for edge in self.network.edge_ids:
+                    self._connection.edge.subscribe(edge, _EDGE_STATE_VARS)
+            return self._state()
+        except BaseException:
+            self.close()
+            raise
+
+    def _flow(self) -> np.ndarray:
+        """Read boundary traffic once per simulation time using the backend's API."""
+        now = self._time_ms
+        if self._flow_cache is not None and self._flow_cache[0] == now:
+            return self._flow_cache[1]
+        tc = self._tc
+        edge_state = {}
+        if not self.done and self.backend == 'libsumo':
+            edge_api = self._connection.edge
+            for edge in self.network.edge_ids:
+                edge_state[edge] = {
+                    "occupancy": float(edge_api.getLastStepOccupancy(edge)) / 100.,
+                    "mean_speed": float(edge_api.getLastStepMeanSpeed(edge)),
+                    "vehicle_number": float(edge_api.getLastStepVehicleNumber(edge)),
+                    "halting_number": float(edge_api.getLastStepHaltingNumber(edge)),
+                }
+        elif not self.done:
+            results = self._connection.edge.getAllSubscriptionResults()
+            for edge in self.network.edge_ids:
+                values = results.get(edge)
+                if values is None:
+                    continue
+                edge_state[edge] = {
+                    # SUMO reports percentages even below one percent.
+                    "occupancy": float(values[tc.LAST_STEP_OCCUPANCY]) / 100.,
+                    "mean_speed": float(values[tc.LAST_STEP_MEAN_SPEED]),
+                    "vehicle_number": float(values[tc.LAST_STEP_VEHICLE_NUMBER]),
+                    "halting_number": float(values[tc.LAST_STEP_VEHICLE_HALTING_NUMBER]),
+                }
+        flow = self.network.extract_flow(edge_state)
+        self._flow_cache = (now, flow)
+        return flow
+
+    def _state(self) -> dict[str, Any]:
+        return {"time": self._time_ms / 1000., "flow": self._flow(),
+                "vehicles": [dict(self._vehicles[key]) for key in sorted(self._vehicles)],
+                "active_vehicle_count": len(self._active),
+                "arrived_vehicle_count": len(self.travel_times), "done": self.done}
+
+    def _apply_decisions(self, callback: Callable, flow: np.ndarray) -> list[NextHopDecision]:
+        pending = [dict(self._vehicles[key]) for key in sorted(self._pending)]
+        if not pending:
+            return []
+        decisions = list(callback(pending, flow, self._time_ms / 1000.))
+        expected = [row["vehicle_id"] for row in pending]
+        if sorted(decision.vehicle_id for decision in decisions) != expected:
+            raise EnvironmentContractError("policy must return exactly one action per pending vehicle")
+        successful = []
+        for decision in sorted(decisions, key=lambda action: action.vehicle_id):
+            vehicle = self._vehicles[decision.vehicle_id]
+            if decision.current_edge != vehicle["current_edge"] or abs(decision.decision_time - self._time_ms / 1000.) > 1e-8:
+                raise EnvironmentContractError("decision uses stale edge or time")
+            if decision.next_edge not in self.candidates.candidates(decision.current_edge, vehicle["destination_edge"]):
+                raise EnvironmentContractError(f"illegal next edge {decision.next_edge} from {decision.current_edge}")
+            route = self.candidates.full_route(decision.current_edge, decision.next_edge, vehicle["destination_edge"])
+            try:
+                self._connection.vehicle.setRoute(decision.vehicle_id, [self.network.edge_ids[edge] for edge in route])
+            except Exception as exc:
+                raise EnvironmentContractError(f"next-hop execution failed for {decision.vehicle_id}: {exc}") from exc
+            vehicle["committed_next_edge"] = decision.next_edge
+            vehicle["pending_decision"] = False
+            self._pending.discard(decision.vehicle_id)
+            successful.append(decision)
+            self.metrics["events"] += 1
+        return successful
+
+    def _observe(self, departure_counts: np.ndarray) -> None:
+        connection, tc = self._connection, self._tc
+        now = self._time_ms / 1000.
+        if connection.simulation.getStartingTeleportIDList() or connection.simulation.getEndingTeleportIDList():
+            raise EnvironmentContractError("SUMO teleported a vehicle; episode is invalid")
+        for vehicle_id in connection.simulation.getDepartedIDList():
+            if vehicle_id not in self._vehicles:
+                raise EnvironmentContractError(f"uncontrolled vehicle departed: {vehicle_id}")
+            row = self._vehicles[vehicle_id]
+            row["departed"] = True
+            self._active.add(vehicle_id)
+            row["actual_departure_time"] = float(connection.vehicle.getDeparture(vehicle_id))
+            row["departure_time"] = row["actual_departure_time"]
+            row["observed_departure_time"] = now
+            row["pending_decision"] = self._needs_decision(row["current_edge"], row["destination_edge"])
+            if row["pending_decision"]:
+                self._pending.add(vehicle_id)
+            departure_counts[row["current_edge"]] += 1
+            connection.vehicle.subscribe(vehicle_id, (tc.VAR_ROAD_ID, tc.VAR_LANEPOSITION, tc.VAR_LANE_ID))
+        arrived = set(connection.simulation.getArrivedIDList())
+        subscriptions = connection.vehicle.getAllSubscriptionResults()
+        for vehicle_id in sorted(self._active):
+            row = self._vehicles[vehicle_id]
+            if vehicle_id in arrived:
+                # Every assigned route ends at the destination edge, so arrival
+                # from a reachable edge is consistent even when a fixed-length
+                # step crossed the destination edge without observing it.
+                if row["current_edge"] != row["destination_edge"] and not math.isfinite(
+                        self.candidates.distances(row["destination_edge"])[row["current_edge"]]):
+                    raise EnvironmentContractError(f"vehicle {vehicle_id} arrived from an edge that cannot reach its destination")
+                row["arrived"], row["pending_decision"], row["remaining_distance"] = True, False, 0.
+                row["committed_next_edge"] = None
+                row["in_junction"] = False
+                row["junction_remaining_distance"] = 0.
+                row["junction_connection"] = None
+                self._active.discard(vehicle_id)
+                self._pending.discard(vehicle_id)
+                row["arrival_time"] = now
+                self.travel_times[vehicle_id] = now - row["actual_departure_time"]
+                continue
+            state = subscriptions.get(vehicle_id)
+            if state is None:
+                raise EnvironmentContractError(f"active vehicle {vehicle_id} disappeared without arrival")
+            edge_id = state[tc.VAR_ROAD_ID]
+            position = float(state[tc.VAR_LANEPOSITION])
+            if edge_id.startswith(":"):
+                # On internal lanes SUMO's route index still identifies the
+                # incoming external edge. It may differ from our last observed
+                # edge when a fixed step skipped an entire short edge.
+                source, successor = self._route_commitment(vehicle_id)
+                if successor is None:
+                    raise EnvironmentContractError(f"vehicle {vehicle_id} entered a junction without a route successor")
+                row["current_edge"], row["committed_next_edge"] = source, successor
+                row["pending_decision"] = False
+                self._pending.discard(vehicle_id)
+                lane = state[tc.VAR_LANE_ID]
+                row["in_junction"] = True
+                row["remaining_distance"] = 0.
+                row["junction_connection"] = (row["current_edge"], row["committed_next_edge"])
+                row["junction_speed"] = min(self.max_speed, self.network.internal_lane_speeds_mps.get(lane, self.max_speed))
+                suffix = self.network.internal_lane_remaining_lengths_m.get(lane)
+                if suffix is None:
+                    raise EnvironmentContractError(f"unregistered internal lane {lane!r}")
+                row["junction_remaining_distance"] = max(0., suffix - position)
+                row["junction_lane"], row["junction_position"] = lane, position
+                continue
+            if edge_id not in self.network.edge_to_index:
+                raise EnvironmentContractError(f"unknown physical road {edge_id!r} for {vehicle_id}")
+            edge = self.network.edge_to_index[edge_id]
+            if edge != row["current_edge"] or row["in_junction"]:
+                # Only the edge the vehicle is observed on can produce an event;
+                # edges skipped inside one step stay route-followed.
+                row["current_edge"], row["committed_next_edge"] = edge, None
+                row["pending_decision"] = self._needs_decision(edge, row["destination_edge"])
+                if row["pending_decision"]:
+                    self._pending.add(vehicle_id)
+                else:
+                    self._pending.discard(vehicle_id)
+            if row["committed_next_edge"] is None and edge != row["destination_edge"]:
+                source, successor = self._route_commitment(vehicle_id)
+                if source != edge:
+                    raise EnvironmentContractError(f"vehicle {vehicle_id} route index disagrees with its physical road")
+                # A complete SUMO route also commits automatic singleton and
+                # skipped-edge movement. A pending fork may replace this route
+                # at its next policy event; observing it creates no action.
+                row["committed_next_edge"] = successor
+            row["in_junction"] = False
+            row["junction_remaining_distance"] = 0.
+            row["junction_connection"] = None
+            row["remaining_distance"] = max(0., self.network.external_lane_lengths_m.get(state[tc.VAR_LANE_ID], float(self.network.lengths_m[edge])) - position)
+
+    def _route_commitment(self, vehicle_id: str) -> tuple[int, int | None]:
+        """Read the actual external route pair, including while inside a junction."""
+        api = self._connection.vehicle
+        route, index = api.getRoute(vehicle_id), int(api.getRouteIndex(vehicle_id))
+        if not 0 <= index < len(route):
+            raise EnvironmentContractError(f"vehicle {vehicle_id} has an invalid route index {index}")
+        try:
+            source = self.network.edge_to_index[route[index]]
+            successor = (self.network.edge_to_index[route[index + 1]]
+                         if index + 1 < len(route) else None)
+        except KeyError as exc:
+            raise EnvironmentContractError(f"vehicle {vehicle_id} route contains an unknown external edge") from exc
+        destination = self._vehicles[vehicle_id]["destination_edge"]
+        if route[-1] != self.network.edge_ids[destination]:
+            raise EnvironmentContractError(f"vehicle {vehicle_id} route does not end at its destination")
+        if successor is None and source != destination:
+            raise EnvironmentContractError(f"vehicle {vehicle_id} route ends before its destination")
+        if successor is not None and successor not in self.network.adjacency_list[source]:
+            raise EnvironmentContractError(f"vehicle {vehicle_id} route has an illegal successor")
+        return source, successor
+
+    def _apply_incident(self) -> None:
+        config = self.config.simulation
+        active = config.incident_start_seconds <= self._time_ms / 1000. < config.incident_end_seconds
+        if active != self._incident_active:
+            for lane, speed in self._incident_lanes.items():
+                self._connection.lane.setMaxSpeed(lane, config.incident_speed_mps if active else speed)
+            self._incident_active = active
+
+    def advance_window(self, callback: Callable) -> WindowResult:
+        if self._closed or self._connection is None:
+            raise SessionClosedError("SUMO session is not open")
+        if self._invalid:
+            raise EnvironmentContractError("invalid episode cannot be continued or trained")
+        start, end = self._time_ms, self._time_ms + 30000
+        frozen_flow = self._state()["flow"]
+        decisions, departures = [], np.zeros(self.network.edge_count, dtype=np.float32)
+        active_seconds = 0.
+        try:
+            while self._time_ms < end:
+                if time.monotonic() - self._started_at > self.config.simulation.episode_wall_timeout_seconds:
+                    raise EnvironmentContractError("episode exceeded wall timeout")
+                if self.done:
+                    self._time_ms = end
+                    break
+                decisions.extend(self._apply_decisions(callback, frozen_flow))
+                self._apply_incident()
+                previous_time = self._time_ms / 1000.
+                active_before = len(self._active)
+                self._connection.simulationStep()
+                self._time_ms += self._step_ms
+                self.metrics["microsteps"] += 1
+                self._observe(departures)
+                active_seconds += active_before * self.microstep_seconds
+                for vehicle_id in self._connection.simulation.getDepartedIDList():
+                    row = self._vehicles[vehicle_id]
+                    active_seconds += max(0., self._time_ms / 1000. - max(previous_time, row["actual_departure_time"]))
+            counts = np.zeros(self.network.edge_count, dtype=np.float32)
+            for decision in decisions:
+                counts[decision.next_edge] += 1
+            self.metrics["active_vehicle_seconds"] += active_seconds
+            self.metrics["wall_seconds"] = time.monotonic() - self._started_at
+            return WindowResult(tuple(decisions), counts, departures, active_seconds, self._state(), start / 1000., end / 1000.)
+        except BaseException:
+            self._invalid = True
+            raise
+
+    def close(self) -> None:
+        if self._connection is not None:
+            self._connection.close()
+            self._connection = None
+        self._closed = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()

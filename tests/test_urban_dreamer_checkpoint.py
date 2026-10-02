@@ -22,6 +22,7 @@ from urban_dreamer.workflow.checkpoint import (
 
 def _training_state() -> dict[str, object]:
     return {
+        "reward_contract": "global_physical_individual_timeout_v1",
         "models": {"world_model": {"weights": torch.tensor([1.0, 2.0])}},
         "optimizers": {"world_model": {"lr": 1e-3}},
         "replay": {"episodes": [1, 2, 3]},
@@ -164,6 +165,8 @@ def test_decide_output_directory_reports_fresh_completed_and_nonempty_invalid(
         (lambda payload: payload.pop("input_hash"), "missing key"),
         (lambda payload: payload.__setitem__("unexpected", 1), "unexpected key"),
         (lambda payload: payload.__setitem__("schema_version", 1), "unsupported checkpoint schema version"),
+        (lambda payload: payload.__setitem__("schema_version", 3), "unsupported checkpoint schema version"),
+        (lambda payload: payload.__setitem__("schema_version", 4), "unsupported checkpoint schema version"),
         (lambda payload: payload.__setitem__("phase", "unknown"), "invalid checkpoint phase"),
         (lambda payload: payload.__setitem__("next_unit", -1), "next_unit must be a non-negative integer"),
         (

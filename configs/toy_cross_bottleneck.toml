@@ -11,11 +11,13 @@ output_dir = "../outputs/toy_cross_bottleneck"
 device = "cuda:1"
 seed = 42
 warmup_episodes = 1
-world_model_initialization_steps = 1
+world_model_initialization_epochs = 1
 online_training_episodes = 150
 evaluation_episodes = 3
 
 [simulation]
+# Homogeneous Poisson arrivals per OD; counts in agents.csv define expected demand.
+demand_duration_seconds = 420.0
 vehicle_max_speed_mps = 40.0
 world_model_intervals_per_episode = 60
 warmup_horizon_seconds = 1800

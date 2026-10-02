@@ -175,6 +175,8 @@ class NextHopCandidates:
         self.network = network
         self.max_candidates = max(1, max(map(len, network.adjacency_list), default=0))
         self._distances: dict[tuple[int, bool], np.ndarray] = {}
+        self._candidate_memo: dict[tuple[int, int], tuple[int, ...]] = {}
+        self._stack_caches: dict[bool, dict[bytes, tuple[np.ndarray, np.ndarray, np.ndarray]]] = {False: {}, True: {}}
         self._predecessors = [[] for _ in network.edge_ids]
         for source, targets in enumerate(network.adjacency_list):
             for target in targets:
@@ -212,14 +214,18 @@ class NextHopCandidates:
     def candidates(self, current: int, destination: int) -> tuple[int, ...]:
         if not 0 <= current < self.network.edge_count:
             raise TopologyError(f"unknown current edge {current}")
-        distance = self.distances(destination)
-        if current == destination:
-            return ()
-        result = tuple(sorted(target for target in self.network.adjacency_list[current]
-                              if self.network.passenger_allowed[target] and math.isfinite(distance[target])))
-        if not result:
-            raise TopologyError(f"no destination-reachable successor from edge {current} to {destination}")
-        return result
+        key = (current, destination)
+        if key not in self._candidate_memo:
+            distance = self.distances(destination)
+            if current == destination:
+                result: tuple[int, ...] = ()
+            else:
+                result = tuple(sorted(target for target in self.network.adjacency_list[current]
+                                      if self.network.passenger_allowed[target] and math.isfinite(distance[target])))
+                if not result:
+                    raise TopologyError(f"no destination-reachable successor from edge {current} to {destination}")
+            self._candidate_memo[key] = result
+        return self._candidate_memo[key]
 
     def junction(self, current: int, target: int) -> tuple[float, float]:
         return (self.network.connection_lengths_m.get((current, target), 0.),
@@ -236,6 +242,69 @@ class NextHopCandidates:
                                                   + float(self.network.free_flow_travel_seconds[target]) + costs[target], target))
             route += (placeholder,)
         return route
+
+    def full_route(self, current: int, next_edge: int, destination: int) -> tuple[int, ...]:
+        """Complete path from ``current`` through ``next_edge`` to ``destination``.
+
+        The suffix beyond ``next_edge`` follows the free-flow cost-to-go table
+        greedily (junction seconds + free-flow seconds + remaining cost, ties to
+        the lower edge index), so vehicles can cross later junctions without a
+        runtime ``findRoute`` even when no decision event fires there.
+        """
+        if next_edge not in self.candidates(current, destination):
+            raise TopologyError(f"invalid next edge {next_edge} from {current} to {destination}")
+        route = [current, next_edge]
+        costs = self.costs(destination)
+        edge = next_edge
+        while edge != destination:
+            if len(route) > self.network.edge_count + 1:
+                raise TopologyError(f"cost-to-go chain from {current} to {destination} exceeds the edge count")
+            edge = min(self.candidates(edge, destination),
+                       key=lambda target: (self.junction(edge, target)[0] / self.junction(edge, target)[1]
+                                           + float(self.network.free_flow_travel_seconds[target]) + costs[target], target))
+            route.append(edge)
+        return tuple(route)
+
+    def stacked_distance_tables(self, destinations: np.ndarray, *,
+                                seconds: bool) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """(unique destinations, inverse map, stacked tables) for a batch of destinations.
+
+        Memoized with a bounded FIFO because consecutive decision batches usually
+        share the same destination mix; tables themselves are immutable.
+        """
+        cache = self._stack_caches[seconds]
+        key = destinations.tobytes()
+        if key not in cache:
+            unique, inverse = np.unique(destinations, return_inverse=True)
+            tables = np.stack([self._table(int(edge), seconds) for edge in unique])
+            cache[key] = (unique, inverse, tables)
+            while len(cache) > 8:
+                cache.pop(next(iter(cache)))
+        return cache[key]
+
+    def junction_matrices(self) -> tuple[np.ndarray, np.ndarray]:
+        """Dense (edge, edge) junction length/speed tables equivalent to ``junction``.
+
+        Lazily built float32 copies of the connection dictionaries (zero length and
+        the target edge speed limit, floored at 0.1 m/s, where no connection exists),
+        so batch builders can replace per-pair dictionary lookups with fancy indexing.
+        First use costs 8 * edge_count**2 bytes.
+        """
+        cached = getattr(self, "_junction_matrices", None)
+        if cached is None:
+            network = self.network
+            count = network.edge_count
+            lengths = np.zeros((count, count), dtype=np.float32)
+            speeds = np.broadcast_to(network.speed_limits_mps, (count, count)).copy()
+            for table, values in ((lengths, network.connection_lengths_m), (speeds, network.connection_speeds_mps)):
+                if values:
+                    pairs = np.asarray(list(values), dtype=np.int64)
+                    table[pairs[:, 0], pairs[:, 1]] = np.fromiter(values.values(), dtype=np.float32, count=len(pairs))
+            np.maximum(speeds, 0.1, out=speeds)
+            lengths.setflags(write=False)
+            speeds.setflags(write=False)
+            self._junction_matrices = cached = (lengths, speeds)
+        return cached
 
 
 def _load_edge_network(path: Path) -> EdgeNetwork:
