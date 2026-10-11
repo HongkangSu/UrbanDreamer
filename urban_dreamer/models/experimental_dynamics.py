@@ -20,7 +20,8 @@ from urban_dreamer.models.world_model import (
 )
 
 VARIANTS = ("graph_fm", "no_prior_fm", "random_prior_fm", "regression",
-            "graph_regression", "gaussian", "graph_prior_r64_fm", "graph_prior_r128_fm")
+            "graph_regression", "gaussian", "graph_prior_r64_fm", "graph_prior_r128_fm",
+            "isotropic_noise_graph_fm", "isotropic_noise_no_prior_fm")
 
 
 def _low_frequency_basis(adjacency, rank):
@@ -40,15 +41,21 @@ class ExperimentalPrior(nn.Module):
 
     ``rank`` remains the noise coefficient dimension expected by production FM
     losses. ``projection_rank`` records the deterministic projection dimension.
+    With isotropic noise, the stored ``noise_basis`` preserves source provenance
+    only; sampling uses independent road coordinates with matched total energy.
     """
 
     def __init__(self, prior: LowFrequencyGraphPrior, *, random_projection: bool, seed: int,
-                 projection_rank: int | None = None):
+                 projection_rank: int | None = None, isotropic_noise: bool = False,
+                 keep_prediction: bool = False):
         super().__init__()
         if projection_rank is not None and (random_projection or isinstance(projection_rank, bool)
                                             or not isinstance(projection_rank, int) or projection_rank < 1):
             raise ValueError("spectral projection rank must be a positive integer without random projection")
-        self.noise_rank, self.noise_scale = prior.rank, prior.noise_scale
+        self.original_noise_rank = prior.rank
+        self.isotropic_noise = bool(isotropic_noise)
+        self.noise_rank = prior.basis.shape[0] if isotropic_noise else prior.rank
+        self.noise_scale = prior.noise_scale
         self.register_buffer("noise_basis", prior.basis.detach().clone())
         self.register_buffer("projection_seed", torch.tensor(seed, dtype=torch.long,
                                                            device=prior.basis.device))
@@ -62,12 +69,20 @@ class ExperimentalPrior(nn.Module):
             prior.basis = _low_frequency_basis(prior.adjacency, projection_rank).to(prior.basis)
             prior.rank = prior.basis.shape[1]
             self.prediction = prior
+        elif keep_prediction:
+            self.prediction = prior
         else:
             self.prediction = None
 
     @property
     def rank(self):
         return self.noise_rank
+
+    @property
+    def source_std(self):
+        """Coordinate std: latent coordinates for isotropic, basis coefficients otherwise."""
+        return (self.noise_scale * math.sqrt(self.original_noise_rank / self.noise_rank)
+                if self.isotropic_noise else self.noise_scale)
 
     @property
     def projection_rank(self):
@@ -91,6 +106,10 @@ class ExperimentalPrior(nn.Module):
             noise = torch.randn(shape, device=z.device, dtype=z.dtype)
         if tuple(noise.shape) != shape:
             raise ValueError(f"noise must have coefficient shape {shape}")
+        if self.isotropic_noise:
+            # Keep covariance trace sigma^2 * original_rank per latent channel.
+            # No dense identity basis is needed for independent road coordinates.
+            return self.source_std * noise.to(z)
         return self.noise_scale * torch.matmul(self.noise_basis.to(z), noise.to(z))
 
 
@@ -108,6 +127,9 @@ class ExperimentalDynamics(Dynamics):
         elif variant in {"graph_prior_r64_fm", "graph_prior_r128_fm"}:
             backbone.graph_prior = ExperimentalPrior(backbone.graph_prior, random_projection=False,
                 seed=seed, projection_rank=64 if variant == "graph_prior_r64_fm" else 128)
+        elif variant in {"isotropic_noise_graph_fm", "isotropic_noise_no_prior_fm"}:
+            backbone.graph_prior = ExperimentalPrior(backbone.graph_prior, random_projection=False,
+                seed=seed, isotropic_noise=True, keep_prediction=variant == "isotropic_noise_graph_fm")
         if variant == "gaussian":
             old = backbone.flow_head
             head = nn.Linear(old.in_features, 2 * FLOW_LATENT_DIM,
@@ -219,12 +241,20 @@ def _dynamics(model):
 def variant_metadata(model):
     dynamics = _dynamics(model)
     prior = dynamics.graph_prior
+    original_noise_rank = getattr(prior, "original_noise_rank", prior.rank)
+    projection_rank = getattr(prior, "projection_rank", prior.rank)
     return {"variant": getattr(dynamics, "variant", "graph_fm"),
             "projection_seed": getattr(dynamics, "seed", None),
             "parameters": sum(p.numel() for p in dynamics.parameters()),
             "trainable_parameters": sum(p.numel() for p in dynamics.parameters() if p.requires_grad),
             "noise_rank": getattr(prior, "noise_rank", prior.rank),
-            "projection_rank": getattr(prior, "projection_rank", prior.rank),
+            "original_noise_rank": original_noise_rank,
+            "projection_rank": projection_rank,
+            "coarse_projection_rank": projection_rank,
+            "source_std": getattr(prior, "source_std", prior.noise_scale),
+            "source_std_coordinates": "independent_road_latent" if getattr(prior, "isotropic_noise", False) else "spectral_basis_coefficients",
+            "expected_energy": prior.noise_scale ** 2 * original_noise_rank * FLOW_LATENT_DIM,
+            "expected_energy_unit": "sum of squared source perturbations over roads and all latent channels per state",
             "gaussian_noise_space": "full_latent" if getattr(dynamics, "variant", None) == "gaussian" else None}
 
 
@@ -241,7 +271,7 @@ def experimental_loss(model, *, z_inputs, z_targets, action, action_events=None,
     if variant.endswith("fm"):
         return independent_transition_fm_loss(dynamics, z_inputs=z_inputs, z_targets=z_targets,
             action=action, action_events=action_events,
-            prior_weight=0. if variant == "no_prior_fm" else prior_weight,
+            prior_weight=0. if variant in {"no_prior_fm", "isotropic_noise_no_prior_fm"} else prior_weight,
             predict_endpoints=predict_endpoints, steps=steps, solver=solver,
             picard_iterations=picard_iterations, noise=noise, flow_time=flow_time)
     if (z_inputs.ndim != 4 or z_targets.shape != z_inputs.shape

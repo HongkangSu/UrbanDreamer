@@ -50,7 +50,7 @@ def test_variants_train_backbone_and_event_encoder(case, variant):
         assert parameter.grad.abs().sum() > 0
     if variant == "gaussian":
         assert model.dynamics.flow_head.weight.grad[64:].abs().sum() > 0
-    if variant in {"no_prior_fm", "regression", "gaussian"}:
+    if variant in {"no_prior_fm", "regression", "gaussian", "isotropic_noise_no_prior_fm"}:
         assert list(model.dynamics.graph_prior.parameters()) == []
         assert metrics["prior_loss"] == 0
 
@@ -100,7 +100,7 @@ def test_checkpoint_and_sampling_roundtrip(case, variant):
     assert variant_metadata(restored)["variant"] == variant
     if variant != "graph_fm":
         assert variant_metadata(restored)["projection_seed"] == 7
-    shape = (3, *z.shape) if variant == "gaussian" else (3, 2, 2, 1, 64)
+    shape = (3, *z.shape) if variant == "gaussian" else (3, 2, 2, model.dynamics.graph_prior.rank, 64)
     noise = torch.randn(shape)
     kwargs = dict(action_events=events, n_samples=3, noise=noise)
     samples, global_variance, edge_variance = model.latent_disagreement(z, action, **kwargs)
@@ -206,4 +206,60 @@ def test_rank_candidate_metadata_and_parameter_budget(case, variant):
                                    noise=torch.randn(2, 2, 1, 64))
     loss.backward()
     gradient = model.dynamics.graph_prior.prediction.output.weight.grad
+    assert gradient is not None and torch.isfinite(gradient).all() and gradient.abs().sum() > 0
+
+
+@pytest.mark.parametrize("variant,reference", [
+    ("isotropic_noise_graph_fm", "graph_fm"),
+    ("isotropic_noise_no_prior_fm", "no_prior_fm"),
+])
+def test_isotropic_changes_only_source_covariance_not_coarse_prediction(case, variant, reference):
+    model, z, _, action, events = case
+    baseline = copy.deepcopy(model)
+    apply_variant(baseline, reference)
+    rng = torch.random.get_rng_state()
+    apply_variant(model, variant)
+    assert torch.equal(torch.random.get_rng_state(), rng)
+    condition = baseline.dynamics.encode_condition(action, action_events=events)
+    assert torch.equal(model.dynamics.graph_prior(z, condition), baseline.dynamics.graph_prior(z, condition))
+    assert torch.equal(model.dynamics.graph_prior.project(z), baseline.dynamics.graph_prior.project(z))
+    metadata, source_metadata = variant_metadata(model), variant_metadata(baseline)
+    assert metadata['parameters'] == source_metadata['parameters']
+    assert metadata['original_noise_rank'] == 1
+    assert metadata['noise_rank'] == 3
+    assert metadata['source_std'] == pytest.approx(.1 * (1 / 3) ** .5)
+    assert metadata['expected_energy'] == pytest.approx(source_metadata['expected_energy'])
+    assert metadata['coarse_projection_rank'] == (1 if reference == 'graph_fm' else 0)
+
+
+def test_isotropic_covariance_is_diagonal_with_preserved_total_trace():
+    # Probe every noise-coordinate basis vector; this computes covariance exactly,
+    # rather than relying on a random Monte Carlo tolerance.
+    torch.set_num_threads(1)
+    prior = LowFrequencyGraphPrior(torch.ones(20, 20) - torch.eye(20), rank=16, noise_scale=.1)
+    original = copy.deepcopy(prior)
+    isotropic = ExperimentalPrior(prior, random_projection=False, seed=0,
+                                 isotropic_noise=True, keep_prediction=True)
+    coefficients = torch.eye(20).unsqueeze(-1).expand(20, 20, 64)
+    transformed = isotropic.sample_noise(torch.zeros(20, 20, 64), coefficients)[..., 0]
+    covariance = transformed.T @ transformed
+    torch.testing.assert_close(covariance, torch.eye(20) * (.1 ** 2 * 16 / 20), rtol=1e-6, atol=1e-8)
+    original_coefficients = torch.eye(16).unsqueeze(-1).expand(16, 16, 64)
+    original_transformed = original.sample_noise(torch.zeros(16, 20, 64), original_coefficients)[..., 0]
+    original_covariance = original_transformed.T @ original_transformed
+    torch.testing.assert_close(covariance.trace(), original_covariance.trace(), rtol=1e-5, atol=1e-7)
+    assert covariance.trace().item() * 64 == pytest.approx(.1 ** 2 * 16 * 64, rel=1e-6)
+
+
+@pytest.mark.parametrize("variant", ["isotropic_noise_graph_fm", "isotropic_noise_no_prior_fm"])
+def test_isotropic_transition_backpropagates_and_rejects_old_coefficient_shape(case, variant):
+    model, z, _, action, events = case
+    apply_variant(model, variant)
+    with pytest.raises(ValueError, match='coefficient shape'):
+        predict_next(model, z, action, action_events=events, noise=torch.randn(2, 2, 1, 64))
+    result = predict_next(model, z.requires_grad_(), action, action_events=events,
+                          noise=torch.randn(2, 2, 3, 64))
+    result.square().mean().backward()
+    assert z.grad is not None and torch.isfinite(z.grad).all() and z.grad.abs().sum() > 0
+    gradient = model.dynamics.flow_head.weight.grad
     assert gradient is not None and torch.isfinite(gradient).all() and gradient.abs().sum() > 0
