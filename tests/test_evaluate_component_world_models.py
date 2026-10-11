@@ -1,8 +1,10 @@
 import numpy as np
 import pytest
 import torch
+from dataclasses import replace
 from types import SimpleNamespace
 
+import tools.evaluate_component_world_models as evaluation
 from tools.evaluate_component_world_models import (
     endpoint_target, evaluate_condition, parser, run, sample_trajectories,
     select_conditions, select_traffic_conditions, summarize,
@@ -139,3 +141,94 @@ def test_phase_selection_uses_true_counts_and_keeps_empty_stress_separate():
         ('early', 2), ('peak', 3), ('drain', 5), ('empty_stress', 0)]
     no_drain = select_traffic_conditions(data, torch.ones(2), per_group=3, max_groups=1, horizon=3, seed=1)
     assert any(row['traffic_phase'] == 'post_peak_no_drain' for row in no_drain)
+
+
+@pytest.mark.parametrize('traffic_phase', [False, True])
+def test_selectors_keep_only_complete_horizon_population_including_empty_stress(traffic_phase):
+    entries = [dict(path='short-only', episode=0, windows=1, demand_group='short'),
+               dict(path='mixed-short', episode=1, windows=2, demand_group='mixed'),
+               dict(path='mixed-full', episode=2, windows=9, demand_group='mixed')]
+    flow = np.zeros((10, 2, 8))
+    flow[:, 0, 2] = [0., 1., 4., 8., 4., 2., 1., 0., 0., 0.]
+    loaded = []
+
+    def episode(index, **kwargs):
+        loaded.append(index)
+        assert index == 2, 'short archives must not supply phases or empty-stress states'
+        return {'flow': flow}
+
+    options = dict(per_group=3, max_groups=2, horizon=5, seed=17)
+    if traffic_phase:
+        data = SimpleNamespace(manifest={'entries': entries}, _episode=episode)
+        rows = select_traffic_conditions(data, torch.ones(2), **options)
+        assert any(row['traffic_phase'] == 'empty_stress' for row in rows)
+        assert loaded
+    else:
+        rows = select_conditions(entries, **options)
+    assert rows
+    assert all(row['episode_index'] == 2 and row['demand_group'] == 'mixed' for row in rows)
+    assert all(entries[row['episode_index']]['windows'] - row['start'] >= 5 for row in rows)
+
+
+def test_selector_rejects_population_without_complete_horizons():
+    entries = [dict(path='a', episode=0, windows=3, demand_group='g')]
+    with pytest.raises(ValueError, match='all 4 required windows'):
+        select_conditions(entries, per_group=1, max_groups=1, horizon=4, seed=1)
+
+
+def test_future_traffic_labels_cannot_change_predictive_samples(monkeypatch):
+    batch = batch_case(frames=4)
+    future_changed = batch.flow.clone()
+    future_changed[:, 1:, :, 1] += 7.
+    future_changed[:, 1:, :, 2] += 100.
+    # Preserve actions and actual lifecycle/boundary records. Alter future
+    # telemetry, not the initially observed state or cohort membership.
+    altered = replace(batch, flow=future_changed)
+    real_sample = evaluation.sample_trajectories
+    sampled = []
+
+    def capture(*args, **kwargs):
+        draws, disagreement = real_sample(*args, **kwargs)
+        sampled.append({h: values.clone() for h, values in draws.items()})
+        return draws, disagreement
+
+    monkeypatch.setattr(evaluation, 'sample_trajectories', capture)
+    options = dict(horizons=[1, 2], samples=4, sample_chunk=2, steps=2, device='cpu',
+                   scales=np.array([1., 10.]), metadata=dict(demand_group='g', episode='p::0'), seed=123)
+    original_rows = evaluate_condition(Model(), batch, torch.tensor([5., 10.]), torch.tensor([10., 20.]), **options)
+    first_samples = list(sampled)
+    sampled.clear()
+    altered_rows = evaluate_condition(Model(), altered, torch.tensor([5., 10.]), torch.tensor([10., 20.]), **options)
+    assert len(first_samples) == len(sampled) == 4  # forecast and independent risk for each protocol
+    for original, changed in zip(first_samples, sampled):
+        assert original.keys() == changed.keys()
+        for h in original:
+            torch.testing.assert_close(original[h], changed[h], rtol=0., atol=0.)
+    original_predictors = [row for row in original_rows if row['predictor'] == 'predictor']
+    altered_predictors = [row for row in altered_rows if row['predictor'] == 'predictor']
+    assert all(a['latent_disagreement'] == b['latent_disagreement']
+               for a, b in zip(original_predictors, altered_predictors))
+    assert all(a['speed_mae_all'] != b['speed_mae_all']
+               for a, b in zip(original_predictors, altered_predictors))
+
+
+def test_cli_rejects_truncated_materialization_despite_complete_manifest(monkeypatch, tmp_path):
+    entries = [dict(path='full', episode=0, windows=10, demand_group='g')]
+    source = SimpleNamespace(manifest={'entries': entries},
+                             batch_from_starts=lambda *args, **kwargs: batch_case(frames=3))
+    model = SimpleNamespace()
+    model.to = lambda device: model
+    model.eval = lambda: model
+    topology = SimpleNamespace(network=SimpleNamespace(capacities=[5., 10.], speed_limits_mps=[10., 20.]))
+    protocol = dict(selection_seed=1, checkpoint_sha256='parent')
+    monkeypatch.setattr(evaluation, 'load_frozen', lambda *args, **kwargs: (None, None, topology, model, protocol))
+    monkeypatch.setattr(evaluation, 'dataset', lambda *args, **kwargs: source)
+    monkeypatch.setattr(evaluation, 'variant_metadata', lambda model: {'variant': 'graph_fm'})
+    monkeypatch.setattr(evaluation, 'estimate_training_scales',
+                        lambda *args, **kwargs: (np.ones(2), {'congestion_edges': []}))
+    args = parser().parse_args(['--output-dir', str(tmp_path/'out'), '--horizons', '1,4',
+                               '--max-groups', '1', '--conditions-per-group', '1',
+                               '--condition-sampling', 'uniform'])
+    with pytest.raises(ValueError, match='complete forecast horizon'):
+        run(args)
+    assert not (args.output_dir/'summary.json').exists()

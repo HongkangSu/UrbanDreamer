@@ -28,12 +28,16 @@ def stable_seed(*values):
 
 
 def select_conditions(entries, *, per_group, max_groups, horizon, seed):
-    """Choose archive/start pairs without dependence on model or checkpoint."""
+    """Choose starts with every requested physical window, independent of model.
+
+    The CLI requests max forecast horizon + one following window for speed
+    labels, so every selected state belongs to the full-horizon intersection.
+    """
     if min(per_group, max_groups, horizon) < 1:
         raise ValueError("condition/group/horizon counts must be positive")
     groups = defaultdict(list)
     for index, entry in enumerate(entries):
-        if entry["windows"] >= 1:
+        if entry["windows"] >= horizon:
             groups[entry["demand_group"]].append((index, entry))
     selected = []
     for group in sorted(groups, key=lambda x: stable_seed(seed, x))[:max_groups]:
@@ -41,7 +45,7 @@ def select_conditions(entries, *, per_group, max_groups, horizon, seed):
         seen = set()
         for condition in range(per_group):
             index, entry = episodes[condition % len(episodes)]
-            legal = max(1, entry["windows"] - horizon + 1)
+            legal = entry["windows"] - horizon + 1
             rng = np.random.default_rng(stable_seed(seed, group, condition))
             starts = rng.permutation(legal)
             start = next((int(value) for value in starts if (index, int(value)) not in seen), None)
@@ -52,7 +56,7 @@ def select_conditions(entries, *, per_group, max_groups, horizon, seed):
                 episode=f'{entry["path"]}::episode={entry["episode"]}', source_path=entry["path"],
                 requested_horizon=horizon, condition_seed=stable_seed(seed, group, entry["path"], entry["episode"], start)))
     if not selected:
-        raise ValueError("no development conditions selected")
+        raise ValueError(f"no development conditions have all {horizon} required windows")
     return selected
 
 
@@ -62,20 +66,22 @@ def select_traffic_conditions(data, capacities, *, per_group, max_groups, horizo
     Per archive: early is the first pre-peak >=25% of the eligible peak;
     peak is the maximum; drain is the first post-peak <=50% of the peak.
     Without a drain crossing use the final eligible post-peak boundary and label
-    it explicitly. Zero-count starts form a separate stress stratum.
+    it explicitly. Zero-count starts form a separate stress stratum. Both use
+    only archives/starts with all ``horizon`` required physical windows.
     """
     entries = data.manifest["entries"]
     seeds = select_conditions(entries, per_group=1, max_groups=max_groups, horizon=horizon, seed=seed)
     selected = []
     for seed_row in seeds:
         group = seed_row["demand_group"]
-        episodes = sorted([(i, e) for i, e in enumerate(entries) if e["demand_group"] == group],
+        episodes = sorted([(i, e) for i, e in enumerate(entries)
+                           if e["demand_group"] == group and e["windows"] >= horizon],
             key=lambda item: stable_seed(seed, item[1]["path"], item[1]["episode"]))
         seen = set()
         for condition in range(per_group):
             index, entry = episodes[(condition // 3) % len(episodes)]
             arrays = data._episode(index, flow_only=True)
-            legal = max(1, int(entry["windows"]) - horizon + 1)
+            legal = int(entry["windows"]) - horizon + 1
             counts = (np.asarray(arrays["flow"][:legal, :, 2], dtype=np.float64)
                       * capacities.cpu().numpy()).sum(-1)
             peak = int(np.argmax(counts))
@@ -96,7 +102,7 @@ def select_traffic_conditions(data, capacities, *, per_group, max_groups, horizo
         if include_empty:
             for index, entry in episodes:
                 arrays = data._episode(index, flow_only=True)
-                legal = max(1, int(entry["windows"]) - horizon + 1)
+                legal = int(entry["windows"]) - horizon + 1
                 counts = (np.asarray(arrays["flow"][:legal, :, 2], dtype=np.float64)
                           * capacities.cpu().numpy()).sum(-1)
                 empty = np.flatnonzero(counts <= 1e-6)
@@ -300,7 +306,10 @@ def run(args):
         condition_sampling=args.condition_sampling, empty_stress_aggregated_separately=True,
         phase_definition="early first >=25% eligible peak; peak argmax; drain first postpeak <=50%; otherwise final eligible boundary labelled post_peak_no_drain",
         target_speed="mean endpoint and following observed boundary; unavailable labels are NaN",
-        missing_horizons="omit endpoints beyond recorded trajectory, never extrapolate truth",
+        evaluation_population="complete-horizon intersection including following speed-label window",
+        required_physical_windows=max(horizons) + 1,
+        short_episode_policy="skip episodes shorter than required_physical_windows before group selection",
+        missing_horizons="CLI rejects incomplete batches; direct evaluate_condition supports missing-label diagnostics",
         disagreement="h1 separate noise ensemble; h>1 same-ensemble diagnostic only",
         limits="recorded conditions with background traffic; not a SUMO counterfactual or closed-loop policy validation")
     atomic_json(args.output_dir / "protocol.json", evaluation_protocol)
@@ -308,6 +317,8 @@ def run(args):
     with (args.output_dir / "states.jsonl").open("w") as stream:
         for index, item in enumerate(conditions):
             batch = validation.batch_from_starts(item["episode_index"], [item["start"]], fm_only=False)
+            if batch.flow.shape[1] < max(horizons) + 2:
+                raise ValueError("selected condition lacks the complete forecast horizon and following speed-label boundary")
             rows = evaluate_condition(model, batch, capacities, limits, horizons=horizons, samples=args.samples,
                 sample_chunk=args.sample_chunk, steps=args.steps, device=device, scales=scales,
                 metadata=dict(item, variant=variant_metadata(model)["variant"]), seed=item["condition_seed"])
