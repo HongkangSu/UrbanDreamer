@@ -30,6 +30,11 @@ CAMPAIGN_KEYS = ('development_manifest_identity', 'checkpoint_sha256', 'config_s
 TRAINING_KEYS = ('batch_size', 'data_seed', 'horizon', 'learning_rate', 'mode', 'optimizer', 'precision',
                  'sampler', 'training_manifest_identity', 'recursive_solver_steps', 'ms_samples', 'ms_weight', 'prior_weight')
 PREDICTORS = {'predictor', 'persistence', 'endpoint_codec'}
+KNOWN_HORIZON_POLICIES = {
+    'omit endpoints beyond recorded trajectory, never extrapolate truth',
+    'CLI rejects incomplete batches; direct evaluate_condition supports missing-label diagnostics',
+}
+COMPLETE_HORIZON_POLICY = 'verified complete requested horizons with full count and speed labels'
 
 
 def file_hash(path):
@@ -84,6 +89,50 @@ def read_evaluation(directory):
                 hashes={name: file_hash(path) for name, path in files.items()})
 
 
+def complete_horizon_proof(evaluation):
+    """Prove equivalence of known selection policies from the realized records.
+
+    Never infer complete observations from a policy name or from equal missing
+    windows in both runs. Every declared condition needs all requested forecasts
+    and labels, including the following-boundary speed target at the final step.
+    """
+    protocol = evaluation['protocol']
+    original = protocol.get('missing_horizons')
+    if original not in KNOWN_HORIZON_POLICIES:
+        raise ValueError(f'unknown missing_horizons policy: {original!r}')
+    horizons = protocol.get('horizons')
+    if (not isinstance(horizons, list) or not horizons or len(set(horizons)) != len(horizons)
+            or any(isinstance(h, bool) or not isinstance(h, int) or h < 1 for h in horizons)):
+        raise ValueError('horizons must declare distinct positive integer forecasts')
+    declared = {key(row, CONDITION_KEYS) for row in evaluation['conditions']}
+    required = {('one_step_previous_state', 1)} | {
+        ('recorded_action_recursive_initial_cohort', h) for h in horizons}
+    observed = defaultdict(set)
+    valid_road_counts = []
+    for state in evaluation['states'].values():
+        row = state['predictor']
+        condition = key(row, CONDITION_KEYS)
+        if condition not in declared:
+            raise ValueError('states contain undeclared conditions')
+        forecast = (row['protocol'], row['horizon'])
+        if forecast in observed[condition]:
+            raise ValueError('duplicate predictor condition/protocol/horizon')
+        observed[condition].add(forecast)
+        roads = row.get('roads')
+        if (isinstance(roads, bool) or not isinstance(roads, int) or roads <= 0
+                or row.get('count_valid_roads_all') != roads
+                or row.get('speed_valid_roads_all') != roads):
+            raise ValueError('complete-horizon proof requires full positive count and speed road labels')
+        valid_road_counts.append(roads)
+    if not declared or any(observed[condition] != required for condition in declared):
+        raise ValueError('conditions lack complete one-step and requested recursive horizons')
+    return dict(original_policy=original, canonical_policy=COMPLETE_HORIZON_POLICY,
+                conditions_checked=len(declared), recursive_horizons=sorted(horizons),
+                predictor_states_checked=len(valid_road_counts),
+                minimum_valid_roads=min(valid_road_counts),
+                all_requested_forecasts_present=True, all_count_and_speed_roads_valid=True)
+
+
 def compatibility_signature(evaluation):
     protocol = evaluation['protocol']
     try:
@@ -91,6 +140,7 @@ def compatibility_signature(evaluation):
         result['campaign'] = {name: protocol['campaign'][name] for name in CAMPAIGN_KEYS}
     except KeyError as error:
         raise ValueError(f'missing comparison protocol field {error.args[0]}') from error
+    result['missing_horizons'] = complete_horizon_proof(evaluation)['canonical_policy']
     training = protocol.get('training_protocol')
     if training is not None:
         parent = training.get('parent', training)
@@ -228,6 +278,7 @@ def create_report(evaluations, *, repetitions=1000, seed=20261011):
         difference_sign='candidate minus reference; negative is better for all reported error/score metrics.',
         independent_training_seeds=seeds, repetitions=repetitions, seed=seed, compatibility=signature,
         sources=[{name: item[name] for name in ('directory', 'label', 'variant', 'training_seed', 'hashes')} for item in evaluations],
+        missing_horizon_equivalence=[dict(run=item['label'], **complete_horizon_proof(item)) for item in evaluations],
         metrics=aggregates, paired_differences=differences, calibration=calibration, risk=risk)
 
 
