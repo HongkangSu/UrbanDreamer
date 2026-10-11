@@ -33,6 +33,7 @@ def toy_setup():
 def city_setup(name):
     pytest.importorskip('traci')
     config = load_config(ROOT / f'configs/{name}.toml')
+    config = replace(config, simulation=replace(config.simulation, traffic_model='micro', backend='traci'))
     prepared = validate_prepared_inputs(config)
     return config, prepared, load_traffic_topology(prepared)
 

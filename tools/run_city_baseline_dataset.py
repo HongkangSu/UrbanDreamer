@@ -15,8 +15,14 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from urban_dreamer.learning.baselines.common import resolve_collection_settings
+from urban_dreamer.workflow.config import load_config
 CITIES = ('ingolstadt_custom', 'gretz_armainvilliers', 'fontenay_en_parisis')
 METHODS = ('online_ac', 'gnac', 'dreamer', 'mbpo', 'random')
+EXTRA_METHODS = ('ippo', 'mappo', 'iql', 'mamba')
 
 
 def now():
@@ -34,7 +40,7 @@ def snapshot(root):
     files = {}
     for directory in ('urban_dreamer', 'tools', 'configs'):
         for source in sorted((ROOT / directory).rglob('*')):
-            if source.is_file() and source.suffix in {'.py', '.toml'} and '__pycache__' not in source.parts:
+            if source.is_file() and (source.suffix in {'.py', '.toml'} or source.name in {'LICENSE', 'README.md'}) and '__pycache__' not in source.parts:
                 relative = source.relative_to(ROOT)
                 target = destination / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -46,11 +52,18 @@ def snapshot(root):
 
 
 def build_runs(root, source, args, stamp):
+    if getattr(args, 'forbid_revisit', False) and getattr(args, 'sp_prior_weight', 0.) != 0.:
+        raise ValueError('forbid-revisit requires zero shortest-path prior')
     runs, gpu = [], 0
     for city in args.cities:
+        config_path = source / 'configs' / f'{city}.toml'
+        # build_runs is also used to inspect a planned snapshot before it exists.
+        config = load_config(config_path if config_path.exists() else ROOT / 'configs' / f'{city}.toml')
+        session_args = argparse.Namespace(session=None, backend=None, step_seconds=None)
+        simulation_settings = resolve_collection_settings(config, session_args)
         for method in args.methods:
             device = 'cpu'
-            if method in {'gnac', 'dreamer', 'mbpo'} and args.devices:
+            if method not in {'online_ac', 'random'} and args.devices:
                 device = args.devices[gpu % len(args.devices)]
                 gpu += 1
             tool = ('collect_random_episodes.py' if method == 'random' else
@@ -59,23 +72,29 @@ def build_runs(root, source, args, stamp):
             command = [sys.executable, '-u', str(source / 'tools' / tool),
                 '--config', str(source / 'configs' / f'{city}.toml'), '--output-dir', str(output),
                 '--episodes', str(args.episodes), '--seed', str(args.seed), '--device', device,
-                '--threads', '1', '--session', 'event', '--backend', 'libsumo', '--step-seconds', '1']
+                '--threads', '1', '--session', session_args.session, '--backend', session_args.backend,
+                '--step-seconds', str(session_args.step_seconds)]
+            if getattr(args, 'forbid_revisit', False):
+                command += ['--forbid-revisit']
+            command += ['--global-reward-only' if getattr(args, 'global_reward_only', True)
+                        else '--no-global-reward-only']
+            command += ['--reward-objective', getattr(args, 'reward_objective', 'observed_mean')]
             if method != 'random':
                 command += ['--save-episodes', '--checkpoint-every', str(args.checkpoint_every),
                     '--eval-every', str(args.eval_every), '--eval-seeds', str(args.eval_seeds),
                     '--skip-reference-baselines', '--skip-initial-evaluation']
-                if getattr(args, 'sp_prior_weight', 0.) > 0:
-                    command += ['--sp-prior-weight', str(args.sp_prior_weight),
-                        '--sp-prior-temperature', str(args.sp_prior_temperature),
-                        '--sp-prior-hold-episodes', str(args.sp_prior_hold_episodes),
-                        '--sp-prior-off-episode', str(args.sp_prior_off_episode)]
+                command += ['--sp-prior-weight', str(getattr(args, 'sp_prior_weight', 0.)),
+                    '--sp-prior-temperature', str(getattr(args, 'sp_prior_temperature', 30.)),
+                    '--sp-prior-hold-episodes', str(getattr(args, 'sp_prior_hold_episodes', 200)),
+                    '--sp-prior-off-episode', str(getattr(args, 'sp_prior_off_episode', 1000))]
             if method not in {'random', 'online_ac'}:
                 command += ['--method', method]
             name = city + '_' + method
             runs.append(dict(id=name, city=city, method=method, device=device, command=command,
                 output_dir=str(output), log=str(root / 'logs' / f'{name}.log'),
                 state=str(root / 'processes' / f'{name}.json'),
-                tmux_session=f'uddata_{stamp}_{name}', launched=False))
+                tmux_session=f'uddata_{stamp}_{name}', launched=False,
+                simulation_settings=simulation_settings))
     return runs
 
 
@@ -93,16 +112,25 @@ def launch(args):
     runs = build_runs(root, source, args, stamp)
     manifest = dict(created_at=now(), episode_budget=args.episodes,
         total_training_episodes=args.episodes * len(runs), seed=args.seed,
+        forbid_revisit=bool(getattr(args, 'forbid_revisit', False)),
+        reward_mode=('global_only' if getattr(args, 'global_reward_only', True)
+                     else 'global_with_individual_timeout'),
+        revisit_policy=dict(node='directed_external_road_edge',
+            enabled=bool(getattr(args, 'forbid_revisit', False)),
+            mask='visited_and_current_nodes_plus_unreachable_successors',
+            fallback='none'),
         session_protocol='event', action_semantics='branch-only', backend='libsumo', step_seconds=1.,
+        simulation_settings_by_city={entry['city']: entry['simulation_settings'] for entry in runs},
         evaluation_seeds=[args.seed + 10000 + i for i in range(args.eval_seeds)],
         holdout_seeds=[args.seed + 20000 + i for i in range(args.eval_seeds)],
         evaluation_archived_as_training=False, source_snapshot=str(source),
         min_free_gb=args.min_free_gb, max_restarts=args.max_restarts,
+        cuda_visible_devices=getattr(args, 'cuda_visible_devices', None),
         policy_prior=dict(enabled=args.sp_prior_weight > 0,
             initial_weight=args.sp_prior_weight, temperature_seconds=args.sp_prior_temperature,
             hold_episodes=args.sp_prior_hold_episodes, off_episode=args.sp_prior_off_episode,
             decay='cosine', schedule_clock='real_training_episode',
-            cost='junction_time + candidate_edge_free_flow_time + downstream_remaining_time',
+            cost='model-specific junction_time + candidate_edge_free_flow_time + downstream_remaining_time; meso junction_time=0',
             bias='-weight * (cost - minimum_legal_cost) / temperature_seconds',
             evaluation='scheduled_prior and zero_prior on identical fixed demand seeds',
             best_selection='zero_prior' if args.sp_prior_weight > 0 else 'deterministic',
@@ -139,6 +167,8 @@ def supervise(args):
     entry = next(run for run in manifest['runs'] if run['id'] == args.run_id)
     state_path = Path(entry['state'])
     environment = dict(os.environ, OMP_NUM_THREADS='1', MKL_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1')
+    if manifest.get('cuda_visible_devices') is not None:
+        environment['CUDA_VISIBLE_DEVICES'] = manifest['cuda_visible_devices']
     output = Path(entry['output_dir'])
     checkpoint = output / ('progress.json' if entry['method'] == 'random' else 'latest.pt')
     for attempt in range(manifest['max_restarts'] + 1):
@@ -211,13 +241,24 @@ def main(argv=None):
     parser.add_argument('--min-free-gb', type=float, default=10.)
     parser.add_argument('--max-restarts', type=int, default=3)
     parser.add_argument('--cities', nargs='+', choices=CITIES, default=list(CITIES))
-    parser.add_argument('--methods', nargs='+', choices=METHODS, default=list(METHODS))
+    parser.add_argument('--methods', nargs='+', choices=METHODS + EXTRA_METHODS, default=list(METHODS))
     parser.add_argument('--devices', nargs='*', default=['cuda:0', 'cuda:1'])
-    parser.add_argument('--sp-prior-weight', type=float, default=0.)
+    parser.add_argument('--cuda-visible-devices',
+                        help='Restrict worker CUDA visibility, including checkpoint RNG allocation')
+    parser.add_argument('--sp-prior-weight', type=float, default=0.,
+                        help='Initial shortest-path prior weight (default: 0; pass 1 to enable)')
     parser.add_argument('--sp-prior-temperature', type=float, default=30.)
     parser.add_argument('--sp-prior-hold-episodes', type=int, default=200)
     parser.add_argument('--sp-prior-off-episode', type=int, default=1000)
+    parser.add_argument('--forbid-revisit', action='store_true')
+    parser.add_argument('--global-reward-only', action=argparse.BooleanOptionalAction, default=True,
+                        help='Use causal observed-mean global reward; legacy shaping requires an explicit legacy objective')
+    parser.add_argument('--reward-objective', choices=('observed_mean', 'legacy_exposure'), default='observed_mean')
     args = parser.parse_args(argv)
+    if args.reward_objective == 'observed_mean' and not args.global_reward_only:
+        parser.error('observed_mean requires --global-reward-only')
+    if args.forbid_revisit and args.sp_prior_weight != 0.:
+        parser.error('forbid-revisit requires zero shortest-path prior')
     if min(args.episodes, args.eval_every, args.eval_seeds, args.checkpoint_every) < 1 or args.min_free_gb <= 0 or args.max_restarts < 0:
         parser.error('invalid collection budgets')
     if args.mode == 'launch':

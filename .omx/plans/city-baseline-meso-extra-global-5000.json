@@ -1,0 +1,43 @@
+{
+  "status": "stopped_by_user",
+  "output_root": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632",
+  "reference_output_root": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_meso_sp_prior_5000ep_20261006_160058",
+  "methods": [
+    "ippo",
+    "mappo",
+    "iql",
+    "mamba"
+  ],
+  "cities": [
+    "ingolstadt_custom",
+    "gretz_armainvilliers",
+    "fontenay_en_parisis"
+  ],
+  "episode_budget_per_run": 5000,
+  "target_episodes": 60000,
+  "device": "cuda:0",
+  "cuda_visible_devices": "0",
+  "reward_mode": "global_only",
+  "forbid_revisit": false,
+  "policy_prior": {
+    "enabled": true,
+    "initial_weight": 1.0,
+    "temperature_seconds": 30.0,
+    "hold_episodes": 200,
+    "off_episode": 1000,
+    "decay": "cosine",
+    "schedule_clock": "real_training_episode",
+    "cost": "model-specific junction_time + candidate_edge_free_flow_time + downstream_remaining_time; meso junction_time=0",
+    "bias": "-weight * (cost - minimum_legal_cost) / temperature_seconds",
+    "evaluation": "scheduled_prior and zero_prior on identical fixed demand seeds",
+    "best_selection": "zero_prior",
+    "random_control": "uniform legal actions; no prior",
+    "mbpo_synthetic_buffer": "discard old-weight rows whenever scheduled weight changes"
+  },
+  "smoke_verification": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/additional_baselines_alignment_20261006/meso_smoke.json",
+  "verification": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/launch_verification.json",
+  "first_episode_verified": 12,
+  "stopped_at": "2026-10-07T12:55:26.408121+00:00",
+  "preservation_record": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/preservation_and_stop.json",
+  "preserved_episodes": 4437
+}

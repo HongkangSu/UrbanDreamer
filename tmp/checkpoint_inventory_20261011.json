@@ -1,0 +1,6949 @@
+{
+  "outputs/toy_ac_global_deterministic_5000_seed42_20260929": [
+    {
+      "name": "initial.pt",
+      "bytes": 656508,
+      "inode": 69608274,
+      "links": 1,
+      "mtime": 1790703161.8584125
+    },
+    {
+      "name": "best.pt",
+      "bytes": 656259,
+      "inode": 69608273,
+      "links": 1,
+      "mtime": 1790703161.8544126
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1946521,
+      "inode": 69608275,
+      "links": 1,
+      "mtime": 1790716731.2546756
+    }
+  ],
+  "outputs/ingolstadt_codec_diagnosis_20261002": [
+    {
+      "name": "codec_checkpoint_original.pt",
+      "bytes": 32988907,
+      "inode": 70290713,
+      "links": 1,
+      "mtime": 1790949036.7411013
+    },
+    {
+      "name": "codec_checkpoint_vehicle_units_all.pt",
+      "bytes": 32990473,
+      "inode": 70290715,
+      "links": 1,
+      "mtime": 1790949037.005109
+    },
+    {
+      "name": "codec_checkpoint_vehicle_units_balanced.pt",
+      "bytes": 32991343,
+      "inode": 70290716,
+      "links": 1,
+      "mtime": 1790949037.2371159
+    }
+  ],
+  "outputs/ingolstadt_online_meso_sp_prior_20261007": [
+    {
+      "name": "continuation_checkpoint.pt",
+      "bytes": 225591350,
+      "inode": 70815968,
+      "links": 1,
+      "mtime": 1791375009.1945093
+    },
+    {
+      "name": "initialization_checkpoint.pt",
+      "bytes": 33892355,
+      "inode": 70816044,
+      "links": 1,
+      "mtime": 1791302574.0103579
+    },
+    {
+      "name": "source_checkpoint.pt",
+      "bytes": 225500230,
+      "inode": 70815899,
+      "links": 1,
+      "mtime": 1791374934.5874665
+    }
+  ],
+  "outputs/dta_gretz_armainvilliers_seed42_20260930": [
+    {
+      "name": "initial.pt",
+      "bytes": 10505385,
+      "inode": 69608350,
+      "links": 1,
+      "mtime": 1790798495.199506
+    },
+    {
+      "name": "best.pt",
+      "bytes": 10685972,
+      "inode": 69608349,
+      "links": 1,
+      "mtime": 1790835052.2621937
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 10685986,
+      "inode": 69608351,
+      "links": 1,
+      "mtime": 1790835434.305086
+    }
+  ],
+  "outputs/imagination_40s_20261004": [
+    {
+      "name": "checkpoint_before_parallel.pt",
+      "bytes": 284774199,
+      "inode": 69607588,
+      "links": 1,
+      "mtime": 1791144192.66544
+    }
+  ],
+  "outputs/dta_fontenay_en_parisis_seed42_20260930": [
+    {
+      "name": "initial.pt",
+      "bytes": 46577577,
+      "inode": 69608369,
+      "links": 1,
+      "mtime": 1790799588.6896646
+    },
+    {
+      "name": "best.pt",
+      "bytes": 47263828,
+      "inode": 69608368,
+      "links": 1,
+      "mtime": 1790818617.502598
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 47377698,
+      "inode": 69608370,
+      "links": 1,
+      "mtime": 1790863153.2170773
+    }
+  ],
+  "outputs/toy_baseline_dta_5000_seed42_20260929": [
+    {
+      "name": "initial.pt",
+      "bytes": 24553,
+      "inode": 69608253,
+      "links": 1,
+      "mtime": 1790693896.7436852
+    },
+    {
+      "name": "best.pt",
+      "bytes": 24596,
+      "inode": 69608252,
+      "links": 1,
+      "mtime": 1790694197.9385078
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 24610,
+      "inode": 69608254,
+      "links": 1,
+      "mtime": 1790694197.942508
+    }
+  ],
+  "outputs/ingolstadt_online_meso_noincident_entropyfix_20261008": [
+    {
+      "name": "continuation_checkpoint.pt",
+      "bytes": 229394446,
+      "inode": 71203978,
+      "links": 1,
+      "mtime": 1791449344.3189435
+    },
+    {
+      "name": "initialization_checkpoint.pt",
+      "bytes": 33892355,
+      "inode": 71203984,
+      "links": 1,
+      "mtime": 1791388235.3061192
+    },
+    {
+      "name": "source_checkpoint.pt",
+      "bytes": 229302686,
+      "inode": 71203833,
+      "links": 1,
+      "mtime": 1791449256.2590477
+    }
+  ],
+  "outputs/toy_baseline_mbpo_5000_seed42_20260929": [
+    {
+      "name": "initial.pt",
+      "bytes": 5119330,
+      "inode": 69608259,
+      "links": 1,
+      "mtime": 1790693111.5953274
+    },
+    {
+      "name": "best.pt",
+      "bytes": 5117391,
+      "inode": 69608258,
+      "links": 1,
+      "mtime": 1790693111.587327
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 25047806,
+      "inode": 69608260,
+      "links": 1,
+      "mtime": 1790703553.0494401
+    }
+  ],
+  "outputs/ingolstadt_online_libsumo_20261004": [
+    {
+      "name": "source_checkpoint.pt",
+      "bytes": 280816695,
+      "inode": 69606992,
+      "links": 1,
+      "mtime": 1791126016.3162212
+    }
+  ],
+  "outputs/toy_ac_global_fleet_seed42_20260929": [
+    {
+      "name": "initial.pt",
+      "bytes": 937898,
+      "inode": 69607893,
+      "links": 1,
+      "mtime": 1790673986.0823958
+    },
+    {
+      "name": "preserved_episode_102.pt",
+      "bytes": 2795098,
+      "inode": 69607908,
+      "links": 1,
+      "mtime": 1790675519.8746672
+    },
+    {
+      "name": "best.pt",
+      "bytes": 937311,
+      "inode": 69607892,
+      "links": 1,
+      "mtime": 1790673986.0783956
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 2790905,
+      "inode": 69607894,
+      "links": 1,
+      "mtime": 1790675517.8506303
+    }
+  ],
+  "outputs/mappo_probability_diagnosis_20261010": [
+    {
+      "name": "diagnostic.pt",
+      "bytes": 8924853,
+      "inode": 71585362,
+      "links": 1,
+      "mtime": 1791645645.7937436
+    }
+  ],
+  "outputs/ingo_temperature_decomposition_20261010": [
+    {
+      "name": "gnac_actor.pt",
+      "bytes": 3391605,
+      "inode": 71565862,
+      "links": 1,
+      "mtime": 1791604484.5016212
+    },
+    {
+      "name": "dreamer_actor.pt",
+      "bytes": 279837,
+      "inode": 71565863,
+      "links": 1,
+      "mtime": 1791604497.9462001
+    },
+    {
+      "name": "online_ac_actor.pt",
+      "bytes": 279861,
+      "inode": 71565861,
+      "links": 1,
+      "mtime": 1791604484.4736202
+    }
+  ],
+  "outputs/toy_ac_real_seed42_20260929": [
+    {
+      "name": "initial.pt",
+      "bytes": 570172,
+      "inode": 69606865,
+      "links": 1,
+      "mtime": 1790670035.513076
+    },
+    {
+      "name": "best.pt",
+      "bytes": 569923,
+      "inode": 69606840,
+      "links": 1,
+      "mtime": 1790670035.5090759
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1688217,
+      "inode": 69606866,
+      "links": 1,
+      "mtime": 1790672079.1397736
+    }
+  ],
+  "outputs/dreamer_inference_optimization_20261007": [
+    {
+      "name": "fixed_seed_fixture.pt",
+      "bytes": 339320307,
+      "inode": 70946924,
+      "links": 1,
+      "mtime": 1791386790.9969354
+    }
+  ],
+  "outputs/toy_ac_global_smoke_20260929": [
+    {
+      "name": "initial.pt",
+      "bytes": 937898,
+      "inode": 69607741,
+      "links": 1,
+      "mtime": 1790673043.7310035
+    },
+    {
+      "name": "best.pt",
+      "bytes": 2790747,
+      "inode": 69607740,
+      "links": 1,
+      "mtime": 1790673046.343116
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 2790905,
+      "inode": 69607742,
+      "links": 1,
+      "mtime": 1790673046.3511162
+    }
+  ],
+  "outputs/shortest_ingolstadt_custom_seed42_20260930": [
+    {
+      "name": "initial.pt",
+      "bytes": 570492,
+      "inode": 69608347,
+      "links": 1,
+      "mtime": 1790797982.7706928
+    },
+    {
+      "name": "best.pt",
+      "bytes": 570243,
+      "inode": 69608346,
+      "links": 1,
+      "mtime": 1790797982.7666924
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 570281,
+      "inode": 69608348,
+      "links": 1,
+      "mtime": 1790797982.7706928
+    }
+  ],
+  "outputs/ingolstadt_codec_ready_20261002": [
+    {
+      "name": "codec_dense_500.pt",
+      "bytes": 359471,
+      "inode": 70290993,
+      "links": 1,
+      "mtime": 1790953901.43393
+    },
+    {
+      "name": "codec_best.pt",
+      "bytes": 359349,
+      "inode": 70297781,
+      "links": 1,
+      "mtime": 1790956699.14452
+    },
+    {
+      "name": "codec_latest.pt",
+      "bytes": 359535,
+      "inode": 70297780,
+      "links": 1,
+      "mtime": 1790956777.7787318
+    },
+    {
+      "name": "codec_raw_seq4_4500.pt",
+      "bytes": 359471,
+      "inode": 70297779,
+      "links": 1,
+      "mtime": 1790955037.4942665
+    }
+  ],
+  "outputs/toy_ac_real_smoke_20260929": [
+    {
+      "name": "initial.pt",
+      "bytes": 570108,
+      "inode": 69606854,
+      "links": 1,
+      "mtime": 1790669888.4384015
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1687979,
+      "inode": 69606856,
+      "links": 1,
+      "mtime": 1790669891.0224478
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1688089,
+      "inode": 69606855,
+      "links": 1,
+      "mtime": 1790669891.0264478
+    }
+  ],
+  "outputs/ingo_temperature_sweep_20261010": [
+    {
+      "name": "gnac_actor.pt",
+      "bytes": 3391605,
+      "inode": 71565622,
+      "links": 1,
+      "mtime": 1791604484.5016212
+    },
+    {
+      "name": "dreamer_actor.pt",
+      "bytes": 279837,
+      "inode": 71565623,
+      "links": 1,
+      "mtime": 1791604497.9462001
+    },
+    {
+      "name": "online_ac_actor.pt",
+      "bytes": 279861,
+      "inode": 71565621,
+      "links": 1,
+      "mtime": 1791604484.4736202
+    }
+  ],
+  "outputs/toy_ac_global_only_smoke_20260929": [
+    {
+      "name": "initial.pt",
+      "bytes": 656380,
+      "inode": 69607966,
+      "links": 1,
+      "mtime": 1790675764.9714148
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1946283,
+      "inode": 69607965,
+      "links": 1,
+      "mtime": 1790675767.5434673
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1946393,
+      "inode": 69607969,
+      "links": 1,
+      "mtime": 1790675767.5474672
+    }
+  ],
+  "outputs/toy_baseline_gnac_5000_seed42_20260929": [
+    {
+      "name": "initial.pt",
+      "bytes": 774055,
+      "inode": 69608262,
+      "links": 1,
+      "mtime": 1790693117.155665
+    },
+    {
+      "name": "best.pt",
+      "bytes": 2294357,
+      "inode": 69608261,
+      "links": 1,
+      "mtime": 1790695083.2145972
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 2294517,
+      "inode": 69608263,
+      "links": 1,
+      "mtime": 1790703559.4294693
+    }
+  ],
+  "outputs/dta_ingolstadt_custom_seed42_20260930": [
+    {
+      "name": "initial.pt",
+      "bytes": 1000361,
+      "inode": 69608342,
+      "links": 1,
+      "mtime": 1790797869.9828448
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1010260,
+      "inode": 69608341,
+      "links": 1,
+      "mtime": 1790799217.4235067
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1014050,
+      "inode": 69608343,
+      "links": 1,
+      "mtime": 1790802548.3637793
+    }
+  ],
+  "outputs/ingolstadt_online_meso_20261006": [
+    {
+      "name": "decoder_calibration_latest.pt",
+      "bytes": 33934627,
+      "inode": 70552761,
+      "links": 1,
+      "mtime": 1791302567.9781976
+    },
+    {
+      "name": "initialization_checkpoint.pt",
+      "bytes": 33892355,
+      "inode": 70553235,
+      "links": 1,
+      "mtime": 1791302574.0103579
+    }
+  ],
+  "outputs/toy_baseline_gnac_global_5000_seed42_20260930": [
+    {
+      "name": "initial.pt",
+      "bytes": 860071,
+      "inode": 69608310,
+      "links": 1,
+      "mtime": 1790744045.7536867
+    },
+    {
+      "name": "best.pt",
+      "bytes": 2552405,
+      "inode": 69608309,
+      "links": 1,
+      "mtime": 1790745018.3255801
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 2552565,
+      "inode": 69608311,
+      "links": 1,
+      "mtime": 1790789045.0854852
+    }
+  ],
+  "outputs/ingo_entropy_gradient_audit_20261010": [
+    {
+      "name": "ac_checkpoint_5000.pt",
+      "bytes": 12140030,
+      "inode": 71566018,
+      "links": 1,
+      "mtime": 1791556808.2927625
+    }
+  ],
+  "outputs/shortest_gretz_armainvilliers_seed42_20260930": [
+    {
+      "name": "initial.pt",
+      "bytes": 570492,
+      "inode": 69608353,
+      "links": 1,
+      "mtime": 1790798662.8794706
+    },
+    {
+      "name": "best.pt",
+      "bytes": 570243,
+      "inode": 69608352,
+      "links": 1,
+      "mtime": 1790798662.8794706
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 570281,
+      "inode": 69608354,
+      "links": 1,
+      "mtime": 1790798662.8834708
+    }
+  ],
+  "outputs/baseline_algorithm_audit_20261007": [
+    {
+      "name": "real_episode1_mappo.pt",
+      "bytes": 20142039,
+      "inode": 70947077,
+      "links": 1,
+      "mtime": 1791384553.5271502
+    },
+    {
+      "name": "real_episode743_mappo.pt",
+      "bytes": 33108999,
+      "inode": 70947104,
+      "links": 1,
+      "mtime": 1791385749.1008022
+    }
+  ],
+  "outputs/toy_ac_global_deterministic_smoke_20260929": [
+    {
+      "name": "initial.pt",
+      "bytes": 656444,
+      "inode": 69608268,
+      "links": 1,
+      "mtime": 1790703066.5757897
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1946411,
+      "inode": 69608267,
+      "links": 1,
+      "mtime": 1790703069.175744
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1946521,
+      "inode": 69608269,
+      "links": 1,
+      "mtime": 1790703071.7317
+    }
+  ],
+  "outputs/toy_ac_global_seed42_20260929": [
+    {
+      "name": "initial.pt",
+      "bytes": 937898,
+      "inode": 69607747,
+      "links": 1,
+      "mtime": 1790673266.6441765
+    },
+    {
+      "name": "best.pt",
+      "bytes": 937311,
+      "inode": 69607746,
+      "links": 1,
+      "mtime": 1790673266.6401763
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 2790905,
+      "inode": 69607795,
+      "links": 1,
+      "mtime": 1790675572.8316472
+    }
+  ],
+  "outputs/toy_ac_local_only_5000_seed42_20260929": [
+    {
+      "name": "initial.pt",
+      "bytes": 570428,
+      "inode": 69608216,
+      "links": 1,
+      "mtime": 1790686427.226834
+    },
+    {
+      "name": "best.pt",
+      "bytes": 570179,
+      "inode": 69608215,
+      "links": 1,
+      "mtime": 1790686427.226834
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1688409,
+      "inode": 69608217,
+      "links": 1,
+      "mtime": 1790716730.4626615
+    }
+  ],
+  "outputs/toy_ac_global_only_seed42_20260929": [
+    {
+      "name": "initial.pt",
+      "bytes": 656444,
+      "inode": 69608023,
+      "links": 1,
+      "mtime": 1790676142.2714732
+    },
+    {
+      "name": "best.pt",
+      "bytes": 656195,
+      "inode": 69608022,
+      "links": 1,
+      "mtime": 1790676142.2714732
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1946457,
+      "inode": 69608024,
+      "links": 1,
+      "mtime": 1790716492.626567
+    }
+  ],
+  "outputs/toy_ac_global_only_checked_smoke_20260929": [
+    {
+      "name": "initial.pt",
+      "bytes": 656444,
+      "inode": 69607979,
+      "links": 1,
+      "mtime": 1790675996.1322744
+    },
+    {
+      "name": "best.pt",
+      "bytes": 656195,
+      "inode": 69607977,
+      "links": 1,
+      "mtime": 1790675996.1322744
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1946457,
+      "inode": 69607983,
+      "links": 1,
+      "mtime": 1790675998.7603312
+    }
+  ],
+  "outputs/toy_baseline_dreamer_5000_seed42_20260929": [
+    {
+      "name": "initial.pt",
+      "bytes": 5200266,
+      "inode": 69608256,
+      "links": 1,
+      "mtime": 1790693111.4473183
+    },
+    {
+      "name": "best.pt",
+      "bytes": 5197599,
+      "inode": 69608255,
+      "links": 1,
+      "mtime": 1790693111.4433181
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 72966658,
+      "inode": 69608257,
+      "links": 1,
+      "mtime": 1790703542.3533936
+    }
+  ],
+  "outputs/ingo_cohort_reward_audit_20261011": [
+    {
+      "name": "checkpoint.pt",
+      "bytes": 380904131,
+      "inode": 71587386,
+      "links": 1,
+      "mtime": 1791693360.4668014
+    }
+  ],
+  "outputs/ingo_bounded_critic_candidate_20261011": [
+    {
+      "name": "source_checkpoint.pt",
+      "bytes": 380904131,
+      "inode": 71587887,
+      "links": 1,
+      "mtime": 1791696291.3287156
+    }
+  ],
+  "outputs/ingolstadt_online_meso_noincident_noprior_20261007": [
+    {
+      "name": "initialization_checkpoint.pt",
+      "bytes": 33892355,
+      "inode": 71077712,
+      "links": 1,
+      "mtime": 1791388235.3061192
+    }
+  ],
+  "outputs/toy_baseline_mbpo_global_5000_seed42_20260930": [
+    {
+      "name": "initial.pt",
+      "bytes": 5205346,
+      "inode": 69608304,
+      "links": 1,
+      "mtime": 1790744040.426036
+    },
+    {
+      "name": "best.pt",
+      "bytes": 5203343,
+      "inode": 69608303,
+      "links": 1,
+      "mtime": 1790744040.4180365
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 23618622,
+      "inode": 69608305,
+      "links": 1,
+      "mtime": 1790839878.4046206
+    }
+  ],
+  "outputs/toy_baseline_dreamer_global_5000_seed42_20260930": [
+    {
+      "name": "initial.pt",
+      "bytes": 4918492,
+      "inode": 69608307,
+      "links": 1,
+      "mtime": 1790744041.0859923
+    },
+    {
+      "name": "best.pt",
+      "bytes": 4916163,
+      "inode": 69608306,
+      "links": 1,
+      "mtime": 1790744041.0739932
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 73629904,
+      "inode": 69608308,
+      "links": 1,
+      "mtime": 1790863217.8860781
+    }
+  ],
+  "outputs/montereau_actor_only_eval_20261011": [
+    {
+      "name": "load_probe.pt",
+      "bytes": 54978613,
+      "inode": 71589663,
+      "links": 1,
+      "mtime": 1791715316.4947946
+    },
+    {
+      "name": "checkpoint.pt",
+      "bytes": 54978046,
+      "inode": 71589520,
+      "links": 1,
+      "mtime": 1791715156.2104912
+    }
+  ],
+  "outputs/shortest_fontenay_en_parisis_seed42_20260930": [
+    {
+      "name": "initial.pt",
+      "bytes": 570492,
+      "inode": 69608376,
+      "links": 1,
+      "mtime": 1790800210.4613163
+    },
+    {
+      "name": "best.pt",
+      "bytes": 570243,
+      "inode": 69608375,
+      "links": 1,
+      "mtime": 1790800210.4573162
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 570281,
+      "inode": 69608377,
+      "links": 1,
+      "mtime": 1790800210.4613163
+    }
+  ],
+  "outputs/montereau_collection_speed_20261011": [
+    {
+      "name": "migration_probe.pt",
+      "bytes": 54642632,
+      "inode": 71588518,
+      "links": 1,
+      "mtime": 1791701174.7029085
+    },
+    {
+      "name": "checkpoint.pt",
+      "bytes": 54642238,
+      "inode": 71588359,
+      "links": 1,
+      "mtime": 1791700724.3557236
+    }
+  ],
+  "outputs/event_mainline_verify_20261002_libsumo/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 167070394,
+      "inode": 70290331,
+      "links": 1,
+      "mtime": 1790935220.5022643
+    }
+  ],
+  "outputs/montereau_dynamic_prior_ac_500_20261011/run": [
+    {
+      "name": "initial.pt",
+      "bytes": 18300533,
+      "inode": 71588524,
+      "links": 1,
+      "mtime": 1791701221.9640312
+    },
+    {
+      "name": "best.pt",
+      "bytes": 55051856,
+      "inode": 71589682,
+      "links": 1,
+      "mtime": 1791715445.26616
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 55052350,
+      "inode": 71590147,
+      "links": 1,
+      "mtime": 1791716735.6801238
+    }
+  ],
+  "outputs/montereau_dynamic_prior_ac_500_20261011/before_collection_speed_migration": [
+    {
+      "name": "initial.pt",
+      "bytes": 18300341,
+      "inode": 71588523,
+      "links": 1,
+      "mtime": 1791697345.0981233
+    },
+    {
+      "name": "best.pt",
+      "bytes": 18299772,
+      "inode": 71588525,
+      "links": 1,
+      "mtime": 1791697345.1341243
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 54642238,
+      "inode": 71588527,
+      "links": 1,
+      "mtime": 1791701221.536021
+    }
+  ],
+  "outputs/montereau_dynamic_prior_ac_500_20261011/before_actor_only_evaluation": [
+    {
+      "name": "initial.pt",
+      "bytes": 18300533,
+      "inode": 71589672,
+      "links": 1,
+      "mtime": 1791701221.9640312
+    },
+    {
+      "name": "best.pt",
+      "bytes": 54754256,
+      "inode": 71589673,
+      "links": 1,
+      "mtime": 1791702692.1504889
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 54978046,
+      "inode": 71589487,
+      "links": 1,
+      "mtime": 1791715441.354059
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/ingolstadt_custom/gnac": [
+    {
+      "name": "initial.pt",
+      "bytes": 7170253,
+      "inode": 70552502,
+      "links": 1,
+      "mtime": 1791301888.74363
+    },
+    {
+      "name": "best.pt",
+      "bytes": 7170169,
+      "inode": 70552501,
+      "links": 1,
+      "mtime": 1791301888.711629
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 15657751,
+      "inode": 70552750,
+      "links": 1,
+      "mtime": 1791302260.293947
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/ingolstadt_custom/mbpo": [
+    {
+      "name": "initial.pt",
+      "bytes": 119229747,
+      "inode": 70552510,
+      "links": 1,
+      "mtime": 1791301889.5636532
+    },
+    {
+      "name": "best.pt",
+      "bytes": 119229594,
+      "inode": 70552508,
+      "links": 1,
+      "mtime": 1791301889.0516386
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 360529653,
+      "inode": 70552606,
+      "links": 1,
+      "mtime": 1791302317.1634867
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/ingolstadt_custom/dreamer": [
+    {
+      "name": "initial.pt",
+      "bytes": 19383367,
+      "inode": 70552506,
+      "links": 1,
+      "mtime": 1791301888.8596332
+    },
+    {
+      "name": "best.pt",
+      "bytes": 19383208,
+      "inode": 70552505,
+      "links": 1,
+      "mtime": 1791301888.7996314
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 97746722,
+      "inode": 70552525,
+      "links": 1,
+      "mtime": 1791302134.9985237
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/ingolstadt_custom/online_ac": [
+    {
+      "name": "initial.pt",
+      "bytes": 4057717,
+      "inode": 70552485,
+      "links": 1,
+      "mtime": 1791301888.3396182
+    },
+    {
+      "name": "best.pt",
+      "bytes": 4057142,
+      "inode": 70552484,
+      "links": 1,
+      "mtime": 1791301888.331618
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 12140540,
+      "inode": 70552601,
+      "links": 1,
+      "mtime": 1791302225.3449967
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/fontenay_en_parisis/gnac": [
+    {
+      "name": "initial.pt",
+      "bytes": 261963021,
+      "inode": 70552544,
+      "links": 1,
+      "mtime": 1791301925.4486747
+    },
+    {
+      "name": "best.pt",
+      "bytes": 261962937,
+      "inode": 70552539,
+      "links": 1,
+      "mtime": 1791301923.3366146
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 261962993,
+      "inode": 70552545,
+      "links": 1,
+      "mtime": 1791301927.0607204
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/fontenay_en_parisis/mbpo": [
+    {
+      "name": "initial.pt",
+      "bytes": 1045121587,
+      "inode": 70552546,
+      "links": 1,
+      "mtime": 1791301930.3968148
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1045121434,
+      "inode": 70552542,
+      "links": 1,
+      "mtime": 1791301924.6486518
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1045121536,
+      "inode": 70552551,
+      "links": 1,
+      "mtime": 1791301935.8809702
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/fontenay_en_parisis/dreamer": [
+    {
+      "name": "initial.pt",
+      "bytes": 136788807,
+      "inode": 70552540,
+      "links": 1,
+      "mtime": 1791301923.2126112
+    },
+    {
+      "name": "best.pt",
+      "bytes": 136788648,
+      "inode": 70552533,
+      "links": 1,
+      "mtime": 1791301922.648595
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 136788754,
+      "inode": 70552543,
+      "links": 1,
+      "mtime": 1791301923.9246314
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/fontenay_en_parisis/online_ac": [
+    {
+      "name": "initial.pt",
+      "bytes": 31631989,
+      "inode": 70552536,
+      "links": 1,
+      "mtime": 1791301922.648595
+    },
+    {
+      "name": "best.pt",
+      "bytes": 31631414,
+      "inode": 70552535,
+      "links": 1,
+      "mtime": 1791301922.608594
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 31631968,
+      "inode": 70552537,
+      "links": 1,
+      "mtime": 1791301922.680596
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/gretz_armainvilliers/gnac": [
+    {
+      "name": "initial.pt",
+      "bytes": 99597453,
+      "inode": 70552524,
+      "links": 1,
+      "mtime": 1791301900.3039596
+    },
+    {
+      "name": "best.pt",
+      "bytes": 99597305,
+      "inode": 70552522,
+      "links": 1,
+      "mtime": 1791301899.7759447
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 137838231,
+      "inode": 70552752,
+      "links": 1,
+      "mtime": 1791302340.6161194
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/gretz_armainvilliers/mbpo": [
+    {
+      "name": "initial.pt",
+      "bytes": 618760563,
+      "inode": 70552528,
+      "links": 1,
+      "mtime": 1791301904.3080738
+    },
+    {
+      "name": "best.pt",
+      "bytes": 618760410,
+      "inode": 70552527,
+      "links": 1,
+      "mtime": 1791301901.8440034
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1859978165,
+      "inode": 70552741,
+      "links": 1,
+      "mtime": 1791302162.8552887
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/gretz_armainvilliers/dreamer": [
+    {
+      "name": "initial.pt",
+      "bytes": 82725447,
+      "inode": 70552520,
+      "links": 1,
+      "mtime": 1791301899.683942
+    },
+    {
+      "name": "best.pt",
+      "bytes": 82725288,
+      "inode": 70552519,
+      "links": 1,
+      "mtime": 1791301899.3599327
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 342068194,
+      "inode": 70552597,
+      "links": 1,
+      "mtime": 1791302188.311986
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/gretz_armainvilliers/online_ac": [
+    {
+      "name": "initial.pt",
+      "bytes": 18934389,
+      "inode": 70552516,
+      "links": 1,
+      "mtime": 1791301898.8479183
+    },
+    {
+      "name": "best.pt",
+      "bytes": 18933814,
+      "inode": 70552515,
+      "links": 1,
+      "mtime": 1791301898.8279176
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 56770556,
+      "inode": 70552573,
+      "links": 1,
+      "mtime": 1791302286.1746485
+    }
+  ],
+  "outputs/ingolstadt_custom/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 378896967,
+      "inode": 69606798,
+      "links": 1,
+      "mtime": 1789550742.9756284
+    }
+  ],
+  "outputs/unfinished_diagnosis_20261009/checkpoints/montereau_fault_yonne": [
+    {
+      "name": "online_ac.pt",
+      "bytes": 280621,
+      "inode": 71436031,
+      "links": 1,
+      "mtime": 1791547184.4909527
+    },
+    {
+      "name": "dta.pt",
+      "bytes": 12051925,
+      "inode": 71436033,
+      "links": 1,
+      "mtime": 1791547185.7989907
+    },
+    {
+      "name": "ippo.pt",
+      "bytes": 280753,
+      "inode": 71436032,
+      "links": 1,
+      "mtime": 1791547184.4989529
+    }
+  ],
+  "outputs/unfinished_diagnosis_20261009/checkpoints/coulommiers": [
+    {
+      "name": "online_ac.pt",
+      "bytes": 280621,
+      "inode": 71436027,
+      "links": 1,
+      "mtime": 1791547183.3829205
+    },
+    {
+      "name": "dta.pt",
+      "bytes": 10232853,
+      "inode": 71436029,
+      "links": 1,
+      "mtime": 1791547184.4109504
+    },
+    {
+      "name": "ippo.pt",
+      "bytes": 280753,
+      "inode": 71436028,
+      "links": 1,
+      "mtime": 1791547183.3909206
+    }
+  ],
+  "outputs/demand_od_screen_20261009/curriculum_pilot": [
+    {
+      "name": "final_episode0020.pt",
+      "bytes": 54521883,
+      "inode": 71441295,
+      "links": 1,
+      "mtime": 1791563884.6506913
+    }
+  ],
+  "outputs/demand_od_screen_20261009/reference_check/occupancy1250": [
+    {
+      "name": "dta_assignment_0005.pt",
+      "bytes": 6555957,
+      "inode": 71441532,
+      "links": 1,
+      "mtime": 1791565030.1995134
+    }
+  ],
+  "outputs/demand_od_screen_20261009/reference_check/occupancy1500": [
+    {
+      "name": "dta_assignment_0005.pt",
+      "bytes": 6597941,
+      "inode": 71441576,
+      "links": 1,
+      "mtime": 1791565476.2640774
+    }
+  ],
+  "outputs/demand_od_screen_20261009/reference_check/ingo1250": [
+    {
+      "name": "dta_assignment_0005.pt",
+      "bytes": 7222645,
+      "inode": 71441461,
+      "links": 1,
+      "mtime": 1791564693.1742668
+    }
+  ],
+  "outputs/demand_timing_stress_20261011/checkpoints": [
+    {
+      "name": "coulommiers.pt",
+      "bytes": 10058613,
+      "inode": 71587351,
+      "links": 1,
+      "mtime": 1791693770.8096738
+    },
+    {
+      "name": "ingolstadt_custom.pt",
+      "bytes": 1056797,
+      "inode": 71587402,
+      "links": 1,
+      "mtime": 1791693761.8814313
+    },
+    {
+      "name": "montereau_fault_yonne.pt",
+      "bytes": 6597941,
+      "inode": 71587419,
+      "links": 1,
+      "mtime": 1791693779.5259106
+    }
+  ],
+  "outputs/ingolstadt_per_transition_pretrain_20261002/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 99649313,
+      "inode": 69605469,
+      "links": 1,
+      "mtime": 1790963860.2225409
+    }
+  ],
+  "outputs/baseline_algorithm_repair_20261007/toy/iql": [
+    {
+      "name": "initial.pt",
+      "bytes": 572925,
+      "inode": 70947247,
+      "links": 1,
+      "mtime": 1791387113.601257
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1140031,
+      "inode": 70947255,
+      "links": 1,
+      "mtime": 1791387118.137194
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1140107,
+      "inode": 70947254,
+      "links": 1,
+      "mtime": 1791387118.1411939
+    }
+  ],
+  "outputs/baseline_algorithm_repair_20261007/toy/mappo": [
+    {
+      "name": "initial.pt",
+      "bytes": 663037,
+      "inode": 70947234,
+      "links": 1,
+      "mtime": 1791387106.7133548
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1954941,
+      "inode": 70947241,
+      "links": 1,
+      "mtime": 1791387107.1653483
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1955053,
+      "inode": 70947245,
+      "links": 1,
+      "mtime": 1791387111.2412903
+    }
+  ],
+  "outputs/baseline_algorithm_repair_20261007/toy/gnac": [
+    {
+      "name": "initial.pt",
+      "bytes": 866499,
+      "inode": 70947179,
+      "links": 1,
+      "mtime": 1791387087.685637
+    },
+    {
+      "name": "best.pt",
+      "bytes": 2562156,
+      "inode": 70947184,
+      "links": 1,
+      "mtime": 1791387088.1056306
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 2562318,
+      "inode": 70947195,
+      "links": 1,
+      "mtime": 1791387092.237568
+    }
+  ],
+  "outputs/baseline_algorithm_repair_20261007/toy/mbpo": [
+    {
+      "name": "initial.pt",
+      "bytes": 5212009,
+      "inode": 70947206,
+      "links": 1,
+      "mtime": 1791387096.3375063
+    },
+    {
+      "name": "best.pt",
+      "bytes": 15610635,
+      "inode": 70947218,
+      "links": 1,
+      "mtime": 1791387101.3334327
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 15610987,
+      "inode": 70947216,
+      "links": 1,
+      "mtime": 1791387101.377432
+    }
+  ],
+  "outputs/baseline_algorithm_repair_20261007/toy/dreamer": [
+    {
+      "name": "initial.pt",
+      "bytes": 4925245,
+      "inode": 70947201,
+      "links": 1,
+      "mtime": 1791387096.0695105
+    },
+    {
+      "name": "best.pt",
+      "bytes": 14973755,
+      "inode": 70947221,
+      "links": 1,
+      "mtime": 1791387102.9574091
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 14974823,
+      "inode": 70947217,
+      "links": 1,
+      "mtime": 1791387103.033408
+    }
+  ],
+  "outputs/baseline_algorithm_repair_20261007/toy/ippo": [
+    {
+      "name": "initial.pt",
+      "bytes": 367869,
+      "inode": 70947225,
+      "links": 1,
+      "mtime": 1791387105.3013752
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1069437,
+      "inode": 70947232,
+      "links": 1,
+      "mtime": 1791387105.6973693
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1069549,
+      "inode": 70947242,
+      "links": 1,
+      "mtime": 1791387109.8693097
+    }
+  ],
+  "outputs/baseline_algorithm_repair_20261007/toy/online_ac": [
+    {
+      "name": "initial.pt",
+      "bytes": 661749,
+      "inode": 70947183,
+      "links": 1,
+      "mtime": 1791387087.7176366
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1952845,
+      "inode": 70947193,
+      "links": 1,
+      "mtime": 1791387088.085631
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1953405,
+      "inode": 70947178,
+      "links": 1,
+      "mtime": 1791387092.285567
+    }
+  ],
+  "outputs/baseline_algorithm_repair_20261007/toy/mamba": [
+    {
+      "name": "initial.pt",
+      "bytes": 41880035,
+      "inode": 71077792,
+      "links": 1,
+      "mtime": 1791388549.3448718
+    },
+    {
+      "name": "best.pt",
+      "bytes": 110711995,
+      "inode": 71077802,
+      "links": 1,
+      "mtime": 1791388553.0409064
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 110785367,
+      "inode": 71077804,
+      "links": 1,
+      "mtime": 1791388561.656987
+    }
+  ],
+  "outputs/ingolstadt_online_meso_sp_prior_20261007/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 215980694,
+      "inode": 70816359,
+      "links": 1,
+      "mtime": 1791388168.2015908
+    }
+  ],
+  "outputs/ingolstadt_bf16_pretrain_20261002/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 99641121,
+      "inode": 69605634,
+      "links": 1,
+      "mtime": 1790994006.9122634
+    }
+  ],
+  "outputs/meso_decline_diagnosis_20261007/frozen/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 225217596,
+      "inode": 70815767,
+      "links": 1,
+      "mtime": 1791370716.5832334
+    }
+  ],
+  "outputs/imagination_40s_20261004/snapshot/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 277582327,
+      "inode": 69607191,
+      "links": 1,
+      "mtime": 1791143215.7070951
+    }
+  ],
+  "outputs/online_profile_round2_20261004/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 294230903,
+      "inode": 69606893,
+      "links": 1,
+      "mtime": 1791124127.630928
+    }
+  ],
+  "outputs/noincident_decline_diagnosis_20261008/frozen/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 225934928,
+      "inode": 71203200,
+      "links": 1,
+      "mtime": 1791445253.6422608
+    }
+  ],
+  "outputs/noincident_decline_diagnosis_20261008/entropy/off": [
+    {
+      "name": "experimental_state.pt",
+      "bytes": 226032405,
+      "inode": 71203395,
+      "links": 1,
+      "mtime": 1791446964.4399538
+    }
+  ],
+  "outputs/noincident_decline_diagnosis_20261008/entropy/legacy": [
+    {
+      "name": "experimental_state.pt",
+      "bytes": 226032405,
+      "inode": 71203367,
+      "links": 1,
+      "mtime": 1791446357.492587
+    }
+  ],
+  "outputs/noincident_decline_diagnosis_20261008/entropy/population": [
+    {
+      "name": "experimental_state.pt",
+      "bytes": 226032405,
+      "inode": 71203422,
+      "links": 1,
+      "mtime": 1791446657.109973
+    }
+  ],
+  "outputs/no_revisit_validation_20261004_195622/staged_gnac": [
+    {
+      "name": "initial.pt",
+      "bytes": 866189,
+      "inode": 69607807,
+      "links": 1,
+      "mtime": 1791144398.0596664
+    },
+    {
+      "name": "best.pt",
+      "bytes": 2562355,
+      "inode": 69607821,
+      "links": 1,
+      "mtime": 1791144399.5156853
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 2562519,
+      "inode": 69607805,
+      "links": 1,
+      "mtime": 1791144399.5236855
+    }
+  ],
+  "outputs/no_revisit_validation_20261004_195622/gnac": [
+    {
+      "name": "initial.pt",
+      "bytes": 865273,
+      "inode": 69607513,
+      "links": 1,
+      "mtime": 1791143784.681103
+    },
+    {
+      "name": "best.pt",
+      "bytes": 2560933,
+      "inode": 69607536,
+      "links": 1,
+      "mtime": 1791143785.2050984
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 2561093,
+      "inode": 69607512,
+      "links": 1,
+      "mtime": 1791143785.2130983
+    }
+  ],
+  "outputs/no_revisit_validation_20261004_195622/mbpo": [
+    {
+      "name": "initial.pt",
+      "bytes": 5210783,
+      "inode": 69607517,
+      "links": 1,
+      "mtime": 1791143784.7411025
+    },
+    {
+      "name": "best.pt",
+      "bytes": 15683331,
+      "inode": 69607540,
+      "links": 1,
+      "mtime": 1791143785.7090938
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 15683681,
+      "inode": 69607542,
+      "links": 1,
+      "mtime": 1791143785.7530935
+    }
+  ],
+  "outputs/no_revisit_validation_20261004_195622/staged_dreamer": [
+    {
+      "name": "initial.pt",
+      "bytes": 4925255,
+      "inode": 69607806,
+      "links": 1,
+      "mtime": 1791144398.0636663
+    },
+    {
+      "name": "best.pt",
+      "bytes": 14993187,
+      "inode": 69607822,
+      "links": 1,
+      "mtime": 1791144400.863703
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 14994297,
+      "inode": 69607793,
+      "links": 1,
+      "mtime": 1791144400.947704
+    }
+  ],
+  "outputs/no_revisit_validation_20261004_195622/staged_mbpo": [
+    {
+      "name": "initial.pt",
+      "bytes": 5212019,
+      "inode": 69607791,
+      "links": 1,
+      "mtime": 1791144397.791663
+    },
+    {
+      "name": "best.pt",
+      "bytes": 15692179,
+      "inode": 69607825,
+      "links": 1,
+      "mtime": 1791144400.1836941
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 15732597,
+      "inode": 69609554,
+      "links": 1,
+      "mtime": 1791145170.9772859
+    }
+  ],
+  "outputs/no_revisit_validation_20261004_195622/dreamer": [
+    {
+      "name": "initial.pt",
+      "bytes": 4923955,
+      "inode": 69607507,
+      "links": 1,
+      "mtime": 1791143784.6411035
+    },
+    {
+      "name": "best.pt",
+      "bytes": 14989459,
+      "inode": 69607539,
+      "links": 1,
+      "mtime": 1791143786.713085
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 14990565,
+      "inode": 69607506,
+      "links": 1,
+      "mtime": 1791143786.7890842
+    }
+  ],
+  "outputs/no_revisit_validation_20261004_195622/online_ac": [
+    {
+      "name": "initial.pt",
+      "bytes": 661109,
+      "inode": 69607500,
+      "links": 1,
+      "mtime": 1791143784.561104
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1952208,
+      "inode": 69607533,
+      "links": 1,
+      "mtime": 1791143784.9931002
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1952766,
+      "inode": 69607496,
+      "links": 1,
+      "mtime": 1791143784.9971
+    }
+  ],
+  "outputs/no_revisit_validation_20261004_195622/staged_online_ac": [
+    {
+      "name": "initial.pt",
+      "bytes": 661749,
+      "inode": 69607782,
+      "links": 1,
+      "mtime": 1791144397.415658
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1952778,
+      "inode": 69607810,
+      "links": 1,
+      "mtime": 1791144398.1316674
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1953404,
+      "inode": 69609552,
+      "links": 1,
+      "mtime": 1791145165.5371747
+    }
+  ],
+  "outputs/ingolstadt_online_meso_noincident_entropyfix_20261008/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 156880145,
+      "inode": 71195541,
+      "links": 1,
+      "mtime": 1791577085.9609838
+    }
+  ],
+  "outputs/mainline_global_poisson_smoke_20261001/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 169030648,
+      "inode": 69630544,
+      "links": 1,
+      "mtime": 1790869890.4864964
+    }
+  ],
+  "outputs/event_mainline_verify_20261002_completed/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 167048339,
+      "inode": 70290445,
+      "links": 1,
+      "mtime": 1790936104.073532
+    }
+  ],
+  "outputs/dta_so_current_networks_50iter_20261008/montereau_fault_yonne": [
+    {
+      "name": "selected_assignment.pt",
+      "bytes": 11791093,
+      "inode": 71310581,
+      "links": 1,
+      "mtime": 1791462389.6715462
+    },
+    {
+      "name": "assignment_0000.pt",
+      "bytes": 11269725,
+      "inode": 71310618,
+      "links": 1,
+      "mtime": 1791461674.054043
+    },
+    {
+      "name": "assignment_0005.pt",
+      "bytes": 11791069,
+      "inode": 71310640,
+      "links": 1,
+      "mtime": 1791462390.4795477
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 11770407,
+      "inode": 71310682,
+      "links": 1,
+      "mtime": 1791462245.4034953
+    },
+    {
+      "name": "assignment_0001.pt",
+      "bytes": 11491933,
+      "inode": 71310617,
+      "links": 1,
+      "mtime": 1791461912.7055578
+    }
+  ],
+  "outputs/dta_so_current_networks_50iter_20261008/coulommiers": [
+    {
+      "name": "selected_assignment.pt",
+      "bytes": 10140341,
+      "inode": 71310576,
+      "links": 1,
+      "mtime": 1791462081.5720513
+    },
+    {
+      "name": "assignment_0020.pt",
+      "bytes": 10124765,
+      "inode": 71310622,
+      "links": 1,
+      "mtime": 1791461913.0855532
+    },
+    {
+      "name": "assignment_0000.pt",
+      "bytes": 9955037,
+      "inode": 71310586,
+      "links": 1,
+      "mtime": 1791461539.4823008
+    },
+    {
+      "name": "assignment_0005.pt",
+      "bytes": 10077469,
+      "inode": 71310584,
+      "links": 1,
+      "mtime": 1791461668.390193
+    },
+    {
+      "name": "assignment_0010.pt",
+      "bytes": 10107293,
+      "inode": 71310599,
+      "links": 1,
+      "mtime": 1791461751.916207
+    },
+    {
+      "name": "assignment_0040.pt",
+      "bytes": 10150173,
+      "inode": 71310656,
+      "links": 1,
+      "mtime": 1791462248.2714918
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 10149479,
+      "inode": 71310700,
+      "links": 1,
+      "mtime": 1791462384.355537
+    },
+    {
+      "name": "assignment_0030.pt",
+      "bytes": 10140317,
+      "inode": 71310641,
+      "links": 1,
+      "mtime": 1791462082.3360467
+    },
+    {
+      "name": "assignment_0001.pt",
+      "bytes": 9994077,
+      "inode": 71310585,
+      "links": 1,
+      "mtime": 1791461588.816563
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/ingolstadt_custom/iql": [
+    {
+      "name": "initial.pt",
+      "bytes": 572413,
+      "inode": 70684799,
+      "links": 2,
+      "mtime": 1791308803.8351989
+    },
+    {
+      "name": "best.pt",
+      "bytes": 142369215,
+      "inode": 70686505,
+      "links": 2,
+      "mtime": 1791319325.0989237
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 143054027,
+      "inode": 70693792,
+      "links": 1,
+      "mtime": 1791377724.2515972
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/ingolstadt_custom/mappo": [
+    {
+      "name": "initial.pt",
+      "bytes": 4057789,
+      "inode": 70684804,
+      "links": 2,
+      "mtime": 1791308803.8992097
+    },
+    {
+      "name": "best.pt",
+      "bytes": 12141245,
+      "inode": 70685848,
+      "links": 2,
+      "mtime": 1791314963.2310152
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 12141421,
+      "inode": 70693764,
+      "links": 1,
+      "mtime": 1791377655.0460715
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/ingolstadt_custom/ippo": [
+    {
+      "name": "initial.pt",
+      "bytes": 367037,
+      "inode": 70684794,
+      "links": 2,
+      "mtime": 1791308803.8031933
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1068989,
+      "inode": 70691528,
+      "links": 2,
+      "mtime": 1791358134.600188
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1069165,
+      "inode": 70693787,
+      "links": 1,
+      "mtime": 1791377686.7187674
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/ingolstadt_custom/mamba": [
+    {
+      "name": "initial.pt",
+      "bytes": 41280141,
+      "inode": 70684806,
+      "links": 2,
+      "mtime": 1791308804.1512535
+    },
+    {
+      "name": "best.pt",
+      "bytes": 163224971,
+      "inode": 70686506,
+      "links": 2,
+      "mtime": 1791319497.4826186
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 160662315,
+      "inode": 70693728,
+      "links": 1,
+      "mtime": 1791377695.2789564
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/fontenay_en_parisis/iql": [
+    {
+      "name": "initial.pt",
+      "bytes": 572413,
+      "inode": 70684841,
+      "links": 2,
+      "mtime": 1791308867.3096573
+    },
+    {
+      "name": "best.pt",
+      "bytes": 572353,
+      "inode": 70684840,
+      "links": 2,
+      "mtime": 1791308867.3056567
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 177568203,
+      "inode": 70693769,
+      "links": 1,
+      "mtime": 1791377662.27423
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/fontenay_en_parisis/mappo": [
+    {
+      "name": "initial.pt",
+      "bytes": 31632061,
+      "inode": 70684851,
+      "links": 2,
+      "mtime": 1791308876.4590847
+    },
+    {
+      "name": "best.pt",
+      "bytes": 31632001,
+      "inode": 70684850,
+      "links": 2,
+      "mtime": 1791308875.8749943
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 94864237,
+      "inode": 70693677,
+      "links": 1,
+      "mtime": 1791377145.2396533
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/fontenay_en_parisis/ippo": [
+    {
+      "name": "initial.pt",
+      "bytes": 367037,
+      "inode": 70684846,
+      "links": 2,
+      "mtime": 1791308871.1742628
+    },
+    {
+      "name": "best.pt",
+      "bytes": 366977,
+      "inode": 70684845,
+      "links": 2,
+      "mtime": 1791308871.170262
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1069165,
+      "inode": 70693718,
+      "links": 1,
+      "mtime": 1791377265.193931
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/fontenay_en_parisis/mamba": [
+    {
+      "name": "initial.pt",
+      "bytes": 41339597,
+      "inode": 70684801,
+      "links": 2,
+      "mtime": 1791308867.249648
+    },
+    {
+      "name": "best.pt",
+      "bytes": 41339003,
+      "inode": 70684838,
+      "links": 2,
+      "mtime": 1791308867.0056098
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 277369451,
+      "inode": 70693774,
+      "links": 1,
+      "mtime": 1791377667.9663548
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/gretz_armainvilliers/iql": [
+    {
+      "name": "initial.pt",
+      "bytes": 572413,
+      "inode": 70684815,
+      "links": 2,
+      "mtime": 1791308824.050639
+    },
+    {
+      "name": "best.pt",
+      "bytes": 194723007,
+      "inode": 70691565,
+      "links": 2,
+      "mtime": 1791358035.0008438
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 194779211,
+      "inode": 70693681,
+      "links": 1,
+      "mtime": 1791377688.7948132
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/gretz_armainvilliers/mappo": [
+    {
+      "name": "initial.pt",
+      "bytes": 18934461,
+      "inode": 70684823,
+      "links": 2,
+      "mtime": 1791308824.754757
+    },
+    {
+      "name": "best.pt",
+      "bytes": 56771261,
+      "inode": 70688063,
+      "links": 2,
+      "mtime": 1791331426.2795043
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 56771437,
+      "inode": 70693773,
+      "links": 1,
+      "mtime": 1791377653.7900438
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/gretz_armainvilliers/ippo": [
+    {
+      "name": "initial.pt",
+      "bytes": 367037,
+      "inode": 70684819,
+      "links": 2,
+      "mtime": 1791308824.170659
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1068989,
+      "inode": 70693336,
+      "links": 2,
+      "mtime": 1791375064.1366706
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1069165,
+      "inode": 70693770,
+      "links": 1,
+      "mtime": 1791377724.1675954
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/gretz_armainvilliers/mamba": [
+    {
+      "name": "initial.pt",
+      "bytes": 41369357,
+      "inode": 70684811,
+      "links": 2,
+      "mtime": 1791308823.8586068
+    },
+    {
+      "name": "best.pt",
+      "bytes": 297089099,
+      "inode": 70690377,
+      "links": 2,
+      "mtime": 1791348136.4156468
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 314219051,
+      "inode": 70693785,
+      "links": 1,
+      "mtime": 1791377688.2028003
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/ingolstadt_custom/iql": [
+    {
+      "name": "initial.pt",
+      "bytes": 572413,
+      "inode": 70684799,
+      "links": 2,
+      "mtime": 1791308803.8351989
+    },
+    {
+      "name": "best.pt",
+      "bytes": 142369215,
+      "inode": 70686505,
+      "links": 2,
+      "mtime": 1791319325.0989237
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 142772043,
+      "inode": 70693581,
+      "links": 1,
+      "mtime": 1791376388.3192232
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/ingolstadt_custom/mappo": [
+    {
+      "name": "initial.pt",
+      "bytes": 4057789,
+      "inode": 70684804,
+      "links": 2,
+      "mtime": 1791308803.8992097
+    },
+    {
+      "name": "best.pt",
+      "bytes": 12141245,
+      "inode": 70685848,
+      "links": 2,
+      "mtime": 1791314963.2310152
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 12141357,
+      "inode": 70693557,
+      "links": 1,
+      "mtime": 1791376417.947225
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/ingolstadt_custom/ippo": [
+    {
+      "name": "initial.pt",
+      "bytes": 367037,
+      "inode": 70684794,
+      "links": 2,
+      "mtime": 1791308803.8031933
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1068989,
+      "inode": 70691528,
+      "links": 2,
+      "mtime": 1791358134.600188
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1069101,
+      "inode": 70693523,
+      "links": 1,
+      "mtime": 1791376398.4432192
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/ingolstadt_custom/mamba": [
+    {
+      "name": "initial.pt",
+      "bytes": 41280141,
+      "inode": 70684806,
+      "links": 2,
+      "mtime": 1791308804.1512535
+    },
+    {
+      "name": "best.pt",
+      "bytes": 163224971,
+      "inode": 70686506,
+      "links": 2,
+      "mtime": 1791319497.4826186
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 161793835,
+      "inode": 70693589,
+      "links": 1,
+      "mtime": 1791376455.947286
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/fontenay_en_parisis/iql": [
+    {
+      "name": "initial.pt",
+      "bytes": 572413,
+      "inode": 70684841,
+      "links": 2,
+      "mtime": 1791308867.3096573
+    },
+    {
+      "name": "best.pt",
+      "bytes": 572353,
+      "inode": 70684840,
+      "links": 2,
+      "mtime": 1791308867.3056567
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 177611403,
+      "inode": 70693458,
+      "links": 1,
+      "mtime": 1791375900.5807986
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/fontenay_en_parisis/mappo": [
+    {
+      "name": "initial.pt",
+      "bytes": 31632061,
+      "inode": 70684851,
+      "links": 2,
+      "mtime": 1791308876.4590847
+    },
+    {
+      "name": "best.pt",
+      "bytes": 31632001,
+      "inode": 70684850,
+      "links": 2,
+      "mtime": 1791308875.8749943
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 94864173,
+      "inode": 70693529,
+      "links": 1,
+      "mtime": 1791376173.4290304
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/fontenay_en_parisis/ippo": [
+    {
+      "name": "initial.pt",
+      "bytes": 367037,
+      "inode": 70684846,
+      "links": 2,
+      "mtime": 1791308871.1742628
+    },
+    {
+      "name": "best.pt",
+      "bytes": 366977,
+      "inode": 70684845,
+      "links": 2,
+      "mtime": 1791308871.170262
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1069101,
+      "inode": 70693574,
+      "links": 1,
+      "mtime": 1791376346.5261579
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/fontenay_en_parisis/mamba": [
+    {
+      "name": "initial.pt",
+      "bytes": 41339597,
+      "inode": 70684801,
+      "links": 2,
+      "mtime": 1791308867.249648
+    },
+    {
+      "name": "best.pt",
+      "bytes": 41339003,
+      "inode": 70684838,
+      "links": 2,
+      "mtime": 1791308867.0056098
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 282855723,
+      "inode": 70693496,
+      "links": 1,
+      "mtime": 1791375927.9016337
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/gretz_armainvilliers/iql": [
+    {
+      "name": "initial.pt",
+      "bytes": 572413,
+      "inode": 70684815,
+      "links": 2,
+      "mtime": 1791308824.050639
+    },
+    {
+      "name": "best.pt",
+      "bytes": 194723007,
+      "inode": 70691565,
+      "links": 2,
+      "mtime": 1791358035.0008438
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 194922635,
+      "inode": 70693563,
+      "links": 1,
+      "mtime": 1791376304.1089067
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/gretz_armainvilliers/mappo": [
+    {
+      "name": "initial.pt",
+      "bytes": 18934461,
+      "inode": 70684823,
+      "links": 2,
+      "mtime": 1791308824.754757
+    },
+    {
+      "name": "best.pt",
+      "bytes": 56771261,
+      "inode": 70688063,
+      "links": 2,
+      "mtime": 1791331426.2795043
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 56771373,
+      "inode": 70693564,
+      "links": 1,
+      "mtime": 1791376431.82724
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/gretz_armainvilliers/ippo": [
+    {
+      "name": "initial.pt",
+      "bytes": 367037,
+      "inode": 70684819,
+      "links": 2,
+      "mtime": 1791308824.170659
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1068989,
+      "inode": 70693336,
+      "links": 2,
+      "mtime": 1791375064.1366706
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1069101,
+      "inode": 70693544,
+      "links": 1,
+      "mtime": 1791376408.77922
+    }
+  ],
+  "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/gretz_armainvilliers/mamba": [
+    {
+      "name": "initial.pt",
+      "bytes": 41369357,
+      "inode": 70684811,
+      "links": 2,
+      "mtime": 1791308823.8586068
+    },
+    {
+      "name": "best.pt",
+      "bytes": 297089099,
+      "inode": 70690377,
+      "links": 2,
+      "mtime": 1791348136.4156468
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 313506411,
+      "inode": 70693543,
+      "links": 1,
+      "mtime": 1791376275.1120493
+    }
+  ],
+  "outputs/city_baselines_paper_reward_20261010/handoff_original/ingolstadt_custom_dreamer": [
+    {
+      "name": "best.pt",
+      "bytes": 995536049,
+      "inode": 71568775,
+      "links": 1,
+      "mtime": 1791613846.4781294
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1244838895,
+      "inode": 71367172,
+      "links": 1,
+      "mtime": 1791613625.0209126
+    }
+  ],
+  "outputs/city_baselines_paper_reward_20261010/handoff_original/coulommiers_mbpo": [
+    {
+      "name": "best.pt",
+      "bytes": 1858305755,
+      "inode": 71568876,
+      "links": 1,
+      "mtime": 1791616310.1987736
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1858296187,
+      "inode": 71509291,
+      "links": 1,
+      "mtime": 1791616268.642718
+    }
+  ],
+  "outputs/city_baselines_paper_reward_20261010/handoff_original/coulommiers_mamba": [
+    {
+      "name": "best.pt",
+      "bytes": 1273458413,
+      "inode": 71568915,
+      "links": 1,
+      "mtime": 1791616559.5163035
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1300349161,
+      "inode": 71509319,
+      "links": 1,
+      "mtime": 1791616474.6995823
+    }
+  ],
+  "outputs/city_baselines_paper_reward_20261010/handoff_original/coulommiers_ippo": [
+    {
+      "name": "best.pt",
+      "bytes": 1070981,
+      "inode": 71568886,
+      "links": 1,
+      "mtime": 1791616328.9788203
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1070317,
+      "inode": 71510103,
+      "links": 1,
+      "mtime": 1791621198.7736375
+    }
+  ],
+  "outputs/city_baselines_paper_reward_20261010/handoff_original/montereau_fault_yonne_mappo": [
+    {
+      "name": "best.pt",
+      "bytes": 54524613,
+      "inode": 71568947,
+      "links": 1,
+      "mtime": 1791616599.904707
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 54524725,
+      "inode": 71444195,
+      "links": 1,
+      "mtime": 1791616597.2326794
+    }
+  ],
+  "outputs/city_baselines_paper_reward_20261010/handoff_original/coulommiers_dreamer": [
+    {
+      "name": "best.pt",
+      "bytes": 6822802291,
+      "inode": 71568866,
+      "links": 1,
+      "mtime": 1791616116.5351605
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 6560450883,
+      "inode": 71509174,
+      "links": 1,
+      "mtime": 1791614905.1878479
+    }
+  ],
+  "outputs/city_baselines_paper_reward_20261010/handoff_original/ingolstadt_custom_gnac": [
+    {
+      "name": "best.pt",
+      "bytes": 15658467,
+      "inode": 71568765,
+      "links": 1,
+      "mtime": 1791613477.737414
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 15658629,
+      "inode": 71434675,
+      "links": 1,
+      "mtime": 1791613477.2534022
+    }
+  ],
+  "outputs/city_baselines_paper_reward_20261010/handoff_original/ingolstadt_custom_mappo": [
+    {
+      "name": "best.pt",
+      "bytes": 12143109,
+      "inode": 71568786,
+      "links": 1,
+      "mtime": 1791613931.104117
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 12142637,
+      "inode": 71368944,
+      "links": 1,
+      "mtime": 1791621216.9980605
+    }
+  ],
+  "outputs/city_baselines_paper_reward_20261010/handoff_original/ingolstadt_custom_mamba": [
+    {
+      "name": "best.pt",
+      "bytes": 610281901,
+      "inode": 71568807,
+      "links": 1,
+      "mtime": 1791614280.9449642
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 584236215,
+      "inode": 71368850,
+      "links": 1,
+      "mtime": 1791621075.874881
+    }
+  ],
+  "outputs/city_baselines_paper_reward_20261010/handoff_original/montereau_fault_yonne_mamba": [
+    {
+      "name": "best.pt",
+      "bytes": 1300497645,
+      "inode": 71568968,
+      "links": 1,
+      "mtime": 1791616827.8235633
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1297692201,
+      "inode": 71509352,
+      "links": 1,
+      "mtime": 1791616740.5983672
+    }
+  ],
+  "outputs/city_baselines_paper_reward_20261010/handoff_original/ingolstadt_custom_iql": [
+    {
+      "name": "best.pt",
+      "bytes": 139462665,
+      "inode": 71568796,
+      "links": 1,
+      "mtime": 1791614009.2312233
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 141774411,
+      "inode": 71368943,
+      "links": 1,
+      "mtime": 1791621227.0142944
+    }
+  ],
+  "outputs/city_baselines_paper_reward_20261010/handoff_original/montereau_fault_yonne_ippo": [
+    {
+      "name": "best.pt",
+      "bytes": 1070981,
+      "inode": 71568940,
+      "links": 1,
+      "mtime": 1791616594.7526536
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1070317,
+      "inode": 71510091,
+      "links": 1,
+      "mtime": 1791621187.9413877
+    }
+  ],
+  "outputs/city_baselines_paper_reward_20261010/handoff_original/montereau_fault_yonne_online_ac": [
+    {
+      "name": "best.pt",
+      "bytes": 54523063,
+      "inode": 71568925,
+      "links": 1,
+      "mtime": 1791616591.7006223
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 54521342,
+      "inode": 71510074,
+      "links": 1,
+      "mtime": 1791621194.7095435
+    }
+  ],
+  "outputs/city_baselines_paper_reward_20261010/handoff_original/montereau_fault_yonne_iql": [
+    {
+      "name": "best.pt",
+      "bytes": 160463049,
+      "inode": 71568958,
+      "links": 1,
+      "mtime": 1791616671.3615043
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 160652373,
+      "inode": 71509345,
+      "links": 1,
+      "mtime": 1791616629.5570254
+    }
+  ],
+  "outputs/city_baselines_paper_reward_20261010/handoff_original/coulommiers_iql": [
+    {
+      "name": "best.pt",
+      "bytes": 141418761,
+      "inode": 71568906,
+      "links": 1,
+      "mtime": 1791616400.123109
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 142210379,
+      "inode": 71510071,
+      "links": 1,
+      "mtime": 1791621202.2897189
+    }
+  ],
+  "outputs/city_baselines_paper_reward_20261010/handoff_original/coulommiers_online_ac": [
+    {
+      "name": "best.pt",
+      "bytes": 56744848,
+      "inode": 71568846,
+      "links": 1,
+      "mtime": 1791619185.6217175
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 56745470,
+      "inode": 71510099,
+      "links": 1,
+      "mtime": 1791621198.7536368
+    }
+  ],
+  "outputs/city_baselines_paper_reward_20261010/handoff_original/coulommiers_mappo": [
+    {
+      "name": "best.pt",
+      "bytes": 56748677,
+      "inode": 71568896,
+      "links": 1,
+      "mtime": 1791616331.5588279
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 56748013,
+      "inode": 71510094,
+      "links": 1,
+      "mtime": 1791621159.1247292
+    }
+  ],
+  "outputs/city_baselines_paper_reward_20261010/handoff_original/coulommiers_gnac": [
+    {
+      "name": "best.pt",
+      "bytes": 137742563,
+      "inode": 71568856,
+      "links": 1,
+      "mtime": 1791614365.7037482
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 137742725,
+      "inode": 71444310,
+      "links": 1,
+      "mtime": 1791614360.895593
+    }
+  ],
+  "outputs/ingolstadt_online_libsumo_20261004/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 337405751,
+      "inode": 69639935,
+      "links": 1,
+      "mtime": 1791188549.0731385
+    }
+  ],
+  "outputs/event_mainline_verify_20261002_traci_restored/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 167070968,
+      "inode": 70290343,
+      "links": 1,
+      "mtime": 1790935235.7467172
+    }
+  ],
+  "outputs/mappo_probability_diagnosis_20261010/run": [
+    {
+      "name": "latest.pt",
+      "bytes": 12148717,
+      "inode": 71585132,
+      "links": 1,
+      "mtime": 1791645587.5783389
+    }
+  ],
+  "outputs/online_profile_20261004/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 347542583,
+      "inode": 69605882,
+      "links": 1,
+      "mtime": 1791117331.8634877
+    }
+  ],
+  "outputs/fm_prior_verification_20261001/no_noise/run/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 167018962,
+      "inode": 69730795,
+      "links": 1,
+      "mtime": 1790872632.0676165
+    }
+  ],
+  "outputs/fm_prior_verification_20261001/full/run/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 167018962,
+      "inode": 69730785,
+      "links": 1,
+      "mtime": 1790872618.1586459
+    }
+  ],
+  "outputs/convergence_diagnosis_20261005/grounded_credit": [
+    {
+      "name": "critic.pt",
+      "bytes": 78025,
+      "inode": 70422718,
+      "links": 1,
+      "mtime": 1791291851.6167052
+    },
+    {
+      "name": "actor.pt",
+      "bytes": 278333,
+      "inode": 70422720,
+      "links": 1,
+      "mtime": 1791291904.4501421
+    }
+  ],
+  "outputs/convergence_diagnosis_20261005/real_feedback": [
+    {
+      "name": "checkpoint_000462.pt",
+      "bytes": 12140187,
+      "inode": 70422684,
+      "links": 1,
+      "mtime": 1791191735.7709756
+    },
+    {
+      "name": "checkpoint_000465.pt",
+      "bytes": 12140187,
+      "inode": 70422687,
+      "links": 1,
+      "mtime": 1791191878.2158377
+    },
+    {
+      "name": "checkpoint_000463.pt",
+      "bytes": 12140187,
+      "inode": 70422685,
+      "links": 1,
+      "mtime": 1791191783.9312336
+    },
+    {
+      "name": "checkpoint_000456.pt",
+      "bytes": 12140187,
+      "inode": 70422677,
+      "links": 1,
+      "mtime": 1791191441.666394
+    },
+    {
+      "name": "checkpoint_000459.pt",
+      "bytes": 12140187,
+      "inode": 70422681,
+      "links": 1,
+      "mtime": 1791191597.8064635
+    },
+    {
+      "name": "checkpoint_000457.pt",
+      "bytes": 12140187,
+      "inode": 70422679,
+      "links": 1,
+      "mtime": 1791191497.5823467
+    },
+    {
+      "name": "checkpoint_000458.pt",
+      "bytes": 12140187,
+      "inode": 70422680,
+      "links": 1,
+      "mtime": 1791191546.8143737
+    },
+    {
+      "name": "checkpoint_000464.pt",
+      "bytes": 12140187,
+      "inode": 70422686,
+      "links": 1,
+      "mtime": 1791191829.6435113
+    },
+    {
+      "name": "checkpoint_000455.pt",
+      "bytes": 12140187,
+      "inode": 70422678,
+      "links": 1,
+      "mtime": 1791191387.846527
+    },
+    {
+      "name": "checkpoint_000454.pt",
+      "bytes": 12140187,
+      "inode": 70422675,
+      "links": 1,
+      "mtime": 1791191339.990725
+    },
+    {
+      "name": "checkpoint_000460.pt",
+      "bytes": 12140187,
+      "inode": 70422682,
+      "links": 1,
+      "mtime": 1791191642.6385894
+    },
+    {
+      "name": "checkpoint_000461.pt",
+      "bytes": 12140187,
+      "inode": 70422683,
+      "links": 1,
+      "mtime": 1791191689.7027647
+    }
+  ],
+  "outputs/convergence_diagnosis_20261005/entropy_heldout/legacy": [
+    {
+      "name": "experimental_state.pt",
+      "bytes": 337514127,
+      "inode": 70422639,
+      "links": 1,
+      "mtime": 1791190784.773961
+    }
+  ],
+  "outputs/convergence_diagnosis_20261005/entropy_heldout/population": [
+    {
+      "name": "experimental_state.pt",
+      "bytes": 337514191,
+      "inode": 70422651,
+      "links": 1,
+      "mtime": 1791191009.3108473
+    }
+  ],
+  "outputs/convergence_diagnosis_20261005/frozen/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 337405751,
+      "inode": 70422569,
+      "links": 1,
+      "mtime": 1791188549.0731385
+    }
+  ],
+  "outputs/convergence_diagnosis_20261005/entropy/legacy": [
+    {
+      "name": "experimental_state.pt",
+      "bytes": 337513999,
+      "inode": 70422598,
+      "links": 1,
+      "mtime": 1791189785.288747
+    }
+  ],
+  "outputs/convergence_diagnosis_20261005/entropy/population": [
+    {
+      "name": "experimental_state.pt",
+      "bytes": 337513999,
+      "inode": 70422610,
+      "links": 1,
+      "mtime": 1791190236.2060156
+    }
+  ],
+  "outputs/montereau_ac_prior_ablation_500_20261011/initial_evaluation": [
+    {
+      "name": "checkpoint.pt",
+      "bytes": 18300533,
+      "inode": 71590166,
+      "links": 1,
+      "mtime": 1791716669.9508152
+    }
+  ],
+  "outputs/montereau_ac_prior_ablation_500_20261011/no_prior/run": [
+    {
+      "name": "initial.pt",
+      "bytes": 18305781,
+      "inode": 71589707,
+      "links": 1,
+      "mtime": 1791716831.9540832
+    },
+    {
+      "name": "best.pt",
+      "bytes": 18305212,
+      "inode": 71590316,
+      "links": 1,
+      "mtime": 1791716831.9780836
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 54866046,
+      "inode": 71614623,
+      "links": 1,
+      "mtime": 1791729410.9666173
+    }
+  ],
+  "outputs/montereau_ac_prior_ablation_500_20261011/decaying_prior/run": [
+    {
+      "name": "initial.pt",
+      "bytes": 18305845,
+      "inode": 71590326,
+      "links": 1,
+      "mtime": 1791716832.3780918
+    },
+    {
+      "name": "best.pt",
+      "bytes": 18305276,
+      "inode": 71590327,
+      "links": 1,
+      "mtime": 1791716832.4060924
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 54977598,
+      "inode": 71614699,
+      "links": 1,
+      "mtime": 1791729366.717643
+    }
+  ],
+  "outputs/penalty_baselines_smoke_20261007/iql": [
+    {
+      "name": "initial.pt",
+      "bytes": 573245,
+      "inode": 71077944,
+      "links": 1,
+      "mtime": 1791393341.014704
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1134271,
+      "inode": 71077951,
+      "links": 1,
+      "mtime": 1791393342.2186954
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1134347,
+      "inode": 71077943,
+      "links": 1,
+      "mtime": 1791393342.2266953
+    }
+  ],
+  "outputs/penalty_baselines_smoke_20261007/mappo": [
+    {
+      "name": "initial.pt",
+      "bytes": 663357,
+      "inode": 71077933,
+      "links": 1,
+      "mtime": 1791393334.0587556
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1955645,
+      "inode": 71077940,
+      "links": 1,
+      "mtime": 1791393335.7707424
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1955757,
+      "inode": 71077932,
+      "links": 1,
+      "mtime": 1791393335.7787426
+    }
+  ],
+  "outputs/penalty_baselines_smoke_20261007/gnac": [
+    {
+      "name": "initial.pt",
+      "bytes": 866819,
+      "inode": 71077889,
+      "links": 1,
+      "mtime": 1791393307.4389858
+    },
+    {
+      "name": "best.pt",
+      "bytes": 2562988,
+      "inode": 71077896,
+      "links": 1,
+      "mtime": 1791393309.2389686
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 2563150,
+      "inode": 71077888,
+      "links": 1,
+      "mtime": 1791393309.2549684
+    }
+  ],
+  "outputs/penalty_baselines_smoke_20261007/mbpo": [
+    {
+      "name": "initial.pt",
+      "bytes": 5212649,
+      "inode": 71077911,
+      "links": 1,
+      "mtime": 1791393321.2268598
+    },
+    {
+      "name": "best.pt",
+      "bytes": 15610763,
+      "inode": 71077918,
+      "links": 1,
+      "mtime": 1791393322.7668467
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 15611115,
+      "inode": 71077910,
+      "links": 1,
+      "mtime": 1791393322.850846
+    }
+  ],
+  "outputs/penalty_baselines_smoke_20261007/dreamer": [
+    {
+      "name": "initial.pt",
+      "bytes": 4925885,
+      "inode": 71077901,
+      "links": 1,
+      "mtime": 1791393314.118923
+    },
+    {
+      "name": "best.pt",
+      "bytes": 14207003,
+      "inode": 71077908,
+      "links": 1,
+      "mtime": 1791393315.6149094
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 14207375,
+      "inode": 71077900,
+      "links": 1,
+      "mtime": 1791393316.5709007
+    }
+  ],
+  "outputs/penalty_baselines_smoke_20261007/ippo": [
+    {
+      "name": "initial.pt",
+      "bytes": 368189,
+      "inode": 71077922,
+      "links": 1,
+      "mtime": 1791393327.8828042
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1070141,
+      "inode": 71077929,
+      "links": 1,
+      "mtime": 1791393329.7107894
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1070253,
+      "inode": 71077921,
+      "links": 1,
+      "mtime": 1791393329.7227895
+    }
+  ],
+  "outputs/penalty_baselines_smoke_20261007/mamba": [
+    {
+      "name": "initial.pt",
+      "bytes": 41883661,
+      "inode": 71077955,
+      "links": 1,
+      "mtime": 1791393348.0346556
+    },
+    {
+      "name": "best.pt",
+      "bytes": 113823931,
+      "inode": 71077962,
+      "links": 1,
+      "mtime": 1791393353.5586197
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 113825335,
+      "inode": 71077954,
+      "links": 1,
+      "mtime": 1791393355.2386093
+    }
+  ],
+  "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/iql": [
+    {
+      "name": "initial.pt",
+      "bytes": 573309,
+      "inode": 71444204,
+      "links": 1,
+      "mtime": 1791568369.7842765
+    },
+    {
+      "name": "best.pt",
+      "bytes": 159335551,
+      "inode": 71516595,
+      "links": 5,
+      "mtime": 1791652318.3972323
+    },
+    {
+      "name": "best_deterministic.pt",
+      "bytes": 159335551,
+      "inode": 71516595,
+      "links": 5,
+      "mtime": 1791652318.3972323
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 160248011,
+      "inode": 71436873,
+      "links": 1,
+      "mtime": 1791734528.7131925
+    },
+    {
+      "name": "best_sampled_temperature_2.pt",
+      "bytes": 159335551,
+      "inode": 71529458,
+      "links": 1,
+      "mtime": 1791652318.3972323
+    },
+    {
+      "name": "best_sampled_temperature_0.2.pt",
+      "bytes": 159335551,
+      "inode": 71529539,
+      "links": 1,
+      "mtime": 1791652318.3972323
+    }
+  ],
+  "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/mappo": [
+    {
+      "name": "initial.pt",
+      "bytes": 18186173,
+      "inode": 71444209,
+      "links": 1,
+      "mtime": 1791568370.3322892
+    },
+    {
+      "name": "best.pt",
+      "bytes": 54529853,
+      "inode": 71511193,
+      "links": 5,
+      "mtime": 1791627848.479393
+    },
+    {
+      "name": "best_deterministic.pt",
+      "bytes": 54529853,
+      "inode": 71511193,
+      "links": 5,
+      "mtime": 1791627848.479393
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 54530029,
+      "inode": 71436872,
+      "links": 1,
+      "mtime": 1791734467.4953701
+    },
+    {
+      "name": "best_sampled_temperature_2.pt",
+      "bytes": 54529853,
+      "inode": 71510615,
+      "links": 1,
+      "mtime": 1791627848.479393
+    },
+    {
+      "name": "best_sampled_temperature_0.2.pt",
+      "bytes": 54529853,
+      "inode": 71521477,
+      "links": 1,
+      "mtime": 1791627848.479393
+    }
+  ],
+  "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/gnac": [
+    {
+      "name": "initial.pt",
+      "bytes": 92418179,
+      "inode": 71571611,
+      "links": 1,
+      "mtime": 1791632372.2531946
+    },
+    {
+      "name": "best.pt",
+      "bytes": 129163820,
+      "inode": 71586869,
+      "links": 5,
+      "mtime": 1791675927.2649589
+    },
+    {
+      "name": "best_deterministic.pt",
+      "bytes": 129163820,
+      "inode": 71586869,
+      "links": 5,
+      "mtime": 1791675927.2649589
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 129163982,
+      "inode": 71614955,
+      "links": 4,
+      "mtime": 1791732083.3273544
+    }
+  ],
+  "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/mbpo": [
+    {
+      "name": "initial.pt",
+      "bytes": 593604201,
+      "inode": 71697791,
+      "links": 1,
+      "mtime": 1791732444.8510745
+    },
+    {
+      "name": "best.pt",
+      "bytes": 593604051,
+      "inode": 71697790,
+      "links": 4,
+      "mtime": 1791732440.7509856
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1783803691,
+      "inode": 71696475,
+      "links": 1,
+      "mtime": 1791734509.9446347
+    },
+    {
+      "name": "best_sampled_temperature_2.pt",
+      "bytes": 593604051,
+      "inode": 71697790,
+      "links": 4,
+      "mtime": 1791732440.7509856
+    },
+    {
+      "name": "best_sampled_temperature_0.2.pt",
+      "bytes": 593604051,
+      "inode": 71696515,
+      "links": 1,
+      "mtime": 1791732440.7509856
+    }
+  ],
+  "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/dreamer": [
+    {
+      "name": "initial.pt",
+      "bytes": 79543613,
+      "inode": 71571603,
+      "links": 1,
+      "mtime": 1791632369.7173736
+    },
+    {
+      "name": "best.pt",
+      "bytes": 6420251207,
+      "inode": 71586776,
+      "links": 5,
+      "mtime": 1791667045.8744216
+    },
+    {
+      "name": "best_deterministic.pt",
+      "bytes": 6420251207,
+      "inode": 71586776,
+      "links": 5,
+      "mtime": 1791667045.8744216
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 6411002787,
+      "inode": 71614900,
+      "links": 4,
+      "mtime": 1791731957.452733
+    }
+  ],
+  "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/ippo": [
+    {
+      "name": "initial.pt",
+      "bytes": 368317,
+      "inode": 71444198,
+      "links": 1,
+      "mtime": 1791568369.292265
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1070141,
+      "inode": 71515481,
+      "links": 5,
+      "mtime": 1791647568.0969017
+    },
+    {
+      "name": "best_deterministic.pt",
+      "bytes": 1070141,
+      "inode": 71515481,
+      "links": 5,
+      "mtime": 1791647568.0969017
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1070317,
+      "inode": 71437214,
+      "links": 1,
+      "mtime": 1791734486.435935
+    },
+    {
+      "name": "best_sampled_temperature_2.pt",
+      "bytes": 1070141,
+      "inode": 71520688,
+      "links": 1,
+      "mtime": 1791647568.0969017
+    },
+    {
+      "name": "best_sampled_temperature_0.2.pt",
+      "bytes": 1070141,
+      "inode": 71521409,
+      "links": 1,
+      "mtime": 1791647568.0969017
+    }
+  ],
+  "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/online_ac": [
+    {
+      "name": "initial.pt",
+      "bytes": 18184309,
+      "inode": 71444194,
+      "links": 1,
+      "mtime": 1791568369.1162608
+    },
+    {
+      "name": "best.pt",
+      "bytes": 54526928,
+      "inode": 71523130,
+      "links": 5,
+      "mtime": 1791688485.5967739
+    },
+    {
+      "name": "best_deterministic.pt",
+      "bytes": 54526928,
+      "inode": 71523130,
+      "links": 5,
+      "mtime": 1791688485.5967739
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 54527550,
+      "inode": 71436964,
+      "links": 1,
+      "mtime": 1791734515.3847964
+    },
+    {
+      "name": "best_sampled_temperature_2.pt",
+      "bytes": 54526928,
+      "inode": 71529456,
+      "links": 1,
+      "mtime": 1791688485.5967739
+    },
+    {
+      "name": "best_sampled_temperature_0.2.pt",
+      "bytes": 54526928,
+      "inode": 71529276,
+      "links": 1,
+      "mtime": 1791688485.5967739
+    }
+  ],
+  "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/mamba": [
+    {
+      "name": "initial.pt",
+      "bytes": 156047501,
+      "inode": 71444385,
+      "links": 1,
+      "mtime": 1791568721.4047537
+    },
+    {
+      "name": "best.pt",
+      "bytes": 421116397,
+      "inode": 71510239,
+      "links": 5,
+      "mtime": 1791622473.5000632
+    },
+    {
+      "name": "best_deterministic.pt",
+      "bytes": 421116397,
+      "inode": 71510239,
+      "links": 5,
+      "mtime": 1791622473.5000632
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1083111991,
+      "inode": 71529588,
+      "links": 1,
+      "mtime": 1791734382.1928158
+    },
+    {
+      "name": "best_sampled_temperature_2.pt",
+      "bytes": 421116397,
+      "inode": 71529465,
+      "links": 1,
+      "mtime": 1791622473.5000632
+    },
+    {
+      "name": "best_sampled_temperature_0.2.pt",
+      "bytes": 421116397,
+      "inode": 71529543,
+      "links": 1,
+      "mtime": 1791622473.5000632
+    }
+  ],
+  "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/iql": [
+    {
+      "name": "initial.pt",
+      "bytes": 573245,
+      "inode": 71444180,
+      "links": 1,
+      "mtime": 1791568368.2082398
+    },
+    {
+      "name": "best.pt",
+      "bytes": 142201023,
+      "inode": 71519103,
+      "links": 5,
+      "mtime": 1791663504.7339723
+    },
+    {
+      "name": "best_deterministic.pt",
+      "bytes": 142201023,
+      "inode": 71519103,
+      "links": 5,
+      "mtime": 1791663504.7339723
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 141516299,
+      "inode": 71437057,
+      "links": 1,
+      "mtime": 1791734501.3003776
+    },
+    {
+      "name": "best_sampled_temperature_2.pt",
+      "bytes": 142201023,
+      "inode": 71529443,
+      "links": 1,
+      "mtime": 1791663504.7339723
+    },
+    {
+      "name": "best_sampled_temperature_0.2.pt",
+      "bytes": 142201023,
+      "inode": 71529524,
+      "links": 1,
+      "mtime": 1791663504.7339723
+    }
+  ],
+  "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/mappo": [
+    {
+      "name": "initial.pt",
+      "bytes": 18927485,
+      "inode": 71444189,
+      "links": 1,
+      "mtime": 1791568369.0082583
+    },
+    {
+      "name": "best.pt",
+      "bytes": 56753981,
+      "inode": 71510619,
+      "links": 1,
+      "mtime": 1791624845.6504388
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 56754093,
+      "inode": 71526422,
+      "links": 1,
+      "mtime": 1791713639.137089
+    }
+  ],
+  "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/gnac": [
+    {
+      "name": "initial.pt",
+      "bytes": 99517763,
+      "inode": 71444176,
+      "links": 1,
+      "mtime": 1791568367.7922301
+    },
+    {
+      "name": "best.pt",
+      "bytes": 137748268,
+      "inode": 71513240,
+      "links": 5,
+      "mtime": 1791637914.7008247
+    },
+    {
+      "name": "best_deterministic.pt",
+      "bytes": 137748268,
+      "inode": 71513240,
+      "links": 5,
+      "mtime": 1791637914.7008247
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 137748494,
+      "inode": 71437043,
+      "links": 1,
+      "mtime": 1791734473.8795607
+    },
+    {
+      "name": "best_sampled_temperature_2.pt",
+      "bytes": 137748268,
+      "inode": 71529447,
+      "links": 1,
+      "mtime": 1791637914.7008247
+    },
+    {
+      "name": "best_sampled_temperature_0.2.pt",
+      "bytes": 137748268,
+      "inode": 71529298,
+      "links": 1,
+      "mtime": 1791637914.7008247
+    }
+  ],
+  "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/mbpo": [
+    {
+      "name": "initial.pt",
+      "bytes": 618485801,
+      "inode": 71444075,
+      "links": 1,
+      "mtime": 1791568373.5283635
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1855466587,
+      "inode": 71510179,
+      "links": 5,
+      "mtime": 1791621956.0970702
+    },
+    {
+      "name": "best_deterministic.pt",
+      "bytes": 1855466587,
+      "inode": 71510179,
+      "links": 5,
+      "mtime": 1791621956.0970702
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1855466587,
+      "inode": 71510171,
+      "links": 4,
+      "mtime": 1791621956.0970702
+    }
+  ],
+  "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/dreamer": [
+    {
+      "name": "initial.pt",
+      "bytes": 82690941,
+      "inode": 71444389,
+      "links": 1,
+      "mtime": 1791568722.0287693
+    },
+    {
+      "name": "best.pt",
+      "bytes": 248072531,
+      "inode": 71510167,
+      "links": 5,
+      "mtime": 1791621797.4607847
+    },
+    {
+      "name": "best_deterministic.pt",
+      "bytes": 248072531,
+      "inode": 71510167,
+      "links": 5,
+      "mtime": 1791621797.4607847
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 248072531,
+      "inode": 71510161,
+      "links": 4,
+      "mtime": 1791621797.4607847
+    }
+  ],
+  "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/ippo": [
+    {
+      "name": "initial.pt",
+      "bytes": 368253,
+      "inode": 71444173,
+      "links": 1,
+      "mtime": 1791568366.8602083
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1070141,
+      "inode": 71510965,
+      "links": 5,
+      "mtime": 1791626620.5459883
+    },
+    {
+      "name": "best_deterministic.pt",
+      "bytes": 1070141,
+      "inode": 71510965,
+      "links": 5,
+      "mtime": 1791626620.5459883
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1070317,
+      "inode": 71444065,
+      "links": 1,
+      "mtime": 1791734533.649339
+    },
+    {
+      "name": "best_sampled_temperature_2.pt",
+      "bytes": 1070141,
+      "inode": 71529455,
+      "links": 1,
+      "mtime": 1791626620.5459883
+    },
+    {
+      "name": "best_sampled_temperature_0.2.pt",
+      "bytes": 1070141,
+      "inode": 71529535,
+      "links": 1,
+      "mtime": 1791626620.5459883
+    }
+  ],
+  "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/online_ac": [
+    {
+      "name": "initial.pt",
+      "bytes": 18925685,
+      "inode": 71444167,
+      "links": 1,
+      "mtime": 1791568366.4481988
+    },
+    {
+      "name": "best.pt",
+      "bytes": 56751120,
+      "inode": 71529398,
+      "links": 4,
+      "mtime": 1791733320.4252462
+    },
+    {
+      "name": "best_deterministic.pt",
+      "bytes": 56751056,
+      "inode": 71517628,
+      "links": 2,
+      "mtime": 1791657476.1848547
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 56751678,
+      "inode": 71438363,
+      "links": 1,
+      "mtime": 1791734517.6008623
+    },
+    {
+      "name": "best_sampled_temperature_2.pt",
+      "bytes": 56751120,
+      "inode": 71529398,
+      "links": 4,
+      "mtime": 1791733320.4252462
+    },
+    {
+      "name": "best_sampled_temperature_0.2.pt",
+      "bytes": 56751120,
+      "inode": 71529248,
+      "links": 1,
+      "mtime": 1791733320.4252462
+    }
+  ],
+  "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/mamba": [
+    {
+      "name": "best.pt",
+      "bytes": 1257712571,
+      "inode": 71523429,
+      "links": 5,
+      "mtime": 1791690964.3132772
+    },
+    {
+      "name": "best_deterministic.pt",
+      "bytes": 1257712571,
+      "inode": 71523429,
+      "links": 5,
+      "mtime": 1791690964.3132772
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1254426871,
+      "inode": 71529580,
+      "links": 1,
+      "mtime": 1791734373.9045665
+    },
+    {
+      "name": "best_sampled_temperature_2.pt",
+      "bytes": 1257712571,
+      "inode": 71529467,
+      "links": 1,
+      "mtime": 1791690964.3132772
+    },
+    {
+      "name": "best_sampled_temperature_0.2.pt",
+      "bytes": 1257712571,
+      "inode": 71529546,
+      "links": 1,
+      "mtime": 1791690964.3132772
+    }
+  ],
+  "outputs/offline_pretrain_verify_20261002_libsumo/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 167048721,
+      "inode": 70290458,
+      "links": 1,
+      "mtime": 1790939176.510992
+    }
+  ],
+  "outputs/shortedge10m_completion_dta5_20261007/montereau_fault_yonne": [
+    {
+      "name": "assignment_0003.pt",
+      "bytes": 12174685,
+      "inode": 71077770,
+      "links": 1,
+      "mtime": 1791388427.3797567
+    },
+    {
+      "name": "assignment_0002.pt",
+      "bytes": 12082461,
+      "inode": 71077537,
+      "links": 1,
+      "mtime": 1791388334.1869414
+    },
+    {
+      "name": "assignment_0005.pt",
+      "bytes": 12289053,
+      "inode": 71077785,
+      "links": 1,
+      "mtime": 1791388577.9771404
+    },
+    {
+      "name": "assignment_0004.pt",
+      "bytes": 12256157,
+      "inode": 71077780,
+      "links": 1,
+      "mtime": 1791388522.6446235
+    },
+    {
+      "name": "assignment_0001.pt",
+      "bytes": 12004445,
+      "inode": 71077538,
+      "links": 1,
+      "mtime": 1791388136.181348
+    }
+  ],
+  "outputs/shortedge10m_completion_dta5_20261007/coulommiers": [
+    {
+      "name": "assignment_0003.pt",
+      "bytes": 10749277,
+      "inode": 71077324,
+      "links": 1,
+      "mtime": 1791388033.0926154
+    },
+    {
+      "name": "assignment_0002.pt",
+      "bytes": 10745437,
+      "inode": 71077322,
+      "links": 1,
+      "mtime": 1791387991.8923457
+    },
+    {
+      "name": "assignment_0005.pt",
+      "bytes": 10760797,
+      "inode": 71077319,
+      "links": 1,
+      "mtime": 1791388117.5652103
+    },
+    {
+      "name": "assignment_0004.pt",
+      "bytes": 10773853,
+      "inode": 71077530,
+      "links": 1,
+      "mtime": 1791388080.0209394
+    },
+    {
+      "name": "assignment_0001.pt",
+      "bytes": 10716957,
+      "inode": 71077323,
+      "links": 1,
+      "mtime": 1791387949.4600832
+    }
+  ],
+  "outputs/incident_ablation_dta_sp_20261007/no_incident": [
+    {
+      "name": "selected_assignment.pt",
+      "bytes": 1063797,
+      "inode": 70815893,
+      "links": 1,
+      "mtime": 1791374864.8564942
+    },
+    {
+      "name": "assignment_0025.pt",
+      "bytes": 1062429,
+      "inode": 70815870,
+      "links": 1,
+      "mtime": 1791374657.8027458
+    },
+    {
+      "name": "assignment_0000.pt",
+      "bytes": 1053789,
+      "inode": 70815869,
+      "links": 1,
+      "mtime": 1791374414.8448136
+    },
+    {
+      "name": "assignment_0010.pt",
+      "bytes": 1061789,
+      "inode": 70815874,
+      "links": 1,
+      "mtime": 1791374534.380081
+    },
+    {
+      "name": "assignment_0050.pt",
+      "bytes": 1063773,
+      "inode": 70815885,
+      "links": 1,
+      "mtime": 1791374864.7644901
+    },
+    {
+      "name": "assignment_0001.pt",
+      "bytes": 1056797,
+      "inode": 70815868,
+      "links": 1,
+      "mtime": 1791374439.614395
+    }
+  ],
+  "outputs/incident_ablation_dta_sp_20261007/with_incident": [
+    {
+      "name": "selected_assignment.pt",
+      "bytes": 1059061,
+      "inode": 70815895,
+      "links": 1,
+      "mtime": 1791374890.4896023
+    },
+    {
+      "name": "assignment_0025.pt",
+      "bytes": 1069149,
+      "inode": 70815884,
+      "links": 1,
+      "mtime": 1791374680.6879032
+    },
+    {
+      "name": "assignment_0000.pt",
+      "bytes": 1053789,
+      "inode": 70815872,
+      "links": 1,
+      "mtime": 1791374422.5573106
+    },
+    {
+      "name": "assignment_0010.pt",
+      "bytes": 1065885,
+      "inode": 70815875,
+      "links": 1,
+      "mtime": 1791374540.364422
+    },
+    {
+      "name": "assignment_0050.pt",
+      "bytes": 1071005,
+      "inode": 70815891,
+      "links": 1,
+      "mtime": 1791374890.4175992
+    },
+    {
+      "name": "assignment_0001.pt",
+      "bytes": 1059037,
+      "inode": 70815871,
+      "links": 1,
+      "mtime": 1791374454.235309
+    }
+  ],
+  "outputs/ingo_latest_argmax_20261010/dta": [
+    {
+      "name": "latest.pt",
+      "bytes": 1086397,
+      "inode": 71585416,
+      "links": 1,
+      "mtime": 1791647538.3880987
+    }
+  ],
+  "outputs/ingo_latest_argmax_20261010/dta_iteration1": [
+    {
+      "name": "assignment_0001.pt",
+      "bytes": 1056797,
+      "inode": 71585530,
+      "links": 1,
+      "mtime": 1791648486.4841633
+    }
+  ],
+  "outputs/ingo_latest_argmax_20261010/baselines/iql": [
+    {
+      "name": "latest.pt",
+      "bytes": 142835979,
+      "inode": 71376604,
+      "links": 1,
+      "mtime": 1791647411.272427
+    }
+  ],
+  "outputs/ingo_latest_argmax_20261010/baselines/mappo": [
+    {
+      "name": "latest.pt",
+      "bytes": 12148717,
+      "inode": 71373807,
+      "links": 2,
+      "mtime": 1791634095.4935482
+    }
+  ],
+  "outputs/ingo_latest_argmax_20261010/baselines/gnac": [
+    {
+      "name": "latest.pt",
+      "bytes": 15664334,
+      "inode": 71515392,
+      "links": 1,
+      "mtime": 1791647485.9706335
+    }
+  ],
+  "outputs/ingo_latest_argmax_20261010/baselines/dreamer": [
+    {
+      "name": "latest.pt",
+      "bytes": 1529829767,
+      "inode": 71376583,
+      "links": 1,
+      "mtime": 1791647372.135209
+    }
+  ],
+  "outputs/ingo_latest_argmax_20261010/baselines/ippo": [
+    {
+      "name": "latest.pt",
+      "bytes": 1070381,
+      "inode": 71310854,
+      "links": 2,
+      "mtime": 1791580993.0498686
+    }
+  ],
+  "outputs/ingo_latest_argmax_20261010/baselines/online_ac": [
+    {
+      "name": "latest.pt",
+      "bytes": 12140030,
+      "inode": 71358066,
+      "links": 2,
+      "mtime": 1791556808.2927625
+    }
+  ],
+  "outputs/ingo_latest_argmax_20261010/baselines/mamba": [
+    {
+      "name": "latest.pt",
+      "bytes": 480698231,
+      "inode": 71376576,
+      "links": 1,
+      "mtime": 1791647412.1804547
+    }
+  ],
+  "outputs/ingo_latest_argmax_20261010/mainline/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 378340995,
+      "inode": 71585393,
+      "links": 1,
+      "mtime": 1791647463.8779962
+    }
+  ],
+  "outputs/maule_nangis_dta_sp_20261007/maule": [
+    {
+      "name": "assignment_0025.pt",
+      "bytes": 2022301,
+      "inode": 70946886,
+      "links": 1,
+      "mtime": 1791379085.5555766
+    },
+    {
+      "name": "assignment_0000.pt",
+      "bytes": 1944349,
+      "inode": 70946879,
+      "links": 1,
+      "mtime": 1791377928.184184
+    },
+    {
+      "name": "assignment_0010.pt",
+      "bytes": 1992285,
+      "inode": 70946874,
+      "links": 1,
+      "mtime": 1791378449.1444697
+    },
+    {
+      "name": "assignment_0001.pt",
+      "bytes": 1950813,
+      "inode": 70946878,
+      "links": 1,
+      "mtime": 1791378065.0793216
+    }
+  ],
+  "outputs/maule_nangis_dta_sp_20261007/nangis": [
+    {
+      "name": "selected_assignment.pt",
+      "bytes": 3651381,
+      "inode": 70946888,
+      "links": 1,
+      "mtime": 1791378478.101439
+    },
+    {
+      "name": "assignment_0025.pt",
+      "bytes": 3662685,
+      "inode": 70946877,
+      "links": 1,
+      "mtime": 1791378165.5536466
+    },
+    {
+      "name": "assignment_0000.pt",
+      "bytes": 3630173,
+      "inode": 70946869,
+      "links": 1,
+      "mtime": 1791377795.377183
+    },
+    {
+      "name": "assignment_0010.pt",
+      "bytes": 3651357,
+      "inode": 70946872,
+      "links": 1,
+      "mtime": 1791377967.2970765
+    },
+    {
+      "name": "assignment_0050.pt",
+      "bytes": 3672413,
+      "inode": 70946881,
+      "links": 1,
+      "mtime": 1791378477.8854318
+    },
+    {
+      "name": "assignment_0001.pt",
+      "bytes": 3633885,
+      "inode": 70946868,
+      "links": 1,
+      "mtime": 1791377836.5181077
+    }
+  ],
+  "outputs/offline_pretrain_verify_20261002_traci/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 167048721,
+      "inode": 70290474,
+      "links": 1,
+      "mtime": 1790939337.754314
+    }
+  ],
+  "outputs/city_baselines_argmax_20261011/handoff_original/ingolstadt_custom_dreamer": [
+    {
+      "name": "best.pt",
+      "bytes": 1072899367,
+      "inode": 71385966,
+      "links": 4,
+      "mtime": 1791732626.4630222
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1049936079,
+      "inode": 71386074,
+      "links": 1,
+      "mtime": 1791733972.564184
+    }
+  ],
+  "outputs/city_baselines_argmax_20261011/handoff_original/coulommiers_mbpo": [
+    {
+      "name": "best.pt",
+      "bytes": 1855466587,
+      "inode": 71510179,
+      "links": 5,
+      "mtime": 1791621956.0970702
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1855466587,
+      "inode": 71510171,
+      "links": 4,
+      "mtime": 1791621956.0970702
+    }
+  ],
+  "outputs/city_baselines_argmax_20261011/handoff_original/coulommiers_mamba": [
+    {
+      "name": "best.pt",
+      "bytes": 1257712571,
+      "inode": 71523429,
+      "links": 5,
+      "mtime": 1791690964.3132772
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1255208119,
+      "inode": 71529503,
+      "links": 1,
+      "mtime": 1791733893.3416395
+    }
+  ],
+  "outputs/city_baselines_argmax_20261011/handoff_original/coulommiers_ippo": [
+    {
+      "name": "best.pt",
+      "bytes": 1070141,
+      "inode": 71510965,
+      "links": 5,
+      "mtime": 1791626620.5459883
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1070317,
+      "inode": 71529506,
+      "links": 1,
+      "mtime": 1791733868.2208233
+    }
+  ],
+  "outputs/city_baselines_argmax_20261011/handoff_original/montereau_fault_yonne_mappo": [
+    {
+      "name": "best.pt",
+      "bytes": 54529853,
+      "inode": 71511193,
+      "links": 5,
+      "mtime": 1791627848.479393
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 54530093,
+      "inode": 71529482,
+      "links": 1,
+      "mtime": 1791733909.1821518
+    }
+  ],
+  "outputs/city_baselines_argmax_20261011/handoff_original/coulommiers_dreamer": [
+    {
+      "name": "best.pt",
+      "bytes": 248072531,
+      "inode": 71510167,
+      "links": 5,
+      "mtime": 1791621797.4607847
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 248072531,
+      "inode": 71510161,
+      "links": 4,
+      "mtime": 1791621797.4607847
+    }
+  ],
+  "outputs/city_baselines_argmax_20261011/handoff_original/montereau_fault_yonne_mbpo": [
+    {
+      "name": "best.pt",
+      "bytes": 593604051,
+      "inode": 71697790,
+      "links": 4,
+      "mtime": 1791732440.7509856
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1783785195,
+      "inode": 71699220,
+      "links": 1,
+      "mtime": 1791733878.589161
+    }
+  ],
+  "outputs/city_baselines_argmax_20261011/handoff_original/ingolstadt_custom_mamba": [
+    {
+      "name": "best.pt",
+      "bytes": 458092987,
+      "inode": 71374003,
+      "links": 5,
+      "mtime": 1791634888.38753
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 458916983,
+      "inode": 71386057,
+      "links": 1,
+      "mtime": 1791733875.5250611
+    }
+  ],
+  "outputs/city_baselines_argmax_20261011/handoff_original/montereau_fault_yonne_mamba": [
+    {
+      "name": "best.pt",
+      "bytes": 421116397,
+      "inode": 71510239,
+      "links": 5,
+      "mtime": 1791622473.5000632
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 972922935,
+      "inode": 71529486,
+      "links": 1,
+      "mtime": 1791733899.969854
+    }
+  ],
+  "outputs/city_baselines_argmax_20261011/handoff_original/montereau_fault_yonne_gnac": [
+    {
+      "name": "best.pt",
+      "bytes": 129163820,
+      "inode": 71586869,
+      "links": 5,
+      "mtime": 1791675927.2649589
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 129163982,
+      "inode": 71614955,
+      "links": 4,
+      "mtime": 1791732083.3273544
+    }
+  ],
+  "outputs/city_baselines_argmax_20261011/handoff_original/montereau_fault_yonne_dreamer": [
+    {
+      "name": "best.pt",
+      "bytes": 6420251207,
+      "inode": 71586776,
+      "links": 5,
+      "mtime": 1791667045.8744216
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 6411002787,
+      "inode": 71614900,
+      "links": 4,
+      "mtime": 1791731957.452733
+    }
+  ],
+  "outputs/city_baselines_argmax_20261011/handoff_original/ingolstadt_custom_iql": [
+    {
+      "name": "best.pt",
+      "bytes": 140351615,
+      "inode": 71371416,
+      "links": 5,
+      "mtime": 1791629452.8900497
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 142838027,
+      "inode": 71386070,
+      "links": 1,
+      "mtime": 1791733918.7944617
+    }
+  ],
+  "outputs/city_baselines_argmax_20261011/handoff_original/montereau_fault_yonne_ippo": [
+    {
+      "name": "best.pt",
+      "bytes": 1070141,
+      "inode": 71515481,
+      "links": 5,
+      "mtime": 1791647568.0969017
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1070317,
+      "inode": 71529510,
+      "links": 1,
+      "mtime": 1791733896.0537274
+    }
+  ],
+  "outputs/city_baselines_argmax_20261011/handoff_original/montereau_fault_yonne_online_ac": [
+    {
+      "name": "best.pt",
+      "bytes": 54526928,
+      "inode": 71523130,
+      "links": 5,
+      "mtime": 1791688485.5967739
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 54527550,
+      "inode": 71529512,
+      "links": 1,
+      "mtime": 1791733975.044263
+    }
+  ],
+  "outputs/city_baselines_argmax_20261011/handoff_original/montereau_fault_yonne_iql": [
+    {
+      "name": "best.pt",
+      "bytes": 159335551,
+      "inode": 71516595,
+      "links": 5,
+      "mtime": 1791652318.3972323
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 160034187,
+      "inode": 71529505,
+      "links": 1,
+      "mtime": 1791733904.982016
+    }
+  ],
+  "outputs/city_baselines_argmax_20261011/handoff_original/coulommiers_iql": [
+    {
+      "name": "best.pt",
+      "bytes": 142201023,
+      "inode": 71519103,
+      "links": 5,
+      "mtime": 1791663504.7339723
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 141490891,
+      "inode": 71529468,
+      "links": 1,
+      "mtime": 1791733886.317412
+    }
+  ],
+  "outputs/city_baselines_argmax_20261011/handoff_original/coulommiers_online_ac": [
+    {
+      "name": "best.pt",
+      "bytes": 56751120,
+      "inode": 71529398,
+      "links": 4,
+      "mtime": 1791733320.4252462
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 56751678,
+      "inode": 71529517,
+      "links": 1,
+      "mtime": 1791733933.9989507
+    }
+  ],
+  "outputs/city_baselines_argmax_20261011/handoff_original/coulommiers_gnac": [
+    {
+      "name": "best.pt",
+      "bytes": 137748268,
+      "inode": 71513240,
+      "links": 5,
+      "mtime": 1791637914.7008247
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 137748494,
+      "inode": 71529508,
+      "links": 1,
+      "mtime": 1791733877.7891347
+    }
+  ],
+  "outputs/ingolstadt_online_meso_20261006/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 225500230,
+      "inode": 70571635,
+      "links": 1,
+      "mtime": 1791374934.5874665
+    }
+  ],
+  "outputs/toy_urbandreamer_warmup250_seed42_20260929/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 370936199,
+      "inode": 69608302,
+      "links": 1,
+      "mtime": 1790861259.4598372
+    }
+  ],
+  "outputs/ingolstadt_full_retrain_20261009/inputs": [
+    {
+      "name": "calibration_latest.pt",
+      "bytes": 416525,
+      "inode": 71453840,
+      "links": 1,
+      "mtime": 1791553193.4938393
+    }
+  ],
+  "outputs/ingolstadt_full_retrain_20261009/online_bounded_dynamic_2000_20261011": [
+    {
+      "name": "source_checkpoint.pt",
+      "bytes": 381085635,
+      "inode": 71588294,
+      "links": 1,
+      "mtime": 1791697886.9627645
+    },
+    {
+      "name": "initial_migration_checkpoint.pt",
+      "bytes": 380191003,
+      "inode": 71588288,
+      "links": 1,
+      "mtime": 1791698011.0285144
+    }
+  ],
+  "outputs/ingolstadt_full_retrain_20261009/online_seed": [
+    {
+      "name": "source_checkpoint.pt",
+      "bytes": 99495721,
+      "inode": 71569043,
+      "links": 1,
+      "mtime": 1791624729.9521601
+    }
+  ],
+  "outputs/ingolstadt_full_retrain_20261009/online_bounded_noprior_fresh_t2_2000_20261011": [
+    {
+      "name": "source_checkpoint.pt",
+      "bytes": 99498793,
+      "inode": 71696551,
+      "links": 1,
+      "mtime": 1791701898.1475894
+    },
+    {
+      "name": "initial_checkpoint.pt",
+      "bytes": 34243691,
+      "inode": 71696556,
+      "links": 1,
+      "mtime": 1791731351.68913
+    }
+  ],
+  "outputs/ingolstadt_full_retrain_20261009/online_bounded_dynamic_fresh_2000_20261011": [
+    {
+      "name": "source_checkpoint.pt",
+      "bytes": 99498793,
+      "inode": 71588767,
+      "links": 1,
+      "mtime": 1791701898.1475894
+    },
+    {
+      "name": "initial_checkpoint.pt",
+      "bytes": 34243691,
+      "inode": 71588770,
+      "links": 1,
+      "mtime": 1791701898.523598
+    }
+  ],
+  "outputs/ingolstadt_full_retrain_20261009/online_actor_critic_2000/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 381085635,
+      "inode": 71587973,
+      "links": 1,
+      "mtime": 1791697851.6939445
+    }
+  ],
+  "outputs/ingolstadt_full_retrain_20261009/online_bounded_dynamic_2000_20261011/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 380111963,
+      "inode": 71588313,
+      "links": 1,
+      "mtime": 1791700650.4217656
+    }
+  ],
+  "outputs/ingolstadt_full_retrain_20261009/online_seed/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 99498793,
+      "inode": 71568980,
+      "links": 1,
+      "mtime": 1791624738.160319
+    }
+  ],
+  "outputs/ingolstadt_full_retrain_20261009/bounded_dynamic_cutover_20261011/final": [
+    {
+      "name": "checkpoint.pt",
+      "bytes": 381085635,
+      "inode": 71587832,
+      "links": 1,
+      "mtime": 1791697854.9220195
+    }
+  ],
+  "outputs/ingolstadt_full_retrain_20261009/online_bounded_noprior_fresh_t2_2000_20261011/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 209521726,
+      "inode": 71699756,
+      "links": 1,
+      "mtime": 1791734032.8140917
+    }
+  ],
+  "outputs/ingolstadt_full_retrain_20261009/online_bounded_noprior_fresh_t2_2000_20261011/evaluation_changes/20261011T155343Z": [
+    {
+      "name": "checkpoint.pt",
+      "bytes": 209525438,
+      "inode": 71698995,
+      "links": 1,
+      "mtime": 1791733857.0564592
+    }
+  ],
+  "outputs/ingolstadt_full_retrain_20261009/world_model/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 99495721,
+      "inode": 71569032,
+      "links": 1,
+      "mtime": 1791624729.9521601
+    }
+  ],
+  "outputs/ingolstadt_full_retrain_20261009/online_bounded_dynamic_fresh_2000_20261011/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 182383044,
+      "inode": 71614914,
+      "links": 1,
+      "mtime": 1791731890.615361
+    }
+  ],
+  "outputs/ingolstadt_full_retrain_20261009/online_bounded_dynamic_fresh_2000_20261011/profile_changes/20261011T104443Z": [
+    {
+      "name": "new_checkpoint.pt",
+      "bytes": 171301406,
+      "inode": 71589700,
+      "links": 1,
+      "mtime": 1791715486.7472303
+    },
+    {
+      "name": "checkpoint.pt",
+      "bytes": 171322206,
+      "inode": 71589512,
+      "links": 1,
+      "mtime": 1791715093.1087534
+    }
+  ],
+  "outputs/additional_baselines_alignment_20261006/iql": [
+    {
+      "name": "latest.pt",
+      "bytes": 1129428,
+      "inode": 70683668,
+      "links": 1,
+      "mtime": 1791308174.8225584
+    }
+  ],
+  "outputs/additional_baselines_alignment_20261006/mappo": [
+    {
+      "name": "latest.pt",
+      "bytes": 1954550,
+      "inode": 70683663,
+      "links": 1,
+      "mtime": 1791308174.4865532
+    }
+  ],
+  "outputs/additional_baselines_alignment_20261006/ippo": [
+    {
+      "name": "latest.pt",
+      "bytes": 1069046,
+      "inode": 70683657,
+      "links": 1,
+      "mtime": 1791308174.226549
+    }
+  ],
+  "outputs/additional_baselines_alignment_20261006/mamba": [
+    {
+      "name": "latest.pt",
+      "bytes": 115371007,
+      "inode": 70683673,
+      "links": 1,
+      "mtime": 1791308177.3585992
+    }
+  ],
+  "outputs/baseline_throughput_first_two_20261002/cpu_online_ac_old": [
+    {
+      "name": "initial.pt",
+      "bytes": 661173,
+      "inode": 70290402,
+      "links": 1,
+      "mtime": 1790935591.0893562
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1952272,
+      "inode": 70290409,
+      "links": 1,
+      "mtime": 1790935592.4973986
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1952830,
+      "inode": 70290401,
+      "links": 1,
+      "mtime": 1790935592.5013986
+    }
+  ],
+  "outputs/baseline_throughput_first_two_20261002/cpu_online_ac_new": [
+    {
+      "name": "initial.pt",
+      "bytes": 661109,
+      "inode": 70290413,
+      "links": 1,
+      "mtime": 1790935597.2735424
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1952208,
+      "inode": 70290420,
+      "links": 1,
+      "mtime": 1790935598.5415804
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1952766,
+      "inode": 70290412,
+      "links": 1,
+      "mtime": 1790935598.5495808
+    }
+  ],
+  "outputs/baseline_throughput_first_two_20261002/gpu_mbpo": [
+    {
+      "name": "initial.pt",
+      "bytes": 5211625,
+      "inode": 70290384,
+      "links": 1,
+      "mtime": 1790935366.1706057
+    },
+    {
+      "name": "best.pt",
+      "bytes": 16106955,
+      "inode": 70290391,
+      "links": 1,
+      "mtime": 1790935373.506825
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 16107307,
+      "inode": 70290383,
+      "links": 1,
+      "mtime": 1790935373.606828
+    }
+  ],
+  "outputs/baseline_throughput_first_two_20261002/gpu_dreamer": [
+    {
+      "name": "initial.pt",
+      "bytes": 4924861,
+      "inode": 70290373,
+      "links": 1,
+      "mtime": 1790935351.826177
+    },
+    {
+      "name": "best.pt",
+      "bytes": 15048715,
+      "inode": 70290380,
+      "links": 1,
+      "mtime": 1790935360.0504227
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 15049803,
+      "inode": 70290372,
+      "links": 1,
+      "mtime": 1790935360.1424255
+    }
+  ],
+  "outputs/baseline_algorithm_audit_20261007/mamba_review/toy_v2_final": [
+    {
+      "name": "initial.pt",
+      "bytes": 41879907,
+      "inode": 70947260,
+      "links": 1,
+      "mtime": 1791387145.8168302
+    },
+    {
+      "name": "best.pt",
+      "bytes": 114037195,
+      "inode": 70947273,
+      "links": 1,
+      "mtime": 1791387234.6318898
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 114038603,
+      "inode": 70947268,
+      "links": 1,
+      "mtime": 1791387236.115877
+    }
+  ],
+  "outputs/baseline_algorithm_audit_20261007/mamba_review/toy_v2": [
+    {
+      "name": "initial.pt",
+      "bytes": 41879779,
+      "inode": 70947158,
+      "links": 1,
+      "mtime": 1791387019.6788018
+    },
+    {
+      "name": "best.pt",
+      "bytes": 114037067,
+      "inode": 70947168,
+      "links": 1,
+      "mtime": 1791387080.6137464
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 114038475,
+      "inode": 70947166,
+      "links": 1,
+      "mtime": 1791387081.0497396
+    }
+  ],
+  "outputs/event_mainline_verify_20261002_final/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 167048339,
+      "inode": 70290430,
+      "links": 1,
+      "mtime": 1790935689.1837962
+    }
+  ],
+  "outputs/meso_migration_validation_20261006/toy/mainline/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 99353541,
+      "inode": 70422836,
+      "links": 1,
+      "mtime": 1791298984.457848
+    }
+  ],
+  "outputs/meso_migration_validation_20261006/production_lr/toy/mainline/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 166624945,
+      "inode": 70422875,
+      "links": 1,
+      "mtime": 1791299090.788436
+    }
+  ],
+  "outputs/ingolstadt_online_pilot_20261003/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 280816695,
+      "inode": 69606947,
+      "links": 1,
+      "mtime": 1791126016.3162212
+    }
+  ],
+  "outputs/ingolstadt_online_pilot_20261003/interim_after1/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 194937428,
+      "inode": 69605718,
+      "links": 1,
+      "mtime": 1791050322.5202858
+    }
+  ],
+  "outputs/collector_optimization_20261007/resume_mamba": [
+    {
+      "name": "best.pt",
+      "bytes": 115398603,
+      "inode": 70816151,
+      "links": 1,
+      "mtime": 1791375489.131767
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 115400043,
+      "inode": 70816142,
+      "links": 1,
+      "mtime": 1791375489.7597878
+    }
+  ],
+  "outputs/collector_optimization_20261007/resume_ippo": [
+    {
+      "name": "best.pt",
+      "bytes": 1068861,
+      "inode": 70816117,
+      "links": 1,
+      "mtime": 1791375452.7705593
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1068973,
+      "inode": 70816122,
+      "links": 1,
+      "mtime": 1791375452.7825599
+    }
+  ],
+  "outputs/collector_optimization_20261007/resume_dreamer": [
+    {
+      "name": "best.pt",
+      "bytes": 14870843,
+      "inode": 70816166,
+      "links": 1,
+      "mtime": 1791375507.9163866
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 14871591,
+      "inode": 70816158,
+      "links": 1,
+      "mtime": 1791375508.1523943
+    }
+  ],
+  "outputs/collector_optimization_20261007/resume_mappo": [
+    {
+      "name": "best.pt",
+      "bytes": 1954429,
+      "inode": 70816116,
+      "links": 1,
+      "mtime": 1791375439.1501038
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1954541,
+      "inode": 70816102,
+      "links": 1,
+      "mtime": 1791375439.1621044
+    }
+  ],
+  "outputs/collector_optimization_20261007/resume_mbpo": [
+    {
+      "name": "best.pt",
+      "bytes": 15611979,
+      "inode": 70816180,
+      "links": 1,
+      "mtime": 1791375522.8968785
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 15612331,
+      "inode": 70816174,
+      "links": 1,
+      "mtime": 1791375522.9728808
+    }
+  ],
+  "outputs/collector_optimization_20261007/resume_iql": [
+    {
+      "name": "best.pt",
+      "bytes": 1131071,
+      "inode": 70816137,
+      "links": 1,
+      "mtime": 1791375467.707057
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1131147,
+      "inode": 70816131,
+      "links": 1,
+      "mtime": 1791375467.7150571
+    }
+  ],
+  "outputs/city_baselines_sampling_t2_20261011/handoff_original/ingolstadt_custom_dreamer": [
+    {
+      "name": "best.pt",
+      "bytes": 1072898983,
+      "inode": 71385923,
+      "links": 2,
+      "mtime": 1791732092.307543
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1073549599,
+      "inode": 71385909,
+      "links": 1,
+      "mtime": 1791731992.1294506
+    }
+  ],
+  "outputs/city_baselines_sampling_t2_20261011/handoff_original/coulommiers_mbpo": [
+    {
+      "name": "best.pt",
+      "bytes": 1855466587,
+      "inode": 71510179,
+      "links": 5,
+      "mtime": 1791621956.0970702
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1855466587,
+      "inode": 71510171,
+      "links": 4,
+      "mtime": 1791621956.0970702
+    }
+  ],
+  "outputs/city_baselines_sampling_t2_20261011/handoff_original/coulommiers_mamba": [
+    {
+      "name": "best.pt",
+      "bytes": 1257712571,
+      "inode": 71523429,
+      "links": 5,
+      "mtime": 1791690964.3132772
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1258153911,
+      "inode": 71529232,
+      "links": 1,
+      "mtime": 1791731917.7079153
+    }
+  ],
+  "outputs/city_baselines_sampling_t2_20261011/handoff_original/coulommiers_ippo": [
+    {
+      "name": "best.pt",
+      "bytes": 1070141,
+      "inode": 71510965,
+      "links": 5,
+      "mtime": 1791626620.5459883
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1070253,
+      "inode": 71529259,
+      "links": 1,
+      "mtime": 1791732017.1339703
+    }
+  ],
+  "outputs/city_baselines_sampling_t2_20261011/handoff_original/montereau_fault_yonne_mappo": [
+    {
+      "name": "best.pt",
+      "bytes": 54529853,
+      "inode": 71511193,
+      "links": 5,
+      "mtime": 1791627848.479393
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 54529965,
+      "inode": 71529264,
+      "links": 1,
+      "mtime": 1791732019.4460185
+    }
+  ],
+  "outputs/city_baselines_sampling_t2_20261011/handoff_original/coulommiers_dreamer": [
+    {
+      "name": "best.pt",
+      "bytes": 248072531,
+      "inode": 71510167,
+      "links": 5,
+      "mtime": 1791621797.4607847
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 248072531,
+      "inode": 71510161,
+      "links": 4,
+      "mtime": 1791621797.4607847
+    }
+  ],
+  "outputs/city_baselines_sampling_t2_20261011/handoff_original/ingolstadt_custom_mamba": [
+    {
+      "name": "best.pt",
+      "bytes": 458092987,
+      "inode": 71374003,
+      "links": 5,
+      "mtime": 1791634888.38753
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 459255415,
+      "inode": 71385932,
+      "links": 1,
+      "mtime": 1791732104.3077955
+    }
+  ],
+  "outputs/city_baselines_sampling_t2_20261011/handoff_original/montereau_fault_yonne_mamba": [
+    {
+      "name": "best.pt",
+      "bytes": 421116397,
+      "inode": 71510239,
+      "links": 5,
+      "mtime": 1791622473.5000632
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 421116397,
+      "inode": 71510236,
+      "links": 1,
+      "mtime": 1791622473.5000632
+    }
+  ],
+  "outputs/city_baselines_sampling_t2_20261011/handoff_original/montereau_fault_yonne_gnac": [
+    {
+      "name": "best.pt",
+      "bytes": 129163820,
+      "inode": 71586869,
+      "links": 5,
+      "mtime": 1791675927.2649589
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 129163982,
+      "inode": 71614955,
+      "links": 4,
+      "mtime": 1791732083.3273544
+    }
+  ],
+  "outputs/city_baselines_sampling_t2_20261011/handoff_original/montereau_fault_yonne_dreamer": [
+    {
+      "name": "best.pt",
+      "bytes": 6420251207,
+      "inode": 71586776,
+      "links": 5,
+      "mtime": 1791667045.8744216
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 6411002787,
+      "inode": 71614900,
+      "links": 4,
+      "mtime": 1791731957.452733
+    }
+  ],
+  "outputs/city_baselines_sampling_t2_20261011/handoff_original/ingolstadt_custom_iql": [
+    {
+      "name": "best.pt",
+      "bytes": 140351615,
+      "inode": 71371416,
+      "links": 5,
+      "mtime": 1791629452.8900497
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 143062603,
+      "inode": 71385913,
+      "links": 1,
+      "mtime": 1791732075.303186
+    }
+  ],
+  "outputs/city_baselines_sampling_t2_20261011/handoff_original/montereau_fault_yonne_ippo": [
+    {
+      "name": "best.pt",
+      "bytes": 1070141,
+      "inode": 71515481,
+      "links": 5,
+      "mtime": 1791647568.0969017
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1070253,
+      "inode": 71529263,
+      "links": 1,
+      "mtime": 1791732015.3659337
+    }
+  ],
+  "outputs/city_baselines_sampling_t2_20261011/handoff_original/montereau_fault_yonne_online_ac": [
+    {
+      "name": "best.pt",
+      "bytes": 54526928,
+      "inode": 71523130,
+      "links": 5,
+      "mtime": 1791688485.5967739
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 54527486,
+      "inode": 71529273,
+      "links": 1,
+      "mtime": 1791732082.2633321
+    }
+  ],
+  "outputs/city_baselines_sampling_t2_20261011/handoff_original/montereau_fault_yonne_iql": [
+    {
+      "name": "best.pt",
+      "bytes": 159335551,
+      "inode": 71516595,
+      "links": 5,
+      "mtime": 1791652318.3972323
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 160119947,
+      "inode": 71529274,
+      "links": 1,
+      "mtime": 1791732108.9478931
+    }
+  ],
+  "outputs/city_baselines_sampling_t2_20261011/handoff_original/coulommiers_iql": [
+    {
+      "name": "best.pt",
+      "bytes": 142201023,
+      "inode": 71519103,
+      "links": 5,
+      "mtime": 1791663504.7339723
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 141526219,
+      "inode": 71529269,
+      "links": 1,
+      "mtime": 1791732084.1713722
+    }
+  ],
+  "outputs/city_baselines_sampling_t2_20261011/handoff_original/coulommiers_online_ac": [
+    {
+      "name": "best.pt",
+      "bytes": 56751056,
+      "inode": 71517628,
+      "links": 2,
+      "mtime": 1791657476.1848547
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 56751614,
+      "inode": 71529247,
+      "links": 1,
+      "mtime": 1791732033.8823195
+    }
+  ],
+  "outputs/city_baselines_sampling_t2_20261011/handoff_original/coulommiers_gnac": [
+    {
+      "name": "best.pt",
+      "bytes": 137748268,
+      "inode": 71513240,
+      "links": 5,
+      "mtime": 1791637914.7008247
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 137748430,
+      "inode": 71529267,
+      "links": 1,
+      "mtime": 1791732041.5624797
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/iql": [
+    {
+      "name": "initial.pt",
+      "bytes": 573309,
+      "inode": 71312039,
+      "links": 1,
+      "mtime": 1791464309.4840257
+    },
+    {
+      "name": "best.pt",
+      "bytes": 140351615,
+      "inode": 71371416,
+      "links": 5,
+      "mtime": 1791629452.8900497
+    },
+    {
+      "name": "best_deterministic.pt",
+      "bytes": 140351615,
+      "inode": 71371416,
+      "links": 5,
+      "mtime": 1791629452.8900497
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 143056395,
+      "inode": 71307080,
+      "links": 1,
+      "mtime": 1791734530.7292523
+    },
+    {
+      "name": "best_sampled_temperature_2.pt",
+      "bytes": 140351615,
+      "inode": 71386034,
+      "links": 1,
+      "mtime": 1791629452.8900497
+    },
+    {
+      "name": "best_sampled_temperature_0.2.pt",
+      "bytes": 140351615,
+      "inode": 71386086,
+      "links": 1,
+      "mtime": 1791629452.8900497
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta": [
+    {
+      "name": "initial.pt",
+      "bytes": 1007940,
+      "inode": 71311860,
+      "links": 1,
+      "mtime": 1791464097.1057513
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1074927,
+      "inode": 71312997,
+      "links": 1,
+      "mtime": 1791465839.774212
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1086397,
+      "inode": 71331822,
+      "links": 1,
+      "mtime": 1791494028.295841
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/mappo": [
+    {
+      "name": "initial.pt",
+      "bytes": 4059069,
+      "inode": 71311877,
+      "links": 1,
+      "mtime": 1791464098.105762
+    },
+    {
+      "name": "best.pt",
+      "bytes": 12148605,
+      "inode": 71369881,
+      "links": 1,
+      "mtime": 1791624469.7713962
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 12148717,
+      "inode": 71373807,
+      "links": 2,
+      "mtime": 1791634095.4935482
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac": [
+    {
+      "name": "initial.pt",
+      "bytes": 7170627,
+      "inode": 71434649,
+      "links": 1,
+      "mtime": 1791524288.9910502
+    },
+    {
+      "name": "best.pt",
+      "bytes": 15664108,
+      "inode": 71518389,
+      "links": 1,
+      "mtime": 1791660472.2637067
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 15664334,
+      "inode": 71517485,
+      "links": 1,
+      "mtime": 1791660472.3277087
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer": [
+    {
+      "name": "initial.pt",
+      "bytes": 19383741,
+      "inode": 71311869,
+      "links": 1,
+      "mtime": 1791464097.91376
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1072899367,
+      "inode": 71385966,
+      "links": 4,
+      "mtime": 1791732626.4630222
+    },
+    {
+      "name": "best_deterministic.pt",
+      "bytes": 1072898983,
+      "inode": 71385923,
+      "links": 2,
+      "mtime": 1791732092.307543
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1044758479,
+      "inode": 71307076,
+      "links": 1,
+      "mtime": 1791734505.8965142
+    },
+    {
+      "name": "best_sampled_temperature_2.pt",
+      "bytes": 1072899367,
+      "inode": 71385966,
+      "links": 4,
+      "mtime": 1791732626.4630222
+    },
+    {
+      "name": "best_sampled_temperature_0.2.pt",
+      "bytes": 1072899367,
+      "inode": 71386091,
+      "links": 1,
+      "mtime": 1791732626.4630222
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo": [
+    {
+      "name": "initial.pt",
+      "bytes": 368317,
+      "inode": 71311872,
+      "links": 1,
+      "mtime": 1791464097.8937597
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1070205,
+      "inode": 71316452,
+      "links": 1,
+      "mtime": 1791470682.2437375
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1070381,
+      "inode": 71310854,
+      "links": 2,
+      "mtime": 1791580993.0498686
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac": [
+    {
+      "name": "initial.pt",
+      "bytes": 4057205,
+      "inode": 71311865,
+      "links": 1,
+      "mtime": 1791464097.369754
+    },
+    {
+      "name": "best.pt",
+      "bytes": 12139472,
+      "inode": 71321468,
+      "links": 1,
+      "mtime": 1791478460.3365057
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 12140030,
+      "inode": 71358066,
+      "links": 2,
+      "mtime": 1791556808.2927625
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/mamba": [
+    {
+      "name": "initial.pt",
+      "bytes": 64001421,
+      "inode": 71312257,
+      "links": 1,
+      "mtime": 1791465218.961917
+    },
+    {
+      "name": "best.pt",
+      "bytes": 458092987,
+      "inode": 71374003,
+      "links": 5,
+      "mtime": 1791634888.38753
+    },
+    {
+      "name": "best_deterministic.pt",
+      "bytes": 458092987,
+      "inode": 71374003,
+      "links": 5,
+      "mtime": 1791634888.38753
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 459985591,
+      "inode": 71386116,
+      "links": 1,
+      "mtime": 1791734440.5545654
+    },
+    {
+      "name": "best_sampled_temperature_2.pt",
+      "bytes": 458092987,
+      "inode": 71386014,
+      "links": 1,
+      "mtime": 1791634888.38753
+    },
+    {
+      "name": "best_sampled_temperature_0.2.pt",
+      "bytes": 458092987,
+      "inode": 71386087,
+      "links": 1,
+      "mtime": 1791634888.38753
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/montereau_fault_yonne/iql": [
+    {
+      "name": "initial.pt",
+      "bytes": 573309,
+      "inode": 71434659,
+      "links": 1,
+      "mtime": 1791524300.2193346
+    },
+    {
+      "name": "best.pt",
+      "bytes": 159981055,
+      "inode": 71440181,
+      "links": 1,
+      "mtime": 1791560151.5088065
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 159823243,
+      "inode": 71442838,
+      "links": 1,
+      "mtime": 1791568073.7137015
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/montereau_fault_yonne/dta": [
+    {
+      "name": "initial.pt",
+      "bytes": 11148932,
+      "inode": 71311893,
+      "links": 1,
+      "mtime": 1791464110.8098974
+    },
+    {
+      "name": "best.pt",
+      "bytes": 12036591,
+      "inode": 71317259,
+      "links": 1,
+      "mtime": 1791471993.8696995
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 12093309,
+      "inode": 71362136,
+      "links": 1,
+      "mtime": 1791568337.1315196
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/montereau_fault_yonne/mappo": [
+    {
+      "name": "initial.pt",
+      "bytes": 18186173,
+      "inode": 71313289,
+      "links": 1,
+      "mtime": 1791466044.179298
+    },
+    {
+      "name": "best.pt",
+      "bytes": 54523837,
+      "inode": 71328624,
+      "links": 1,
+      "mtime": 1791489482.060684
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 54523949,
+      "inode": 71362222,
+      "links": 1,
+      "mtime": 1791568006.1923144
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/montereau_fault_yonne/ippo": [
+    {
+      "name": "initial.pt",
+      "bytes": 368317,
+      "inode": 71434654,
+      "links": 1,
+      "mtime": 1791524300.1673334
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1070269,
+      "inode": 71435908,
+      "links": 1,
+      "mtime": 1791546400.7506459
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1070381,
+      "inode": 71443233,
+      "links": 1,
+      "mtime": 1791568319.7951205
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/montereau_fault_yonne/online_ac": [
+    {
+      "name": "initial.pt",
+      "bytes": 18184309,
+      "inode": 71311903,
+      "links": 1,
+      "mtime": 1791464110.025889
+    },
+    {
+      "name": "best.pt",
+      "bytes": 54520784,
+      "inode": 71350772,
+      "links": 1,
+      "mtime": 1791534658.9012065
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 54521342,
+      "inode": 71362311,
+      "links": 1,
+      "mtime": 1791568273.8420722
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/iql": [
+    {
+      "name": "initial.pt",
+      "bytes": 573309,
+      "inode": 71312879,
+      "links": 1,
+      "mtime": 1791465562.081674
+    },
+    {
+      "name": "best.pt",
+      "bytes": 159957951,
+      "inode": 71353499,
+      "links": 1,
+      "mtime": 1791542338.720255
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 160176459,
+      "inode": 71362309,
+      "links": 1,
+      "mtime": 1791568283.226285
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/dta": [
+    {
+      "name": "initial.pt",
+      "bytes": 9868996,
+      "inode": 71311900,
+      "links": 1,
+      "mtime": 1791464110.0658894
+    },
+    {
+      "name": "best.pt",
+      "bytes": 10241775,
+      "inode": 71353411,
+      "links": 1,
+      "mtime": 1791542061.9458482
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 10246141,
+      "inode": 71354562,
+      "links": 1,
+      "mtime": 1791545412.8434298
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/mappo": [
+    {
+      "name": "initial.pt",
+      "bytes": 18927549,
+      "inode": 71312654,
+      "links": 1,
+      "mtime": 1791465230.858047
+    },
+    {
+      "name": "best.pt",
+      "bytes": 56747965,
+      "inode": 71329845,
+      "links": 1,
+      "mtime": 1791491433.7175744
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 56748077,
+      "inode": 71362279,
+      "links": 1,
+      "mtime": 1791568281.4102437
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/gnac": [
+    {
+      "name": "initial.pt",
+      "bytes": 99517827,
+      "inode": 71434664,
+      "links": 1,
+      "mtime": 1791524301.1713588
+    },
+    {
+      "name": "best.pt",
+      "bytes": 137742124,
+      "inode": 71435562,
+      "links": 1,
+      "mtime": 1791541817.3085003
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 137742286,
+      "inode": 71443232,
+      "links": 1,
+      "mtime": 1791568319.9311235
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/mbpo": [
+    {
+      "name": "initial.pt",
+      "bytes": 618485801,
+      "inode": 71434669,
+      "links": 1,
+      "mtime": 1791524305.8434772
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1858591883,
+      "inode": 71438559,
+      "links": 1,
+      "mtime": 1791557785.7677345
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1858590763,
+      "inode": 71442876,
+      "links": 1,
+      "mtime": 1791568233.2571588
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/ippo": [
+    {
+      "name": "initial.pt",
+      "bytes": 368317,
+      "inode": 71312649,
+      "links": 1,
+      "mtime": 1791465230.5140433
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1070205,
+      "inode": 71336934,
+      "links": 1,
+      "mtime": 1791504407.0209215
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1070317,
+      "inode": 71362257,
+      "links": 1,
+      "mtime": 1791568316.4510436
+    }
+  ],
+  "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/online_ac": [
+    {
+      "name": "initial.pt",
+      "bytes": 18925685,
+      "inode": 71311891,
+      "links": 1,
+      "mtime": 1791464107.101858
+    },
+    {
+      "name": "best.pt",
+      "bytes": 56744912,
+      "inode": 71361532,
+      "links": 1,
+      "mtime": 1791566201.6900723
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 56745470,
+      "inode": 71362331,
+      "links": 1,
+      "mtime": 1791568336.7035098
+    }
+  ],
+  "outputs/short_cycle_patch_20261009/validation_v4/montereau_fault_yonne": [
+    {
+      "name": "dta_assignment_0005.pt",
+      "bytes": 11850677,
+      "inode": 71437098,
+      "links": 1,
+      "mtime": 1791552540.8174295
+    }
+  ],
+  "outputs/short_cycle_patch_20261009/validation_v4/coulommiers": [
+    {
+      "name": "dta_assignment_0005.pt",
+      "bytes": 10058613,
+      "inode": 71437022,
+      "links": 1,
+      "mtime": 1791552111.1864963
+    }
+  ],
+  "outputs/short_cycle_patch_20261009/validation_v2/montereau_fault_yonne": [
+    {
+      "name": "dta_assignment_0005.pt",
+      "bytes": 11679669,
+      "inode": 71436757,
+      "links": 1,
+      "mtime": 1791550724.4044337
+    }
+  ],
+  "outputs/short_cycle_patch_20261009/validation_v2/coulommiers": [
+    {
+      "name": "dta_assignment_0005.pt",
+      "bytes": 10046197,
+      "inode": 71436715,
+      "links": 1,
+      "mtime": 1791550520.1787632
+    }
+  ],
+  "outputs/short_cycle_patch_20261009/validation_v3/montereau_fault_yonne": [
+    {
+      "name": "dta_assignment_0005.pt",
+      "bytes": 11666037,
+      "inode": 71436869,
+      "links": 1,
+      "mtime": 1791551305.5173504
+    }
+  ],
+  "outputs/short_cycle_patch_20261009/validation_v3/coulommiers": [
+    {
+      "name": "dta_assignment_0005.pt",
+      "bytes": 10024565,
+      "inode": 71436843,
+      "links": 1,
+      "mtime": 1791551097.3367212
+    }
+  ],
+  "outputs/short_cycle_patch_20261009/validation_v1/montereau_fault_yonne": [
+    {
+      "name": "dta_assignment_0005.pt",
+      "bytes": 11602997,
+      "inode": 71436447,
+      "links": 1,
+      "mtime": 1791550193.7573245
+    }
+  ],
+  "outputs/short_cycle_patch_20261009/validation_v1/coulommiers": [
+    {
+      "name": "dta_assignment_0005.pt",
+      "bytes": 10045877,
+      "inode": 71436404,
+      "links": 1,
+      "mtime": 1791549973.7833285
+    }
+  ],
+  "outputs/short_cycle_patch_20261009/validation_v5/montereau_fault_yonne": [
+    {
+      "name": "dta_assignment_0005.pt",
+      "bytes": 11831477,
+      "inode": 71437545,
+      "links": 1,
+      "mtime": 1791553597.874015
+    }
+  ],
+  "outputs/short_cycle_patch_20261009/validation_v5/coulommiers": [
+    {
+      "name": "dta_assignment_0005.pt",
+      "bytes": 10058613,
+      "inode": 71437189,
+      "links": 1,
+      "mtime": 1791552111.1864963
+    }
+  ],
+  "outputs/city_online_ac_dta_so_poisson_seed42_20261001/ingolstadt_custom/dta_so": [
+    {
+      "name": "initial.pt",
+      "bytes": 1054249,
+      "inode": 69730764,
+      "links": 1,
+      "mtime": 1790872503.9260557
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1078804,
+      "inode": 69730763,
+      "links": 1,
+      "mtime": 1790872939.857913
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1075874,
+      "inode": 69730765,
+      "links": 1,
+      "mtime": 1790875756.6355693
+    }
+  ],
+  "outputs/city_online_ac_dta_so_poisson_seed42_20261001/ingolstadt_custom/online_ac": [
+    {
+      "name": "initial.pt",
+      "bytes": 4056374,
+      "inode": 69730776,
+      "links": 1,
+      "mtime": 1790872601.381455
+    },
+    {
+      "name": "best.pt",
+      "bytes": 12137503,
+      "inode": 69730775,
+      "links": 1,
+      "mtime": 1790874222.226162
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 12137617,
+      "inode": 69730777,
+      "links": 1,
+      "mtime": 1790875660.8309426
+    }
+  ],
+  "outputs/city_online_ac_dta_so_poisson_seed42_20261001/fontenay_en_parisis/dta_so": [
+    {
+      "name": "initial.pt",
+      "bytes": 46708265,
+      "inode": 69730801,
+      "links": 1,
+      "mtime": 1790872681.150925
+    },
+    {
+      "name": "best.pt",
+      "bytes": 47570580,
+      "inode": 69730800,
+      "links": 1,
+      "mtime": 1790874292.9089615
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 47730274,
+      "inode": 69730802,
+      "links": 1,
+      "mtime": 1790875719.1073132
+    }
+  ],
+  "outputs/city_online_ac_dta_so_poisson_seed42_20261001/fontenay_en_parisis/online_ac": [
+    {
+      "name": "initial.pt",
+      "bytes": 31630646,
+      "inode": 69730806,
+      "links": 1,
+      "mtime": 1790873147.6878016
+    },
+    {
+      "name": "best.pt",
+      "bytes": 31630391,
+      "inode": 69730805,
+      "links": 1,
+      "mtime": 1790873147.6518
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 94860433,
+      "inode": 69730807,
+      "links": 1,
+      "mtime": 1790875756.3675673
+    }
+  ],
+  "outputs/city_online_ac_dta_so_poisson_seed42_20261001/gretz_armainvilliers/dta_so": [
+    {
+      "name": "initial.pt",
+      "bytes": 10543593,
+      "inode": 69730770,
+      "links": 1,
+      "mtime": 1790872530.7801812
+    },
+    {
+      "name": "best.pt",
+      "bytes": 10807572,
+      "inode": 69730769,
+      "links": 1,
+      "mtime": 1790873907.1921566
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 10864738,
+      "inode": 69730771,
+      "links": 1,
+      "mtime": 1790875745.9634953
+    }
+  ],
+  "outputs/city_online_ac_dta_so_poisson_seed42_20261001/gretz_armainvilliers/online_ac": [
+    {
+      "name": "initial.pt",
+      "bytes": 18933046,
+      "inode": 69730798,
+      "links": 1,
+      "mtime": 1790872674.3664782
+    },
+    {
+      "name": "best.pt",
+      "bytes": 56767519,
+      "inode": 69730797,
+      "links": 1,
+      "mtime": 1790874343.441726
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 56767633,
+      "inode": 69730799,
+      "links": 1,
+      "mtime": 1790875730.0193863
+    }
+  ],
+  "outputs/ingo_temperature02_latest_20261011/iql": [
+    {
+      "name": "latest.pt",
+      "bytes": 143129547,
+      "inode": 71698180,
+      "links": 1,
+      "mtime": 1791733009.0433557
+    }
+  ],
+  "outputs/ingo_temperature02_latest_20261011/mappo": [
+    {
+      "name": "latest.pt",
+      "bytes": 12148717,
+      "inode": 71698178,
+      "links": 1,
+      "mtime": 1791733008.7193394
+    }
+  ],
+  "outputs/ingo_temperature02_latest_20261011/gnac": [
+    {
+      "name": "latest.pt",
+      "bytes": 15664334,
+      "inode": 71698172,
+      "links": 1,
+      "mtime": 1791732987.1142495
+    }
+  ],
+  "outputs/ingo_temperature02_latest_20261011/dreamer": [
+    {
+      "name": "latest.pt",
+      "bytes": 1076490175,
+      "inode": 71698174,
+      "links": 1,
+      "mtime": 1791732988.5863245
+    }
+  ],
+  "outputs/ingo_temperature02_latest_20261011/ippo": [
+    {
+      "name": "latest.pt",
+      "bytes": 1070381,
+      "inode": 71698176,
+      "links": 1,
+      "mtime": 1791733008.5153291
+    }
+  ],
+  "outputs/ingo_temperature02_latest_20261011/online_ac": [
+    {
+      "name": "latest.pt",
+      "bytes": 12140030,
+      "inode": 71698170,
+      "links": 1,
+      "mtime": 1791732986.750231
+    }
+  ],
+  "outputs/ingo_temperature02_latest_20261011/mamba": [
+    {
+      "name": "latest.pt",
+      "bytes": 460553207,
+      "inode": 71698183,
+      "links": 1,
+      "mtime": 1791733016.6917367
+    }
+  ],
+  "outputs/ingolstadt_noise_training_pair_20261003/arm_sigma0": [
+    {
+      "name": "dynamics_ablation.pt",
+      "bytes": 98290947,
+      "inode": 69605704,
+      "links": 1,
+      "mtime": 1791049420.5094872
+    }
+  ],
+  "outputs/ingolstadt_noise_training_pair_20261003/arm_sigma0.1": [
+    {
+      "name": "dynamics_ablation.pt",
+      "bytes": 98290947,
+      "inode": 69605710,
+      "links": 1,
+      "mtime": 1791049559.0244317
+    }
+  ],
+  "outputs/ingo_bounded_critic_candidate_20261011/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 380009499,
+      "inode": 71587881,
+      "links": 1,
+      "mtime": 1791696410.5677173
+    }
+  ],
+  "outputs/ingolstadt_online_meso_noincident_noprior_20261007/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 229302686,
+      "inode": 71094107,
+      "links": 1,
+      "mtime": 1791449256.2590477
+    }
+  ],
+  "outputs/ingolstadt_online_meso_noincident_noprior_20261007/runtime_resource_changes/gpu_fraction_20261007": [
+    {
+      "name": "checkpoint_before.pt",
+      "bytes": 307565366,
+      "inode": 71077847,
+      "links": 1,
+      "mtime": 1791391004.5573368
+    }
+  ],
+  "outputs/city_baselines_sampling_t0p2_20261011/handoff_original/ingolstadt_custom_dreamer": [
+    {
+      "name": "best.pt",
+      "bytes": 1072899367,
+      "inode": 71385966,
+      "links": 4,
+      "mtime": 1791732626.4630222
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1060620031,
+      "inode": 71386031,
+      "links": 1,
+      "mtime": 1791733467.8349514
+    }
+  ],
+  "outputs/city_baselines_sampling_t0p2_20261011/handoff_original/coulommiers_mbpo": [
+    {
+      "name": "best.pt",
+      "bytes": 1855466587,
+      "inode": 71510179,
+      "links": 5,
+      "mtime": 1791621956.0970702
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1855466587,
+      "inode": 71510171,
+      "links": 4,
+      "mtime": 1791621956.0970702
+    }
+  ],
+  "outputs/city_baselines_sampling_t0p2_20261011/handoff_original/coulommiers_mamba": [
+    {
+      "name": "best.pt",
+      "bytes": 1257712571,
+      "inode": 71523429,
+      "links": 5,
+      "mtime": 1791690964.3132772
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1255409591,
+      "inode": 71529419,
+      "links": 1,
+      "mtime": 1791733336.8619044
+    }
+  ],
+  "outputs/city_baselines_sampling_t0p2_20261011/handoff_original/coulommiers_ippo": [
+    {
+      "name": "best.pt",
+      "bytes": 1070141,
+      "inode": 71510965,
+      "links": 5,
+      "mtime": 1791626620.5459883
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1070317,
+      "inode": 71529330,
+      "links": 1,
+      "mtime": 1791733409.0287263
+    }
+  ],
+  "outputs/city_baselines_sampling_t0p2_20261011/handoff_original/montereau_fault_yonne_mappo": [
+    {
+      "name": "best.pt",
+      "bytes": 54529853,
+      "inode": 71511193,
+      "links": 5,
+      "mtime": 1791627848.479393
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 54530029,
+      "inode": 71529423,
+      "links": 1,
+      "mtime": 1791733441.0739467
+    }
+  ],
+  "outputs/city_baselines_sampling_t0p2_20261011/handoff_original/coulommiers_dreamer": [
+    {
+      "name": "best.pt",
+      "bytes": 248072531,
+      "inode": 71510167,
+      "links": 5,
+      "mtime": 1791621797.4607847
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 248072531,
+      "inode": 71510161,
+      "links": 4,
+      "mtime": 1791621797.4607847
+    }
+  ],
+  "outputs/city_baselines_sampling_t0p2_20261011/handoff_original/montereau_fault_yonne_mbpo": [
+    {
+      "name": "best.pt",
+      "bytes": 593604051,
+      "inode": 71697790,
+      "links": 4,
+      "mtime": 1791732440.7509856
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1783803691,
+      "inode": 71698329,
+      "links": 1,
+      "mtime": 1791733353.6265695
+    }
+  ],
+  "outputs/city_baselines_sampling_t0p2_20261011/handoff_original/ingolstadt_custom_mamba": [
+    {
+      "name": "best.pt",
+      "bytes": 458092987,
+      "inode": 71374003,
+      "links": 5,
+      "mtime": 1791634888.38753
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 457340855,
+      "inode": 71386025,
+      "links": 1,
+      "mtime": 1791733386.1398427
+    }
+  ],
+  "outputs/city_baselines_sampling_t0p2_20261011/handoff_original/montereau_fault_yonne_mamba": [
+    {
+      "name": "best.pt",
+      "bytes": 421116397,
+      "inode": 71510239,
+      "links": 5,
+      "mtime": 1791622473.5000632
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 860190199,
+      "inode": 71529389,
+      "links": 1,
+      "mtime": 1791733303.4125586
+    }
+  ],
+  "outputs/city_baselines_sampling_t0p2_20261011/handoff_original/montereau_fault_yonne_gnac": [
+    {
+      "name": "best.pt",
+      "bytes": 129163820,
+      "inode": 71586869,
+      "links": 5,
+      "mtime": 1791675927.2649589
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 129163982,
+      "inode": 71614955,
+      "links": 4,
+      "mtime": 1791732083.3273544
+    }
+  ],
+  "outputs/city_baselines_sampling_t0p2_20261011/handoff_original/montereau_fault_yonne_dreamer": [
+    {
+      "name": "best.pt",
+      "bytes": 6420251207,
+      "inode": 71586776,
+      "links": 5,
+      "mtime": 1791667045.8744216
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 6411002787,
+      "inode": 71614900,
+      "links": 4,
+      "mtime": 1791731957.452733
+    }
+  ],
+  "outputs/city_baselines_sampling_t0p2_20261011/handoff_original/ingolstadt_custom_iql": [
+    {
+      "name": "best.pt",
+      "bytes": 140351615,
+      "inode": 71371416,
+      "links": 5,
+      "mtime": 1791629452.8900497
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 142878987,
+      "inode": 71386027,
+      "links": 1,
+      "mtime": 1791733435.8337483
+    }
+  ],
+  "outputs/city_baselines_sampling_t0p2_20261011/handoff_original/montereau_fault_yonne_ippo": [
+    {
+      "name": "best.pt",
+      "bytes": 1070141,
+      "inode": 71515481,
+      "links": 5,
+      "mtime": 1791647568.0969017
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1070317,
+      "inode": 71529428,
+      "links": 1,
+      "mtime": 1791733468.5589786
+    }
+  ],
+  "outputs/city_baselines_sampling_t0p2_20261011/handoff_original/montereau_fault_yonne_online_ac": [
+    {
+      "name": "best.pt",
+      "bytes": 54526928,
+      "inode": 71523130,
+      "links": 5,
+      "mtime": 1791688485.5967739
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 54527550,
+      "inode": 71529415,
+      "links": 1,
+      "mtime": 1791733453.134401
+    }
+  ],
+  "outputs/city_baselines_sampling_t0p2_20261011/handoff_original/montereau_fault_yonne_iql": [
+    {
+      "name": "best.pt",
+      "bytes": 159335551,
+      "inode": 71516595,
+      "links": 5,
+      "mtime": 1791652318.3972323
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 159975371,
+      "inode": 71529422,
+      "links": 1,
+      "mtime": 1791733319.949227
+    }
+  ],
+  "outputs/city_baselines_sampling_t0p2_20261011/handoff_original/coulommiers_iql": [
+    {
+      "name": "best.pt",
+      "bytes": 142201023,
+      "inode": 71519103,
+      "links": 5,
+      "mtime": 1791663504.7339723
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 141559051,
+      "inode": 71529435,
+      "links": 1,
+      "mtime": 1791733450.0902865
+    }
+  ],
+  "outputs/city_baselines_sampling_t0p2_20261011/handoff_original/coulommiers_online_ac": [
+    {
+      "name": "best.pt",
+      "bytes": 56751120,
+      "inode": 71529398,
+      "links": 4,
+      "mtime": 1791733320.4252462
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 56751678,
+      "inode": 71520629,
+      "links": 1,
+      "mtime": 1791733438.9818676
+    }
+  ],
+  "outputs/city_baselines_sampling_t0p2_20261011/handoff_original/coulommiers_gnac": [
+    {
+      "name": "best.pt",
+      "bytes": 137748268,
+      "inode": 71513240,
+      "links": 5,
+      "mtime": 1791637914.7008247
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 137748494,
+      "inode": 71529433,
+      "links": 1,
+      "mtime": 1791733427.1894202
+    }
+  ],
+  "outputs/city_online_ac_dta_so_individual_timeout_seed42_20261001/ingolstadt_custom/dta_so": [
+    {
+      "name": "initial.pt",
+      "bytes": 1054249,
+      "inode": 69730898,
+      "links": 1,
+      "mtime": 1790877206.675461
+    },
+    {
+      "name": "best.pt",
+      "bytes": 1078804,
+      "inode": 69730897,
+      "links": 1,
+      "mtime": 1790877656.0312643
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1087202,
+      "inode": 69730899,
+      "links": 1,
+      "mtime": 1790882063.4952781
+    }
+  ],
+  "outputs/city_online_ac_dta_so_individual_timeout_seed42_20261001/ingolstadt_custom/online_ac": [
+    {
+      "name": "initial.pt",
+      "bytes": 4056438,
+      "inode": 69730909,
+      "links": 1,
+      "mtime": 1790877307.9503615
+    },
+    {
+      "name": "best.pt",
+      "bytes": 12137567,
+      "inode": 69730908,
+      "links": 1,
+      "mtime": 1790900431.593118
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 12137681,
+      "inode": 69730910,
+      "links": 1,
+      "mtime": 1790900993.1545615
+    }
+  ],
+  "outputs/city_online_ac_dta_so_individual_timeout_seed42_20261001/fontenay_en_parisis/dta_so": [
+    {
+      "name": "initial.pt",
+      "bytes": 46708329,
+      "inode": 69730920,
+      "links": 1,
+      "mtime": 1790877387.8325336
+    },
+    {
+      "name": "best.pt",
+      "bytes": 48184724,
+      "inode": 69730919,
+      "links": 1,
+      "mtime": 1790903296.2527938
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 48186786,
+      "inode": 69730921,
+      "links": 1,
+      "mtime": 1790914980.5950375
+    }
+  ],
+  "outputs/city_online_ac_dta_so_individual_timeout_seed42_20261001/fontenay_en_parisis/online_ac": [
+    {
+      "name": "initial.pt",
+      "bytes": 31630710,
+      "inode": 69730924,
+      "links": 1,
+      "mtime": 1790877830.383308
+    },
+    {
+      "name": "best.pt",
+      "bytes": 94860383,
+      "inode": 69730923,
+      "links": 1,
+      "mtime": 1790995081.9327683
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 94860497,
+      "inode": 69730925,
+      "links": 1,
+      "mtime": 1790995082.3007743
+    }
+  ],
+  "outputs/city_online_ac_dta_so_individual_timeout_seed42_20261001/gretz_armainvilliers/dta_so": [
+    {
+      "name": "initial.pt",
+      "bytes": 10543593,
+      "inode": 69730903,
+      "links": 1,
+      "mtime": 1790877228.6281052
+    },
+    {
+      "name": "best.pt",
+      "bytes": 10917716,
+      "inode": 69730902,
+      "links": 1,
+      "mtime": 1790886386.2359412
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 10917730,
+      "inode": 69730904,
+      "links": 1,
+      "mtime": 1790886386.8199565
+    }
+  ],
+  "outputs/city_online_ac_dta_so_individual_timeout_seed42_20261001/gretz_armainvilliers/online_ac": [
+    {
+      "name": "initial.pt",
+      "bytes": 18933110,
+      "inode": 69730917,
+      "links": 1,
+      "mtime": 1790877369.3000379
+    },
+    {
+      "name": "best.pt",
+      "bytes": 56767583,
+      "inode": 69730916,
+      "links": 1,
+      "mtime": 1790891321.2367685
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 56767697,
+      "inode": 69730918,
+      "links": 1,
+      "mtime": 1790908131.5893474
+    }
+  ],
+  "outputs/city_baselines_entropy_annealed_20261010/handoff_original/ingolstadt_custom_dreamer": [
+    {
+      "name": "best.pt",
+      "bytes": 995288171,
+      "inode": 71355649,
+      "links": 1,
+      "mtime": 1791548705.851645
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1244544487,
+      "inode": 71367094,
+      "links": 1,
+      "mtime": 1791613367.2347677
+    }
+  ],
+  "outputs/city_baselines_entropy_annealed_20261010/handoff_original/coulommiers_mbpo": [
+    {
+      "name": "best.pt",
+      "bytes": 1858305483,
+      "inode": 71492196,
+      "links": 1,
+      "mtime": 1791591582.4119027
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1858295915,
+      "inode": 71509056,
+      "links": 1,
+      "mtime": 1791613381.435109
+    }
+  ],
+  "outputs/city_baselines_entropy_annealed_20261010/handoff_original/coulommiers_mamba": [
+    {
+      "name": "best.pt",
+      "bytes": 1273459387,
+      "inode": 71492511,
+      "links": 1,
+      "mtime": 1791593746.2508674
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1300350135,
+      "inode": 71509025,
+      "links": 1,
+      "mtime": 1791613312.2294424
+    }
+  ],
+  "outputs/city_baselines_entropy_annealed_20261010/handoff_original/coulommiers_ippo": [
+    {
+      "name": "best.pt",
+      "bytes": 1070205,
+      "inode": 71492829,
+      "links": 1,
+      "mtime": 1791594330.423102
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1070317,
+      "inode": 71509014,
+      "links": 1,
+      "mtime": 1791613454.3368552
+    }
+  ],
+  "outputs/city_baselines_entropy_annealed_20261010/handoff_original/montereau_fault_yonne_mappo": [
+    {
+      "name": "best.pt",
+      "bytes": 54523837,
+      "inode": 71487434,
+      "links": 1,
+      "mtime": 1791576774.6299112
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 54523949,
+      "inode": 71509012,
+      "links": 1,
+      "mtime": 1791613398.607521
+    }
+  ],
+  "outputs/city_baselines_entropy_annealed_20261010/handoff_original/coulommiers_dreamer": [
+    {
+      "name": "best.pt",
+      "bytes": 6822477095,
+      "inode": 71507316,
+      "links": 1,
+      "mtime": 1791605624.9347622
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 6560125879,
+      "inode": 71509017,
+      "links": 1,
+      "mtime": 1791613416.7559562
+    }
+  ],
+  "outputs/city_baselines_entropy_annealed_20261010/handoff_original/ingolstadt_custom_gnac": [
+    {
+      "name": "best.pt",
+      "bytes": 15657964,
+      "inode": 71508258,
+      "links": 1,
+      "mtime": 1791609895.9716716
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 15658126,
+      "inode": 71509074,
+      "links": 1,
+      "mtime": 1791613460.8450105
+    }
+  ],
+  "outputs/city_baselines_entropy_annealed_20261010/handoff_original/ingolstadt_custom_mappo": [
+    {
+      "name": "best.pt",
+      "bytes": 12142525,
+      "inode": 71321682,
+      "links": 1,
+      "mtime": 1791478769.1625113
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 12142637,
+      "inode": 71367083,
+      "links": 1,
+      "mtime": 1791613447.4446905
+    }
+  ],
+  "outputs/city_baselines_entropy_annealed_20261010/handoff_original/ingolstadt_custom_mamba": [
+    {
+      "name": "best.pt",
+      "bytes": 610283067,
+      "inode": 71341358,
+      "links": 1,
+      "mtime": 1791511127.3505046
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 598650743,
+      "inode": 71367115,
+      "links": 1,
+      "mtime": 1791613382.3351305
+    }
+  ],
+  "outputs/city_baselines_entropy_annealed_20261010/handoff_original/montereau_fault_yonne_mamba": [
+    {
+      "name": "best.pt",
+      "bytes": 1300498299,
+      "inode": 71492733,
+      "links": 1,
+      "mtime": 1791593908.6981914
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1297692983,
+      "inode": 71508994,
+      "links": 1,
+      "mtime": 1791613394.3794196
+    }
+  ],
+  "outputs/city_baselines_entropy_annealed_20261010/handoff_original/ingolstadt_custom_iql": [
+    {
+      "name": "best.pt",
+      "bytes": 139462015,
+      "inode": 71337797,
+      "links": 1,
+      "mtime": 1791505583.2240288
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 142961611,
+      "inode": 71367132,
+      "links": 1,
+      "mtime": 1791613423.2721121
+    }
+  ],
+  "outputs/city_baselines_entropy_annealed_20261010/handoff_original/montereau_fault_yonne_ippo": [
+    {
+      "name": "best.pt",
+      "bytes": 1070205,
+      "inode": 71488109,
+      "links": 1,
+      "mtime": 1791580187.6322463
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 1070317,
+      "inode": 71508908,
+      "links": 1,
+      "mtime": 1791613447.9647028
+    }
+  ],
+  "outputs/city_baselines_entropy_annealed_20261010/handoff_original/montereau_fault_yonne_online_ac": [
+    {
+      "name": "best.pt",
+      "bytes": 54520784,
+      "inode": 71491607,
+      "links": 1,
+      "mtime": 1791590018.1971567
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 54521342,
+      "inode": 71509064,
+      "links": 1,
+      "mtime": 1791613450.6847677
+    }
+  ],
+  "outputs/city_baselines_entropy_annealed_20261010/handoff_original/montereau_fault_yonne_iql": [
+    {
+      "name": "best.pt",
+      "bytes": 160462207,
+      "inode": 71494532,
+      "links": 1,
+      "mtime": 1791601336.5841417
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 160651531,
+      "inode": 71509053,
+      "links": 1,
+      "mtime": 1791613415.5919282
+    }
+  ],
+  "outputs/city_baselines_entropy_annealed_20261010/handoff_original/coulommiers_iql": [
+    {
+      "name": "best.pt",
+      "bytes": 141417919,
+      "inode": 71494005,
+      "links": 1,
+      "mtime": 1791599487.970996
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 142290123,
+      "inode": 71508982,
+      "links": 1,
+      "mtime": 1791613295.1050284
+    }
+  ],
+  "outputs/city_baselines_entropy_annealed_20261010/handoff_original/coulommiers_online_ac": [
+    {
+      "name": "best.pt",
+      "bytes": 56744912,
+      "inode": 71508390,
+      "links": 1,
+      "mtime": 1791610453.5918522
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 56745470,
+      "inode": 71508910,
+      "links": 1,
+      "mtime": 1791613429.1242523
+    }
+  ],
+  "outputs/city_baselines_entropy_annealed_20261010/handoff_original/coulommiers_mappo": [
+    {
+      "name": "best.pt",
+      "bytes": 56747901,
+      "inode": 71508132,
+      "links": 1,
+      "mtime": 1791609326.111339
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 56748013,
+      "inode": 71509009,
+      "links": 1,
+      "mtime": 1791613381.0510998
+    }
+  ],
+  "outputs/city_baselines_entropy_annealed_20261010/handoff_original/coulommiers_gnac": [
+    {
+      "name": "best.pt",
+      "bytes": 137742060,
+      "inode": 71492409,
+      "links": 1,
+      "mtime": 1791592469.401227
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 137742222,
+      "inode": 71509063,
+      "links": 1,
+      "mtime": 1791613395.2354403
+    }
+  ],
+  "outputs/fm_prior_no_global_context_20261001/no_noise/run/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 165932284,
+      "inode": 69730856,
+      "links": 1,
+      "mtime": 1790875590.3745437
+    }
+  ],
+  "outputs/fm_prior_no_global_context_20261001/full/run/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 165932284,
+      "inode": 69730846,
+      "links": 1,
+      "mtime": 1790875576.8544738
+    }
+  ],
+  "outputs/two_city_urbandreamer_pretrain_supplement_20261011/montereau_fault_yonne/world_model": [
+    {
+      "name": "continuation_checkpoint.pt",
+      "bytes": 100581569,
+      "inode": 71697616,
+      "links": 1,
+      "mtime": 1791732144.8566508
+    },
+    {
+      "name": "source_checkpoint.pt",
+      "bytes": 100585971,
+      "inode": 71697612,
+      "links": 1,
+      "mtime": 1791732144.7126477
+    }
+  ],
+  "outputs/two_city_urbandreamer_pretrain_supplement_20261011/montereau_fault_yonne/world_model/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 100581569,
+      "inode": 71697618,
+      "links": 1,
+      "mtime": 1791732144.8566508
+    }
+  ],
+  "outputs/two_city_urbandreamer_pretrain_supplement_20261011/coulommiers/world_model": [
+    {
+      "name": "continuation_checkpoint.pt",
+      "bytes": 100629441,
+      "inode": 71696513,
+      "links": 1,
+      "mtime": 1791729647.4319618
+    },
+    {
+      "name": "source_checkpoint.pt",
+      "bytes": 100626419,
+      "inode": 71696509,
+      "links": 1,
+      "mtime": 1791729647.2879584
+    }
+  ],
+  "outputs/two_city_urbandreamer_pretrain_supplement_20261011/coulommiers/world_model/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 100638961,
+      "inode": 71699821,
+      "links": 1,
+      "mtime": 1791734437.2424664
+    }
+  ],
+  "outputs/toy_cross_bottleneck/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 172678996,
+      "inode": 69606763,
+      "links": 1,
+      "mtime": 1789501365.8071194
+    }
+  ],
+  "outputs/two_city_urbandreamer_pretrain_20261010/montereau_fault_yonne/world_model_ingo_profile": [
+    {
+      "name": "continuation_checkpoint.pt",
+      "bytes": 100590145,
+      "inode": 71583986,
+      "links": 1,
+      "mtime": 1791640957.3617885
+    },
+    {
+      "name": "source_checkpoint.pt",
+      "bytes": 100578545,
+      "inode": 71583984,
+      "links": 1,
+      "mtime": 1791640872.9452682
+    }
+  ],
+  "outputs/two_city_urbandreamer_pretrain_20261010/montereau_fault_yonne/codec": [
+    {
+      "name": "codec_best.pt",
+      "bytes": 361077,
+      "inode": 71573836,
+      "links": 1,
+      "mtime": 1791633499.0701785
+    },
+    {
+      "name": "codec_latest.pt",
+      "bytes": 361265,
+      "inode": 71573536,
+      "links": 1,
+      "mtime": 1791633499.094179
+    }
+  ],
+  "outputs/two_city_urbandreamer_pretrain_20261010/montereau_fault_yonne/world_model_ingo_profile/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 100590145,
+      "inode": 71583988,
+      "links": 1,
+      "mtime": 1791640957.3617885
+    }
+  ],
+  "outputs/two_city_urbandreamer_pretrain_20261010/montereau_fault_yonne/world_model/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 100578545,
+      "inode": 71583905,
+      "links": 1,
+      "mtime": 1791640872.9452682
+    }
+  ],
+  "outputs/two_city_urbandreamer_pretrain_20261010/coulommiers/codec": [
+    {
+      "name": "codec_best.pt",
+      "bytes": 360885,
+      "inode": 71573646,
+      "links": 1,
+      "mtime": 1791633394.7847624
+    },
+    {
+      "name": "codec_latest.pt",
+      "bytes": 361073,
+      "inode": 71572909,
+      "links": 1,
+      "mtime": 1791633394.8127627
+    }
+  ],
+  "outputs/two_city_urbandreamer_pretrain_20261010/coulommiers/world_model_ingo_profile/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 100618993,
+      "inode": 71605186,
+      "links": 1,
+      "mtime": 1791724303.7023208
+    }
+  ],
+  "outputs/ingolstadt_complete_cohort_pretrain_20261002/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 99650401,
+      "inode": 69763892,
+      "links": 1,
+      "mtime": 1790961230.561274
+    }
+  ],
+  "outputs/ingolstadt_pretrain_pilot_20261002/checkpoints": [
+    {
+      "name": "world_model_pretrained.pt",
+      "bytes": 32988001,
+      "inode": 70290709,
+      "links": 1,
+      "mtime": 1790944878.5216465
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 99758909,
+      "inode": 70290700,
+      "links": 1,
+      "mtime": 1790943578.4080966
+    }
+  ],
+  "outputs/offline_pretrain_verify_20261002_external_config/checkpoints": [
+    {
+      "name": "latest.pt",
+      "bytes": 167048721,
+      "inode": 70290681,
+      "links": 1,
+      "mtime": 1790939807.168149
+    }
+  ],
+  "outputs/ingo_reference_reselection_20261007/montereau_fault_yonne": [
+    {
+      "name": "assignment_0005.pt",
+      "bytes": 12314397,
+      "inode": 70946961,
+      "links": 1,
+      "mtime": 1791380810.793085
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 12317479,
+      "inode": 70946954,
+      "links": 1,
+      "mtime": 1791380809.7450469
+    }
+  ],
+  "outputs/ingo_reference_reselection_20261007/coulommiers": [
+    {
+      "name": "assignment_0005.pt",
+      "bytes": 10954013,
+      "inode": 70946945,
+      "links": 1,
+      "mtime": 1791380269.306428
+    },
+    {
+      "name": "latest.pt",
+      "bytes": 10957095,
+      "inode": 70946948,
+      "links": 1,
+      "mtime": 1791380268.6144104
+    }
+  ]
+}

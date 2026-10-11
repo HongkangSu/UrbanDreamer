@@ -1,0 +1,27 @@
+{
+  "scope": "Deterministic CPU analytic toy only; not traffic-policy recovery evidence",
+  "declared_before_optimization": true,
+  "seed": 17,
+  "torch_threads": 1,
+  "training_states": 9,
+  "heldout_states": 8,
+  "train_x": "0, 0.125, ..., 1",
+  "heldout_x": "midpoints between training x values",
+  "fixed_cohort": "One active and started vehicle; no future departures",
+  "deadline_seconds": "120 + 60*x",
+  "two_path_travel_seconds": "deadline_seconds * [0.25 + 0.1*x, 0.60 + 0.1*x]",
+  "q_label": "negative path travel seconds / 60 / started_count",
+  "v_label": "equal-probability expectation of the two exact Q labels",
+  "controls": "Fresh bounded and unbounded models with identical named trainable parameter initialization, trained separately",
+  "optimizer": "Adam, lr=0.003; full batch physical-return MSE; no normalization",
+  "steps_per_model": 350,
+  "total_steps": 1400,
+  "acceptance": {
+    "heldout_physical_return_mae_minutes": 0.03,
+    "ranking_clear_margin_minutes": 0.1,
+    "ranking_accuracy": 1.0,
+    "bounded_terminal_return": 0.0
+  },
+  "failure_policy": "Report failure at fixed budget; do not relax tolerances or optimize hyperparameters after results",
+  "limitations": "Supervised analytic interpolation does not test SUMO, replay, learned latent sufficiency, TD stability or actor recovery; real policy gate not evaluated and this test never unfreezes actor"
+}

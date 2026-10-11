@@ -1,0 +1,9 @@
+{
+  "score": 96,
+  "verdict": "pass",
+  "category_match": true,
+  "differences": [],
+  "suggestions": [],
+  "reasoning": "Completed117 paired cases. Revised completion scale exposes small failure rates; cost, arrived-only travel, entropy and checkpoint labels are readable.",
+  "next_actions": []
+}

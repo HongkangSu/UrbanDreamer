@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from micro_config_fixture import write_micro_config
 
 PATH = Path(__file__).resolve().parents[1] / 'tools/train_toy_actor_critic.py'
 
@@ -18,7 +19,7 @@ def module():
 
 
 def args(tmp_path, weight=1.):
-    return SimpleNamespace(config=PATH.parents[1] / 'configs/toy_cross_bottleneck.toml',
+    return SimpleNamespace(config=write_micro_config(tmp_path / 'legacy_micro'),
         output_dir=tmp_path, episodes=1, eval_every=1, eval_seeds=1, seed=42, device='cpu',
         threads=1, actor_lr=2e-4, global_critic_lr=3e-4, vehicle_limit=2,
         session='microstep', step_seconds=1., backend='traci', resume=False,
@@ -35,7 +36,7 @@ def test_paired_evaluation_reuses_seeds_labels_and_restores_prior(tmp_path):
         calls.append((kwargs, runner.actor.prior_weight))
         return [], dict(policy=kwargs['policy'], seed=kwargs['seed'], selection_score=-1.)
     runner.run_episode = episode
-    records = tool.evaluate(runner, tmp_path, episode=200, seeds=[42, 43], phase='evaluation')
+    records = tool.evaluate(runner, tmp_path, episode=200, seeds=[42, 43], phase='evaluation', policies=('deterministic',))
     assert [c[0] for c in calls] == [dict(policy='deterministic', seed=s) for s in [42, 43, 42, 43]]
     assert [c[1] for c in calls] == [1., 1., 0., 0.]
     assert [r['policy'] for r in records] == ['deterministic'] * 2 + ['deterministic_no_prior'] * 2

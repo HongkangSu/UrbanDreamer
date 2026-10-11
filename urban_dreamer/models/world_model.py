@@ -8,6 +8,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
+from urban_dreamer.learning.action_events import SparseActionEvents
+
 
 FLOW_FEATURE_DIM = 8
 FLOW_DYNAMIC_DIM = 4
@@ -196,11 +198,12 @@ def _validate_transition_tensor(
 
 
 class FlowProjector(nn.Module):
-    def __init__(self, *, adjacency: torch.Tensor) -> None:
+    def __init__(self, *, adjacency: torch.Tensor, positive_speed: bool = False) -> None:
         super().__init__()
         if adjacency.dim() != 2 or int(adjacency.shape[0]) != int(adjacency.shape[1]):
             raise ValueError(f"adjacency must be square, got {tuple(adjacency.shape)}")
         self.n_edges = int(adjacency.shape[0])
+        self.positive_speed = bool(positive_speed)
         self.register_buffer("adjacency", adjacency.float(), persistent=False)
 
         self.input_proj = nn.Linear(FLOW_FEATURE_DIM, FLOW_LATENT_DIM)
@@ -227,6 +230,9 @@ class FlowProjector(nn.Module):
         nn.init.zeros_(self.decoder_shared[0].bias)
         nn.init.orthogonal_(self.decoder_speed.weight, gain=1.0)
         nn.init.zeros_(self.decoder_speed.bias)
+        if self.positive_speed:
+            # Inverse Softplus(beta=5) at free-flow ratio 1; only the new codec uses it.
+            nn.init.constant_(self.decoder_speed.bias, math.log(math.expm1(5.)) / 5.)
         nn.init.orthogonal_(self.decoder_volume.weight, gain=1.0)
         nn.init.zeros_(self.decoder_volume.bias)
         nn.init.orthogonal_(self.decoder_other.weight, gain=1.0)
@@ -252,6 +258,8 @@ class FlowProjector(nn.Module):
             )
         hidden = self.decoder_shared(latent_edges)
         speed = self.decoder_speed(hidden)
+        if self.positive_speed:
+            speed = F.softplus(speed, beta=5.)
         volume = decode_nonnegative_volume(self.decoder_volume(hidden))
         other = self.decoder_other(hidden)
         return torch.cat([other[..., :1], speed, volume, other[..., 1:2]], dim=-1)
@@ -343,6 +351,36 @@ class MultiheadSelfAttention(nn.Module):
         attended = attended.transpose(1, 2).contiguous().view(batch, length, width)
         return self.output(attended)
 
+    def forward_packed(self, x: torch.Tensor, *, batch_chunk_size: int = 0) -> torch.Tensor:
+        """Project all tokens together; chunk only independent spatial attention.
+
+        The batch axis remains separate throughout SDPA, so different trajectories
+        never attend to each other. This opt-in path shares all existing weights.
+        """
+        batch, length, width = x.shape
+        query, key, value = self.qkv(x.reshape(-1, width)).chunk(3, dim=-1)
+        query = query.reshape(batch, length, self.n_heads, self.head_dim).transpose(1, 2)
+        key = key.reshape(batch, length, self.n_heads, self.head_dim).transpose(1, 2)
+        value = value.reshape(batch, length, self.n_heads, self.head_dim).transpose(1, 2)
+        chunk_size = int(batch_chunk_size)
+        if chunk_size <= 0 or batch <= chunk_size:
+            attended = F.scaled_dot_product_attention(query, key, value, dropout_p=0.0)
+        else:
+            attended = torch.cat(
+                [
+                    F.scaled_dot_product_attention(
+                        query[start : start + chunk_size],
+                        key[start : start + chunk_size],
+                        value[start : start + chunk_size],
+                        dropout_p=0.0,
+                    )
+                    for start in range(0, batch, chunk_size)
+                ],
+                dim=0,
+            )
+        packed = attended.transpose(1, 2).contiguous().reshape(-1, width)
+        return self.output(packed).reshape(batch, length, width)
+
 
 def sinusoid_table(size: int, width: int, *, device: torch.device) -> torch.Tensor:
     position = torch.arange(size, device=device, dtype=torch.float32).unsqueeze(1)
@@ -365,6 +403,7 @@ class SpaceSelfAttention(nn.Module):
     def __init__(self, token_count: int) -> None:
         super().__init__()
         self.attention_batch_chunk_size = 0
+        self.packed_projections = False
         self.attention = MultiheadSelfAttention(WORLD_MODEL_DIM, TRANSFORMER_HEADS)
         mask = torch.ones((1, 1, token_count, token_count), dtype=torch.bool)
         self.register_buffer("attn_mask", mask, persistent=False)
@@ -373,23 +412,16 @@ class SpaceSelfAttention(nn.Module):
         batch, time_steps, token_count, width = x.shape
         flat = x.reshape(batch * time_steps, token_count, width)
         chunk_size = int(self.attention_batch_chunk_size)
-        if chunk_size <= 0 or int(flat.shape[0]) <= chunk_size:
-            output = self.attention(
-                flat,
-                attn_mask=self.attn_mask.expand(batch * time_steps, 1, token_count, token_count),
-            )
+        if self.packed_projections:
+            output = self.attention.forward_packed(flat, batch_chunk_size=chunk_size)
+        elif chunk_size <= 0 or int(flat.shape[0]) <= chunk_size:
+            # All spatial tokens are visible. A redundant all-True mask can
+            # prevent the fastest SDPA backend from being selected.
+            output = self.attention(flat)
         else:
             output = torch.cat(
                 [
-                    self.attention(
-                        flat[start : start + chunk_size],
-                        attn_mask=self.attn_mask.expand(
-                            min(chunk_size, int(flat.shape[0]) - start),
-                            1,
-                            token_count,
-                            token_count,
-                        ),
-                    )
+                    self.attention(flat[start : start + chunk_size])
                     for start in range(0, int(flat.shape[0]), chunk_size)
                 ],
                 dim=0,
@@ -405,6 +437,12 @@ class TimeSelfAttention(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch, time_steps, token_count, width = x.shape
+        if time_steps == 1:
+            # With one key, softmax is identically one and Q/K have zero
+            # derivative. Avoid FlashAttention's padded short-sequence workspace.
+            qkv = self.attention.qkv
+            value = F.linear(x, qkv.weight[2 * width:], qkv.bias[2 * width:] if qkv.bias is not None else None)
+            return self.attention.output(value)
         flat = x.permute(0, 2, 1, 3).contiguous().view(batch * token_count, time_steps, width)
         chunk_size = int(self.attention_batch_chunk_size)
         if chunk_size <= 0 or int(flat.shape[0]) <= chunk_size:
@@ -441,10 +479,11 @@ class BlockCausalTransformer(nn.Module):
     def __init__(self, token_count: int) -> None:
         super().__init__()
         self.layers = nn.ModuleList([BlockCausalLayer(token_count) for _ in range(TRANSFORMER_DEPTH)])
+        self.activation_checkpointing = True
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         for layer in self.layers:
-            if torch.is_grad_enabled():
+            if torch.is_grad_enabled() and self.activation_checkpointing:
                 x = checkpoint(layer, x, use_reentrant=False)
             else:
                 x = layer(x)
@@ -511,6 +550,118 @@ class ActionGNNEncoder(nn.Module):
         return self.edge_conditioning(action_hidden)
 
 
+@dataclass(frozen=True)
+class RawEventAggregate:
+    """Counts and differentiable sums before any nonlinear group readout."""
+
+    count: torch.Tensor
+    feature_sum: torch.Tensor
+
+
+class EventActionEncoder(nn.Module):
+    time_buckets = 3
+    embedding_dim = 16
+    event_dim = 32
+
+    def __init__(self, *, adjacency: torch.Tensor, static_features: torch.Tensor) -> None:
+        super().__init__()
+        self.n_edges = int(adjacency.shape[0])
+        turns = torch.nonzero(adjacency > 0, as_tuple=False)
+        self.register_buffer('turns', turns.long(), persistent=False)
+        self.register_buffer('turn_keys', turns[:, 0] * self.n_edges + turns[:, 1], persistent=False)
+        self.register_buffer('static_features', static_features.float(), persistent=False)
+        self.edge_embedding = nn.Embedding(self.n_edges, self.embedding_dim)
+        self.event_mlp = nn.Sequential(nn.Linear(49, 64), nn.SiLU(), nn.Linear(64, 32))
+        self.turn_mlp = nn.Sequential(nn.Linear(99 + 2 * static_features.shape[1], 64),
+                                      nn.SiLU(), nn.Linear(64, 32))
+
+    def encode_edges(self, current_edge: torch.Tensor, next_edge: torch.Tensor,
+                     destination_edge: torch.Tensor, phase: torch.Tensor) -> torch.Tensor:
+        device = self.edge_embedding.weight.device
+        edges = [value.to(device=device, dtype=torch.long) for value in
+                 (current_edge, next_edge, destination_edge)]
+        for value in edges:
+            if bool(((value < 0) | (value >= self.n_edges)).any()):
+                raise ValueError('action event edge is outside the road graph')
+        return self.event_mlp(torch.cat([*[self.edge_embedding(value) for value in edges],
+                                         phase.to(device=device, dtype=self.edge_embedding.weight.dtype).unsqueeze(-1)], -1))
+
+    def event_features(self, events: SparseActionEvents) -> torch.Tensor:
+        return self.encode_edges(events.current_edge, events.next_edge, events.destination_edge, events.phase)
+
+    def aggregate(self, events: SparseActionEvents) -> RawEventAggregate:
+        events = events.to(self.edge_embedding.weight.device)
+        turn_count = len(self.turns)
+        shape = (events.batch_size, events.time_steps, turn_count, self.time_buckets)
+        keys = events.current_edge * self.n_edges + events.next_edge
+        turn_index = torch.searchsorted(self.turn_keys, keys)
+        if len(events) and (turn_count == 0 or bool((turn_index >= turn_count).any())
+                            or not torch.equal(self.turn_keys[turn_index], keys)):
+            raise ValueError('action event contains an illegal turn')
+        bucket = torch.floor(events.phase * self.time_buckets).long()
+        flat_index = (((events.batch_index * events.time_steps + events.time_index)
+                       * turn_count + turn_index) * self.time_buckets + bucket)
+        size = math.prod(shape)
+        count = torch.zeros(size, device=keys.device, dtype=torch.long)
+        count = count.index_add(0, flat_index, torch.ones_like(flat_index))
+        feature_sum = self.edge_embedding.weight.new_zeros(size, self.event_dim)
+        feature_sum = feature_sum.index_add(0, flat_index,
+            self.event_features(events).to(dtype=feature_sum.dtype))
+        return RawEventAggregate(count.reshape(shape), feature_sum.reshape(*shape, self.event_dim))
+
+    @staticmethod
+    def _group_features(count: torch.Tensor, feature_sum: torch.Tensor) -> torch.Tensor:
+        mean = feature_sum / count.clamp_min(1).unsqueeze(-1)
+        features = torch.cat([torch.log1p(count.to(feature_sum.dtype)).unsqueeze(-1), mean], -1)
+        return features.flatten(-2)
+
+    def compact_readout_counts(self, count: torch.Tensor, feature_sum: torch.Tensor) -> torch.Tensor:
+        features = self._group_features(count, feature_sum)
+        # Share the learned turn readout without fabricating an entry/exit for pooled traffic.
+        hidden = F.silu(F.linear(features, self.turn_mlp[0].weight[:, :99], self.turn_mlp[0].bias))
+        return hidden * (count.sum(-1) > 0).unsqueeze(-1)
+
+    def compact_readout(self, raw: RawEventAggregate) -> torch.Tensor:
+        return self.compact_readout_counts(raw.count.sum(-2), raw.feature_sum.sum(-3))
+
+    def background(self, events: SparseActionEvents, event_row_index: int) -> tuple[RawEventAggregate, RawEventAggregate]:
+        if not 0 <= event_row_index < len(events):
+            raise IndexError('event row index is outside the sparse events')
+        same_window = ((events.batch_index == events.batch_index[event_row_index])
+                       & (events.time_index == events.time_index[event_row_index]))
+        prefix = same_window & (events.phase < events.phase[event_row_index])
+        simultaneous = same_window & (events.phase == events.phase[event_row_index])
+        simultaneous[event_row_index] = False
+        return self.aggregate(events.select(prefix)), self.aggregate(events.select(simultaneous))
+
+    def replace_event(self, raw: RawEventAggregate, events: SparseActionEvents,
+                      event_row_index: int, next_edge: int) -> RawEventAggregate:
+        mask = torch.arange(len(events), device=events.phase.device) == event_row_index
+        own = events.select(mask)
+        if len(own) != 1:
+            raise IndexError('event row index is outside the sparse events')
+        from dataclasses import replace
+        candidate = replace(own, next_edge=torch.full_like(own.next_edge, next_edge))
+        old, new = self.aggregate(own), self.aggregate(candidate)
+        return RawEventAggregate(raw.count - old.count + new.count,
+                                 raw.feature_sum - old.feature_sum + new.feature_sum)
+
+    def readout(self, raw: RawEventAggregate) -> torch.Tensor:
+        batch, steps, turn_count, _ = raw.count.shape
+        features = self._group_features(raw.count, raw.feature_sum)
+        static = self.static_features.to(dtype=features.dtype)
+        turn_static = torch.cat([static[self.turns[:, 0]], static[self.turns[:, 1]]], -1)
+        turn_static = turn_static[None, None].expand(batch, steps, turn_count, -1)
+        hidden = self.turn_mlp(torch.cat([features, turn_static], -1))
+        hidden = hidden * (raw.count.sum(-1) > 0).unsqueeze(-1)
+        incoming = hidden.new_zeros(batch, steps, self.n_edges, 32).index_add(2, self.turns[:, 1], hidden)
+        outgoing = hidden.new_zeros(batch, steps, self.n_edges, 32).index_add(2, self.turns[:, 0], hidden)
+        return torch.cat([outgoing, incoming], -1)
+
+    def forward(self, events: SparseActionEvents) -> torch.Tensor:
+        return self.readout(self.aggregate(events))
+
+
 class Dynamics(nn.Module):
     def __init__(
         self,
@@ -519,10 +670,14 @@ class Dynamics(nn.Module):
         static_features: torch.Tensor,
         low_frequency_rank: int = 16,
         prior_noise_scale: float = 0.1,
+        event_protocol: bool = False,
     ) -> None:
         super().__init__()
         self.n_edges = int(adjacency.shape[0])
         self.action_encoder = ActionGNNEncoder(adjacency=adjacency, static_features=static_features)
+        self.event_protocol = bool(event_protocol)
+        self.event_encoder = (EventActionEncoder(adjacency=adjacency, static_features=static_features)
+                              if self.event_protocol else None)
         self.graph_prior = LowFrequencyGraphPrior(adjacency, rank=low_frequency_rank, noise_scale=prior_noise_scale)
         self.spatial_proj = nn.Linear(FLOW_LATENT_DIM, WORLD_MODEL_DIM)
         self.reference_proj = nn.Linear(FLOW_LATENT_DIM, WORLD_MODEL_DIM, bias=False)
@@ -551,7 +706,18 @@ class Dynamics(nn.Module):
             layer.time.attention_batch_chunk_size = int(time_chunk)
             layer.mlp.token_chunk_size = int(mlp_chunk)
 
+    def set_pretraining_execution_profile(self, *, space_chunk: int, time_chunk: int,
+                                          mlp_chunk: int, activation_checkpointing: bool) -> None:
+        for value in (space_chunk, time_chunk, mlp_chunk):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError('pretraining chunk sizes must be positive integers')
+        if not isinstance(activation_checkpointing, bool):
+            raise ValueError('activation_checkpointing must be a boolean')
+        self._set_chunk_profile(space_chunk=space_chunk, time_chunk=time_chunk, mlp_chunk=mlp_chunk)
+        self.transformer.activation_checkpointing = activation_checkpointing
+
     def set_initial_chunk_profile(self) -> None:
+        self.transformer.activation_checkpointing = True
         self._set_chunk_profile(
             space_chunk=INITIAL_SPACE_CHUNK,
             time_chunk=INITIAL_TIME_CHUNK,
@@ -559,6 +725,7 @@ class Dynamics(nn.Module):
         )
 
     def set_online_chunk_profile(self) -> None:
+        self.transformer.activation_checkpointing = True
         self._set_chunk_profile(
             space_chunk=ONLINE_SPACE_CHUNK,
             time_chunk=ONLINE_TIME_CHUNK,
@@ -593,6 +760,7 @@ class Dynamics(nn.Module):
         packed_latents: torch.Tensor,
         flow_time: torch.Tensor,
         condition: ConditionEncoding | None = None,
+        action_events: SparseActionEvents | None = None,
     ) -> DynamicsOutput:
         if packed_latents.dim() != 4 or tuple(packed_latents.shape[-2:]) != (self.n_edges, FLOW_LATENT_DIM):
             raise ValueError(
@@ -607,7 +775,7 @@ class Dynamics(nn.Module):
 
         spatial_tokens = self.spatial_proj(packed_latents)
         if condition is None:
-            condition = self.encode_condition(action)
+            condition = self.encode_condition(action, action_events=action_events)
         spatial_tokens = spatial_tokens + condition.edge_tokens
         if condition.reference_tokens is not None:
             spatial_tokens = spatial_tokens + condition.reference_tokens
@@ -622,7 +790,17 @@ class Dynamics(nn.Module):
             latent_velocity=self.flow_head(spatial_hidden),
         )
 
-    def encode_condition(self, action: torch.Tensor) -> ConditionEncoding:
+    def encode_condition(self, action: torch.Tensor, *, action_events: SparseActionEvents | None = None) -> ConditionEncoding:
+        if self.event_protocol:
+            if action_events is None:
+                raise ValueError('event protocol requires explicit action_events for every window')
+            if (action_events.batch_size, action_events.time_steps) != tuple(action.shape[:2]):
+                raise ValueError('action event windows must align with the action tensor')
+            hidden = self.event_encoder(action_events)
+            adjacency = self.action_encoder.adjacency.to(device=hidden.device, dtype=hidden.dtype)
+            for layer in self.action_encoder.action_gnn:
+                hidden = layer(hidden, adjacency)
+            return ConditionEncoding(self.action_encoder.edge_conditioning(hidden))
         edge_tokens = self.action_encoder(action)
         edge_tokens = self._inject_actions(edge_tokens, action, self.edge_action_proj)
         return ConditionEncoding(edge_tokens)
@@ -638,47 +816,63 @@ class Dynamics(nn.Module):
     def solve(
         self, start: torch.Tensor, action: torch.Tensor, condition: ConditionEncoding,
         *, steps: int = 2, solver: str = "euler", picard_iterations: int | None = None,
+        picard_batch_chunk_size: int = 64,
     ) -> torch.Tensor:
         if steps < 1 or int(steps) != steps:
             raise ValueError("steps must be a positive integer")
-        if solver not in {"euler", "picard"}:
-            raise ValueError("solver must be 'euler' or 'picard'")
+        if solver not in {"euler", "midpoint", "picard"}:
+            raise ValueError("solver must be 'euler', 'midpoint' or 'picard'")
         batch, intervals, edges, width = start.shape
-        if solver == "euler":
+        if solver in {"euler", "midpoint"}:
             state = start
             for node in range(steps):
                 time = torch.full((batch, intervals), node / steps, device=start.device, dtype=start.dtype)
                 velocity = self(action, packed_latents=state, flow_time=time,
                                 condition=condition).latent_velocity
+                if solver == "midpoint":
+                    # Two velocity evaluations per flow-time interval; reuse the
+                    # physical-window condition and its single source-noise draw.
+                    midpoint = state + velocity / (2 * steps)
+                    midpoint_time = torch.full((batch, intervals), (node + .5) / steps,
+                                               device=start.device, dtype=start.dtype)
+                    velocity = self(action, packed_latents=midpoint, flow_time=midpoint_time,
+                                    condition=condition).latent_velocity
                 state = state + velocity / steps
             return state
         iterations = steps if picard_iterations is None else picard_iterations
         if iterations < 1 or int(iterations) != iterations:
             raise ValueError("picard_iterations must be a positive integer")
-
-        def repeat_nodes(value: torch.Tensor) -> torch.Tensor:
-            # ODE nodes are independent batch members, never causal physical-time tokens.
-            return value.unsqueeze(0).expand(steps, *value.shape).reshape(steps * batch, *value.shape[1:])
-
-        repeated_condition = ConditionEncoding(
-            repeat_nodes(condition.edge_tokens),
-            None if condition.reference_tokens is None else repeat_nodes(condition.reference_tokens),
-        )
-        time = torch.arange(steps, device=start.device, dtype=start.dtype) / steps
-        time = time[:, None, None].expand(steps, batch, intervals).reshape(steps * batch, intervals)
-        repeated_action = repeat_nodes(action)
+        if (isinstance(picard_batch_chunk_size, bool)
+                or not isinstance(picard_batch_chunk_size, int) or picard_batch_chunk_size < 0):
+            raise ValueError("picard_batch_chunk_size must be a nonnegative integer")
+        # Bound complete field evaluations, including their condition tensors.
+        # Nodes remain batch members; physical intervals remain causal tokens.
+        size = picard_batch_chunk_size or steps * batch
+        chunks = []
+        for begin in range(0, steps * batch, size):
+            flat_indices = torch.arange(begin, min(begin + size, steps * batch), device=start.device)
+            node_indices = flat_indices.div(batch, rounding_mode='floor')
+            sample_indices = flat_indices.remainder(batch)
+            time = (node_indices.to(start.dtype) / steps)[:, None].expand(-1, intervals)
+            chunks.append((node_indices, sample_indices, time))
         trajectory = start.unsqueeze(0).expand(steps + 1, *start.shape)
         for _ in range(iterations):
-            velocity = self(repeated_action,
-                            packed_latents=trajectory[:-1].reshape(steps * batch, intervals, edges, width),
-                            flow_time=time, condition=repeated_condition).latent_velocity
-            velocity = velocity.reshape(steps, *start.shape)
+            velocities = []
+            for nodes, samples, time in chunks:
+                chunk_condition = ConditionEncoding(condition.edge_tokens[samples],
+                    None if condition.reference_tokens is None else condition.reference_tokens[samples])
+                velocity = self(action[samples], packed_latents=trajectory[nodes, samples],
+                                flow_time=time, condition=chunk_condition).latent_velocity
+                velocities.append(velocity)
+            velocity = torch.cat(velocities, dim=0).reshape(steps, *start.shape)
             trajectory = torch.cat([start.unsqueeze(0), start.unsqueeze(0) + velocity.cumsum(0) / steps], dim=0)
         return trajectory[-1]
 
     def transition(
         self, z: torch.Tensor, action: torch.Tensor, *, noise: torch.Tensor | None = None,
         steps: int = 2, solver: str = "euler", picard_iterations: int | None = None,
+        picard_batch_chunk_size: int = 64,
+        action_events: SparseActionEvents | None = None,
     ) -> torch.Tensor:
         squeezed = z.dim() == 3
         if squeezed:
@@ -688,16 +882,18 @@ class Dynamics(nn.Module):
         if z.dim() != 4 or tuple(z.shape[-2:]) != (self.n_edges, FLOW_LATENT_DIM):
             raise ValueError("z must have shape (B, E, 64) or (B, T, E, 64)")
         _validate_transition_tensor(action, name="action", expected_shape=tuple(z.shape[:-1]))
-        condition = self.encode_condition(action)
+        condition = self.encode_condition(action, action_events=action_events)
         start, _, condition = self.prior_start(z, condition, noise)
         result = self.solve(start, action, condition, steps=steps, solver=solver,
-                            picard_iterations=picard_iterations)
+                            picard_iterations=picard_iterations, picard_batch_chunk_size=picard_batch_chunk_size)
         return result.squeeze(1) if squeezed else result
 
     def latent_disagreement(
         self, z: torch.Tensor, action: torch.Tensor, *, n_samples: int = 2,
         noise: torch.Tensor | None = None, steps: int = 2, solver: str = "euler",
         picard_iterations: int | None = None,
+        picard_batch_chunk_size: int = 64,
+        action_events: SparseActionEvents | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         if n_samples < 2 or int(n_samples) != n_samples:
             raise ValueError("latent disagreement requires at least two samples")
@@ -709,7 +905,7 @@ class Dynamics(nn.Module):
         if z.dim() != 4 or tuple(z.shape[-2:]) != (self.n_edges, FLOW_LATENT_DIM):
             raise ValueError("z must have shape (B, E, 64) or (B, T, E, 64)")
         _validate_transition_tensor(action, name="action", expected_shape=tuple(z.shape[:-1]))
-        condition = self.encode_condition(action)
+        condition = self.encode_condition(action, action_events=action_events)
         increment = self.graph_prior(z, condition)
         coarse = z + increment
 
@@ -726,7 +922,8 @@ class Dynamics(nn.Module):
         repeated_condition = ConditionEncoding(
             repeat_samples(condition.edge_tokens), repeat_samples(self.reference_proj(coarse)))
         samples = self.solve(starts, repeat_samples(action), repeated_condition,
-                             steps=steps, solver=solver, picard_iterations=picard_iterations)
+                             steps=steps, solver=solver, picard_iterations=picard_iterations,
+                             picard_batch_chunk_size=picard_batch_chunk_size)
         samples = samples.reshape(n_samples, *z.shape)
         if squeezed:
             samples = samples.squeeze(2)
@@ -820,11 +1017,13 @@ class ActiveVehicleFractionReadout(nn.Module):
 
 class UrbanDreamerWorldModel(nn.Module):
     def __init__(self, *, adjacency: torch.Tensor, static_features: torch.Tensor,
-                 low_frequency_rank: int = 16, prior_noise_scale: float = 0.1) -> None:
+                 low_frequency_rank: int = 16, prior_noise_scale: float = 0.1,
+                 event_protocol: bool = False, codec_speed_positive: bool = False) -> None:
         super().__init__()
-        self.flow_projector = FlowProjector(adjacency=adjacency)
+        self.flow_projector = FlowProjector(adjacency=adjacency, positive_speed=codec_speed_positive)
         self.dynamics = Dynamics(adjacency=adjacency, static_features=static_features,
-                                 low_frequency_rank=low_frequency_rank, prior_noise_scale=prior_noise_scale)
+                                 low_frequency_rank=low_frequency_rank, prior_noise_scale=prior_noise_scale,
+                                 event_protocol=event_protocol)
         self.active_vehicle_fraction_readout = ActiveVehicleFractionReadout()
 
     def encode(self, flow_features: torch.Tensor) -> torch.Tensor:
@@ -943,11 +1142,79 @@ def episode_t_all_supervision_loss(
     }
 
 
+def independent_transition_fm_loss(
+    dynamics: Dynamics, *, z_inputs: torch.Tensor, z_targets: torch.Tensor,
+    action: torch.Tensor, action_events: SparseActionEvents | None = None,
+    steps: int = 2, solver: str = "euler", picard_iterations: int | None = None,
+    prior_weight: float = 0.1, noise: torch.Tensor | None = None,
+    flow_time: torch.Tensor | None = None, predict_endpoints: bool = True,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
+    """Independent observed-state transitions with separate endpoint targets.
+
+    Each window starts from its full observed state. Endpoint volume may omit
+    births within that one window, but cannot become the next window's input.
+    Sampled endpoints are optional. Posterior readout supervision reuses the
+    already encoded real targets, eliminating unnecessary integration passes.
+    """
+    if not isinstance(predict_endpoints, bool):
+        raise ValueError('predict_endpoints must be a boolean')
+    if z_inputs.ndim != 4 or tuple(z_inputs.shape[-2:]) != (dynamics.n_edges, FLOW_LATENT_DIM):
+        raise ValueError('z_inputs must have shape (B, H, E, 64)')
+    if z_targets.shape != z_inputs.shape or z_inputs.shape[0] < 1 or z_inputs.shape[1] < 1:
+        raise ValueError('z_targets must match nonempty z_inputs')
+    batch, horizon, edges, _ = z_inputs.shape
+    _validate_transition_tensor(action, name='action', expected_shape=(batch, horizon, edges))
+    if not math.isfinite(prior_weight) or prior_weight < 0:
+        raise ValueError('prior_weight must be finite and nonnegative')
+    if flow_time is None:
+        flow_time = torch.rand(batch, horizon, device=z_inputs.device, dtype=z_inputs.dtype)
+    _validate_transition_tensor(flow_time, name='flow_time', expected_shape=(batch, horizon))
+    if bool(((flow_time < 0) | (flow_time > 1) | ~torch.isfinite(flow_time)).any()):
+        raise ValueError('flow_time must be finite and lie in [0, 1]')
+    if noise is not None:
+        _validate_transition_tensor(noise, name='noise',
+            expected_shape=(batch, horizon, dynamics.graph_prior.rank, FLOW_LATENT_DIM))
+        noise = noise.reshape(batch * horizon, 1, dynamics.graph_prior.rank, FLOW_LATENT_DIM)
+    if action_events is not None:
+        if action_events.batch_size != batch or action_events.time_steps < horizon:
+            raise ValueError('action event windows must cover independent supervision')
+        selected = action_events.select(action_events.time_index < horizon)
+        action_events = SparseActionEvents(
+            batch_index=selected.batch_index * horizon + selected.time_index,
+            time_index=torch.zeros_like(selected.time_index), phase=selected.phase,
+            current_edge=selected.current_edge, next_edge=selected.next_edge,
+            destination_edge=selected.destination_edge, event_index=selected.event_index,
+            vehicle_ids=selected.vehicle_ids, batch_size=batch * horizon, time_steps=1)
+    current = z_inputs.detach().reshape(batch * horizon, 1, edges, FLOW_LATENT_DIM)
+    target = z_targets.detach().reshape_as(current)
+    flattened_action = action.reshape(batch * horizon, 1, edges)
+    condition = dynamics.encode_condition(flattened_action, action_events=action_events)
+    start, increment, condition = dynamics.prior_start(current, condition, noise)
+    tau = flow_time.reshape(batch * horizon, 1, 1, 1)
+    interpolated = (1 - tau) * start + tau * target
+    velocity = dynamics(flattened_action, packed_latents=interpolated,
+                        flow_time=flow_time.reshape(batch * horizon, 1), condition=condition).latent_velocity
+    target_velocity = (target - start).detach()
+    flow_mse = (velocity.float() - target_velocity.float()).square().mean()
+    prior_target = dynamics.graph_prior.project(target - current).detach()
+    prior_mse = (increment.float() - prior_target.float()).square().mean()
+    if predict_endpoints:
+        with torch.no_grad():
+            predicted = dynamics.solve(start.detach(), flattened_action, condition, steps=steps,
+                                       solver=solver, picard_iterations=picard_iterations)
+    else:
+        predicted = target
+    loss = flow_mse + prior_weight * prior_mse
+    return loss, {'flow_mse': flow_mse.detach(), 'weighted_flow_mse': flow_mse.detach(),
+                  'prior_mse': prior_mse.detach(), 'prior_loss': (prior_weight * prior_mse).detach()}, predicted.reshape_as(z_inputs)
+
+
 def recursive_fm_loss(
     dynamics: Dynamics, *, z_sequence: torch.Tensor, action: torch.Tensor,
     steps: int = 2, solver: str = "euler", picard_iterations: int | None = None,
     prior_weight: float = 0.1, depth_weights: torch.Tensor | None = None,
     noise: torch.Tensor | None = None, flow_time: torch.Tensor | None = None,
+    action_events: SparseActionEvents | None = None,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
     """Recorded-condition recursion; later losses retain gradients through earlier solves.
 
@@ -961,6 +1228,8 @@ def recursive_fm_loss(
     if horizon < 1:
         raise ValueError("recursive supervision requires at least one transition")
     _validate_transition_tensor(action, name="action", expected_shape=(batch, horizon, edges))
+    if action_events is not None and (action_events.batch_size != batch or action_events.time_steps < horizon):
+        raise ValueError('action event windows must cover the recursive supervision horizon')
     if not math.isfinite(prior_weight) or prior_weight < 0:
         raise ValueError("prior_weight must be finite and nonnegative")
     if flow_time is None:
@@ -982,7 +1251,7 @@ def recursive_fm_loss(
     flow_losses, prior_losses, predictions = [], [], []
     for index in range(horizon):
         step_action = action[:, index:index+1]
-        condition = dynamics.encode_condition(step_action)
+        condition = dynamics.encode_condition(step_action, action_events=None if action_events is None else action_events.for_step(index))
         step_noise = None if noise is None else noise[:, index:index+1]
         start, increment, condition = dynamics.prior_start(current, condition, step_noise)
         target = references[:, index:index+1]
@@ -1011,9 +1280,10 @@ def cfm_loss(
     *,
     z_sequence: torch.Tensor,
     action: torch.Tensor,
+    action_events: SparseActionEvents | None = None,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     if isinstance(dynamics, Dynamics):
-        loss, metrics, _ = recursive_fm_loss(dynamics, z_sequence=z_sequence, action=action)
+        loss, metrics, _ = recursive_fm_loss(dynamics, z_sequence=z_sequence, action=action, action_events=action_events)
         return loss, metrics
     if z_sequence.dim() != 4 or int(z_sequence.shape[-1]) != FLOW_LATENT_DIM or int(z_sequence.shape[1]) < 2:
         raise ValueError(
@@ -1034,6 +1304,7 @@ def cfm_loss(
         action,
         packed_latents=x_t,
         flow_time=flow_time,
+        **({} if action_events is None else {'action_events': action_events}),
     )
     error2 = (output.latent_velocity.float() - target_velocity.float()).pow(2)
     flow_mse = error2.mean()
@@ -1051,6 +1322,7 @@ def cfm_predict_one_timestep(
     *,
     past_latents: torch.Tensor,
     action: torch.Tensor,
+    action_events: SparseActionEvents | None = None,
 ) -> torch.Tensor:
     if past_latents.dim() != 4 or int(past_latents.shape[-1]) != FLOW_LATENT_DIM or int(past_latents.shape[1]) < 1:
         raise ValueError(
@@ -1062,12 +1334,13 @@ def cfm_predict_one_timestep(
     edge_shape = (batch, 1, edge_count)
     _validate_transition_tensor(action, name="action", expected_shape=edge_shape)
     if isinstance(dynamics, Dynamics):
-        return dynamics.transition(current, action)
+        return dynamics.transition(current, action, action_events=action_events)
 
     velocity = dynamics(
         action,
         packed_latents=current,
         flow_time=torch.zeros((batch, 1), device=current.device, dtype=torch.float32),
+        **({} if action_events is None else {'action_events': action_events}),
     ).latent_velocity
     return current + velocity
 
@@ -1077,6 +1350,7 @@ __all__ = [
     "cfm_loss",
     "cfm_predict_one_timestep",
     "recursive_fm_loss",
+    "independent_transition_fm_loss",
     "decoder_bpr_supervision_loss",
     "decoder_reconstruction_loss",
     "episode_t_all_supervision_loss",

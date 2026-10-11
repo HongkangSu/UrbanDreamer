@@ -1,0 +1,115 @@
+# Maule offline-pretrain / online-finetune mainline profile.
+# Pretrain on compatible mesoscopic archives; microscopic archives are rejected.
+
+[inputs]
+network_name = "maule"
+network_dir = "../networks/maule"
+
+[run]
+# Codec epochs are an upper bound; held-out quality gates decide readiness.
+codec_pretraining_epochs = 10
+output_dir = "../outputs/maule_offline_per_transition_pretrain_eventq_meso"
+device = "cuda:0"
+seed = 42
+# Explicit epoch budget; not a conversion of the historical microbatch count.
+world_model_initialization_epochs = 5
+online_training_episodes = 2000
+evaluation_episodes = 5
+
+[simulation]
+# Shared mainline/baseline mesoscopic execution profile.
+traffic_model = "meso"
+meso_junction_control = true
+meso_lane_queue = false
+meso_multi_queue = false
+meso_edge_length_m = 98.0
+meso_interpolate_positions = true
+session_protocol = "event"
+observation_step_seconds = 1.0
+backend = "libsumo"
+# Homogeneous Poisson arrivals per OD; counts in agents.csv define expected demand.
+demand_duration_seconds = 1800.0
+vehicle_max_speed_mps = 40.0
+world_model_intervals_per_episode = 60
+episode_wall_timeout_seconds = 3600.0
+training_completion_buffer_seconds = 2000
+evaluation_horizon_seconds = 3800
+incident_edge = "-1113710350"
+# Disabled: keep the incident window beyond the episode horizon.
+incident_start_seconds = 1000000.0
+incident_end_seconds = 1001000.0
+incident_speed_mps = 1.0
+sumo_extra_args = ["--collision.action", "warn"]
+
+[resources]
+# Finish whole imagination passes within the per-episode target when possible.
+imagination_passes_per_episode = 2
+imagination_time_budget_seconds = 60.0
+world_model_imagination_precision = "fp32"
+world_model_imagination_compile = true
+world_model_imagination_compile_mode = "default"
+world_model_imagination_space_chunk = 16
+world_model_imagination_time_chunk = 32768
+world_model_imagination_mlp_chunk = 16384
+# Measured GPU pretraining preset; activation checkpointing bounds the working memory.
+world_model_pretrain_space_chunk = 16
+world_model_pretrain_time_chunk = 32768
+world_model_pretrain_mlp_chunk = 16384
+world_model_pretrain_activation_checkpointing = true
+world_model_initialization_batch_size = 1
+world_model_initialization_sequence_length = 1
+world_model_gradient_accumulation_steps = 32
+online_world_model_batch_size = 4
+
+# Frozen at startup; later collection files enter only a new run.
+[data]
+# Empty validation roots select disjoint held-out demand groups automatically.
+validation_archive_roots = []
+# Optional prepared caches; relative paths resolve from this TOML file.
+# pretrain_cache_manifest = "../data/pretrain_cache/manifest.json"
+# validation_cache_manifest = "../data/validation_cache/manifest.json"
+# Freeze compatible real training archives at startup.
+archive_roots = ["../outputs/city_baseline_dataset_meso"]
+cache_episodes = 2
+
+[method]
+disagreement_samples = 2
+fm_solver = "euler"
+fm_steps = 100
+fm_training_mode = "single_step"
+actor_entropy_mode = "annealed"
+actor_entropy_initial_coefficient = 0.002
+actor_entropy_final_coefficient = 0.0001
+actor_entropy_hold_fraction = 0.1
+actor_entropy_end_fraction = 0.8
+# Optional behavior prior, shared with learning baselines; set weight to 1 to enable.
+sp_prior_weight = 0.0
+sp_prior_temperature = 30.0
+sp_prior_hold_episodes = 200
+sp_prior_off_episode = 1000
+# Inputs retain all observed vehicles; target volume excludes current-window departures.
+transition_volume_scope = "previous_state_excluding_current_births"
+
+[codec]
+decoder_online_enabled = true
+decoder_online_learning_rate = 0.00001
+decoder_pretrain_enabled = true
+decoder_pretrain_learning_rate = 1e-4
+occupied_speed_weight = 1.0
+slow_speed_weight = 1.0
+slow_speed_mps = 2.0
+slow_min_vehicles = 5.0
+occupied_speed_mae_mps_max = 1.5
+slow_speed_mae_mps_max = 0.5
+slow_validation_min_roads = 1
+# Freeze encoder after reconstruction; calibrate decoder during offline FM pretraining.
+learning_rate = 1e-4
+batch_size = 32
+max_updates = 20000
+validation_every = 500
+occupied_vehicle_mae_max = 0.5
+vehicle_mae_max = 0.1
+empty_vehicle_mae_max = 0.05
+total_relative_mae_max = 0.1
+speed_mae_mps_max = 1.5
+speed_positive = true

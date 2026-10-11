@@ -13,7 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from urban_dreamer.learning.baselines.common import EpisodeRunner
+from urban_dreamer.learning.baselines.common import resolve_collection_settings
 from urban_dreamer.traffic.event_session import SumoEventSession
+from urban_dreamer.workflow.config import load_config
 
 
 def atomic_json(path, payload):
@@ -34,11 +36,21 @@ def main(argv=None):
     parser.add_argument('--device', default='cpu')
     parser.add_argument('--threads', type=int, default=1)
     parser.add_argument('--vehicle-limit', type=int, default=0)
-    parser.add_argument('--session', choices=('microstep', 'event'), default='event')
-    parser.add_argument('--backend', choices=('traci', 'libsumo'), default='libsumo')
-    parser.add_argument('--step-seconds', type=float, default=1.)
+    parser.add_argument('--session', choices=('microstep', 'event'), default=None,
+                        help='Defaults to simulation.session_protocol from the config')
+    parser.add_argument('--backend', choices=('traci', 'libsumo'), default=None)
+    parser.add_argument('--step-seconds', type=float, default=None)
     parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--forbid-revisit', action='store_true')
+    parser.add_argument('--global-reward-only', action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument('--reward-objective', choices=('observed_mean', 'legacy_exposure'), default='observed_mean')
     args = parser.parse_args(argv)
+    try:
+        simulation_settings = resolve_collection_settings(load_config(args.config), args)
+    except ValueError as error:
+        parser.error(str(error))
+    if args.forbid_revisit and args.session != 'event':
+        parser.error('forbid-revisit requires event session')
     if args.episodes < 1 or args.threads < 1:
         parser.error('episodes and threads must be positive')
     output = args.output_dir.resolve()
@@ -46,16 +58,24 @@ def main(argv=None):
         raise ValueError('refusing to overwrite nonempty collection')
     output.mkdir(parents=True, exist_ok=True)
     factory = functools.partial(SumoEventSession, step_seconds=args.step_seconds,
-                                backend=args.backend) if args.session == 'event' else None
+                                backend=args.backend, **({'forbid_revisit': True} if args.forbid_revisit else {})) if args.session == 'event' else None
     runner = EpisodeRunner(args, session_factory=factory)
     protocol = dict(method='random', policy='uniform_over_legal_candidates', seed=args.seed,
         session=args.session, backend=args.backend, step_seconds=args.step_seconds,
+        forbid_revisit=args.forbid_revisit,
+        global_reward_only=args.global_reward_only,
+        reward_objective=args.reward_objective,
         vehicle_limit=args.vehicle_limit, config=runner.config.resolved_snapshot(),
         input_hashes=runner.prepared.input_hashes,
         archive='episodes/train/episode_XXXXXX.npz; real SUMO only, all populations and completion outcomes')
+    protocol.update(simulation_settings)
     start = 1
     if args.resume:
-        if json.loads((output / 'protocol.json').read_text()) != protocol:
+        saved_protocol = json.loads((output / 'protocol.json').read_text())
+        saved_protocol.setdefault('forbid_revisit', False)
+        saved_protocol.setdefault('global_reward_only', False)
+        saved_protocol.setdefault('reward_objective', 'legacy_exposure')
+        if saved_protocol != protocol:
             raise ValueError('random collection resume protocol mismatch')
         start = json.loads((output / 'progress.json').read_text())['last_episode'] + 1
     else:

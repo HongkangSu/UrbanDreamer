@@ -22,7 +22,7 @@ from urban_dreamer.workflow.checkpoint import (
 
 def _training_state() -> dict[str, object]:
     return {
-        "reward_contract": "global_physical_individual_timeout_v1",
+        "reward_contract": "event_q_counterfactual_global_individual_timeout_v2",
         "models": {"world_model": {"weights": torch.tensor([1.0, 2.0])}},
         "optimizers": {"world_model": {"lr": 1e-3}},
         "replay": {"episodes": [1, 2, 3]},
@@ -45,7 +45,7 @@ def test_save_and_load_checkpoint_round_trip(tmp_path: Path) -> None:
         output_dir=output_dir,
         config_fingerprint="cfg-1",
         input_hash="input-1",
-        phase=CheckpointPhase.WARMUP,
+        phase=CheckpointPhase.PRETRAIN,
         next_unit=3,
         training_state=_training_state(),
     )
@@ -60,7 +60,7 @@ def test_save_and_load_checkpoint_round_trip(tmp_path: Path) -> None:
     )
 
     assert loaded.schema_version == CHECKPOINT_SCHEMA_VERSION
-    assert loaded.phase is CheckpointPhase.WARMUP
+    assert loaded.phase is CheckpointPhase.PRETRAIN
     assert loaded.next_unit == 3
     assert loaded.training_state["next_environment_episode"] == 4
     assert loaded.training_state["metrics"]["losses"] == [1.0, 0.5]
@@ -167,6 +167,11 @@ def test_decide_output_directory_reports_fresh_completed_and_nonempty_invalid(
         (lambda payload: payload.__setitem__("schema_version", 1), "unsupported checkpoint schema version"),
         (lambda payload: payload.__setitem__("schema_version", 3), "unsupported checkpoint schema version"),
         (lambda payload: payload.__setitem__("schema_version", 4), "unsupported checkpoint schema version"),
+        (lambda payload: payload.__setitem__("schema_version", 5), "unsupported checkpoint schema version"),
+        (lambda payload: payload.__setitem__("schema_version", 6), "unsupported checkpoint schema version"),
+        (lambda payload: payload.__setitem__("schema_version", 7), "unsupported checkpoint schema version"),
+        (lambda payload: payload.__setitem__("schema_version", 8), "unsupported checkpoint schema version"),
+        (lambda payload: payload.__setitem__("schema_version", 9), "unsupported checkpoint schema version"),
         (lambda payload: payload.__setitem__("phase", "unknown"), "invalid checkpoint phase"),
         (lambda payload: payload.__setitem__("next_unit", -1), "next_unit must be a non-negative integer"),
         (
@@ -208,7 +213,7 @@ def test_load_rejects_fingerprint_and_input_hash_mismatch(tmp_path: Path) -> Non
         output_dir=tmp_path,
         config_fingerprint="cfg-1",
         input_hash="input-1",
-        phase=CheckpointPhase.WORLD_MODEL_INITIALIZATION,
+        phase=CheckpointPhase.PRETRAIN,
         next_unit=2,
         training_state=_training_state(),
     )
@@ -292,7 +297,7 @@ def test_atomic_failure_leaves_old_latest_checkpoint_intact(
         output_dir=output_dir,
         config_fingerprint="cfg-1",
         input_hash="input-1",
-        phase=CheckpointPhase.WARMUP,
+        phase=CheckpointPhase.PRETRAIN,
         next_unit=4,
         training_state=_training_state(),
     )
@@ -318,7 +323,7 @@ def test_atomic_failure_leaves_old_latest_checkpoint_intact(
         expected_config_fingerprint="cfg-1",
         expected_input_hash="input-1",
     )
-    assert loaded.phase is CheckpointPhase.WARMUP
+    assert loaded.phase is CheckpointPhase.PRETRAIN
     assert loaded.next_unit == 4
     assert list((output_dir / "checkpoints").glob("*.tmp.*")) == []
 
@@ -332,7 +337,7 @@ def test_environment_episode_cursor_is_nonnegative_integer(tmp_path: Path, episo
             output_dir=tmp_path,
             config_fingerprint='cfg-1',
             input_hash='input-1',
-            phase=CheckpointPhase.WARMUP,
+            phase=CheckpointPhase.PRETRAIN,
             next_unit=0,
             training_state=state,
         )

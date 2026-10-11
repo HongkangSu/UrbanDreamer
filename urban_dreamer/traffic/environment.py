@@ -4,13 +4,15 @@ import math
 import shutil
 import time
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Sequence
 
 import numpy as np
 
 from .topology import NextHopCandidates
+from ..learning.global_reward import RewardAccounting
 
 __all__ = ["NextHopDecision", "SumoSession", "EnvironmentContractError",
            "SessionClosedError", "WindowResult", "build_session_factory", "safe_microstep_seconds", "to_plain_state"]
@@ -25,6 +27,15 @@ class SessionClosedError(RuntimeError):
 
 
 def to_plain_state(value: Any) -> Any:
+    # Almost every archived vehicle field is already a native immutable scalar.
+    # Exact types keep dataclass/subclass and NumPy conversion precedence intact.
+    value_type = type(value)
+    if value is None or value_type in (str, int, float, bool):
+        return value
+    if value_type is dict:
+        return {str(key): to_plain_state(item) for key, item in value.items()}
+    if value_type in (list, tuple, set, frozenset):
+        return [to_plain_state(item) for item in value]
     if is_dataclass(value):
         return {item.name: to_plain_state(getattr(value, item.name)) for item in fields(value)}
     if isinstance(value, Path):
@@ -91,6 +102,7 @@ class SumoSession:
         self._time_ms = 0
         self._vehicles: dict[str, dict[str, Any]] = {}
         self.travel_times: dict[str, float] = {}
+        self.reward_accounting = RewardAccounting()
         self.metrics = {"microstep_seconds": self.microstep_seconds, "microsteps": 0,
                         "events": 0, "wall_seconds": 0., "active_vehicle_seconds": 0.}
         self._incident_lanes: dict[str, float] = {}
@@ -109,6 +121,25 @@ class SumoSession:
     @property
     def done(self) -> bool:
         return self._connection is not None and len(self.travel_times) == len(self._vehicles)
+
+    @property
+    def active_vehicle_count(self) -> int:
+        horizon = getattr(self, 'reward_horizon_seconds', math.inf)
+        if self._time_ms / 1000. < horizon:
+            return len(self._active)
+        return sum(self._vehicles[key]['actual_departure_time'] < horizon for key in self._active)
+
+    @property
+    def started_vehicle_count(self) -> int:
+        accounting = getattr(self, 'reward_accounting', None)
+        if accounting is not None:
+            return accounting.started_count
+        return sum(row.get('departed', False) for row in self._vehicles.values())
+
+    @property
+    def cumulative_vehicle_seconds(self) -> float:
+        accounting = getattr(self, 'reward_accounting', None)
+        return accounting.cumulative_vehicle_seconds if accounting is not None else self.metrics['active_vehicle_seconds']
 
     def reset(self) -> dict[str, Any]:
         if self._closed or self._connection is not None:
@@ -187,7 +218,9 @@ class SumoSession:
                 }
         return {"time": self._time_ms / 1000., "flow": self.network.extract_flow(edge_state),
                 "vehicles": [dict(self._vehicles[key]) for key in sorted(self._vehicles)],
-                "active_vehicle_count": len(self._active),
+                "active_vehicle_count": self.active_vehicle_count,
+                "started_vehicle_count": self.started_vehicle_count,
+                "cumulative_vehicle_seconds": self.cumulative_vehicle_seconds,
                 "arrived_vehicle_count": len(self.travel_times), "done": self.done}
 
     def _apply_decisions(self, callback: Callable, flow: np.ndarray) -> list[NextHopDecision]:
@@ -227,6 +260,9 @@ class SumoSession:
             row["departed"] = True
             self._active.add(vehicle_id)
             row["actual_departure_time"] = float(connection.vehicle.getDeparture(vehicle_id))
+            accounting = getattr(self, 'reward_accounting', None)
+            if accounting is not None and row['actual_departure_time'] < getattr(self, 'reward_horizon_seconds', math.inf):
+                accounting.update(0., accounting.started_count + 1)
             row["departure_time"] = row["actual_departure_time"]
             row["observed_departure_time"] = now
             row["pending_decision"] = row["current_edge"] != row["destination_edge"]
@@ -294,7 +330,8 @@ class SumoSession:
             raise SessionClosedError("SUMO session is not open")
         if self._invalid:
             raise EnvironmentContractError("invalid episode cannot be continued or trained")
-        start, end = self._time_ms, self._time_ms + 30000
+        start = self._time_ms
+        end = min(start + 30000, round(getattr(self, 'reward_horizon_seconds', (start + 30000) / 1000.) * 1000))
         frozen_flow = self._state()["flow"]
         decisions, departures = [], np.zeros(self.network.edge_count, dtype=np.float32)
         active_seconds = 0.
@@ -313,10 +350,14 @@ class SumoSession:
                 self._time_ms += self._step_ms
                 self.metrics["microsteps"] += 1
                 self._observe(departures)
-                active_seconds += active_before * self.microstep_seconds
+                step_seconds = active_before * self.microstep_seconds
                 for vehicle_id in self._connection.simulation.getDepartedIDList():
                     row = self._vehicles[vehicle_id]
-                    active_seconds += max(0., self._time_ms / 1000. - max(previous_time, row["actual_departure_time"]))
+                    step_seconds += max(0., self._time_ms / 1000. - max(previous_time, row["actual_departure_time"]))
+                active_seconds += step_seconds
+                accounting = getattr(self, 'reward_accounting', None)
+                if accounting is not None:
+                    accounting.update(step_seconds, accounting.started_count)
             counts = np.zeros(self.network.edge_count, dtype=np.float32)
             for decision in decisions:
                 counts[decision.next_edge] += 1

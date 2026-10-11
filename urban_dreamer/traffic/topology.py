@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from collections import OrderedDict
 import csv
 import json
 import heapq
@@ -57,27 +58,28 @@ class EdgeNetwork:
     ) -> np.ndarray:
         """Return the sole model input layout: four dynamic + four static fields."""
         flow = np.empty((self.edge_count, 8), dtype=np.float32)
+        flow[:, :4] = (0., 1., 0., 0.)
+        flow[:, 4:] = self.static_features
+        present, dynamic_rows = [], []
         for edge_index, edge_id in enumerate(self.edge_ids):
             state = edge_state.get(edge_id)
+            if state is None:
+                continue
             speed_limit = max(float(self.speed_limits_mps[edge_index]), 0.1)
             capacity = max(float(self.capacities[edge_index]), 1.0)
-            if state is None:
-                dynamic = (0.0, 1.0, 0.0, 0.0)
-            else:
-                raw_occupancy = float(state.get("occupancy", 0.0))
-                occupancy = (
-                    raw_occupancy / 100.0
-                    if raw_occupancy > 1.0
-                    else raw_occupancy
-                )
-                dynamic = (
-                    float(np.clip(occupancy, 0.0, 1.0)),
-                    float(state.get("mean_speed", speed_limit)) / speed_limit,
-                    float(state.get("vehicle_number", 0.0)) / capacity,
-                    float(state.get("halting_number", 0.0)) / capacity,
-                )
-            flow[edge_index, :4] = dynamic
-            flow[edge_index, 4:] = self.static_features[edge_index]
+            raw_occupancy = float(state.get("occupancy", 0.0))
+            occupancy = raw_occupancy / 100.0 if raw_occupancy > 1.0 else raw_occupancy
+            present.append(edge_index)
+            dynamic_rows.append((occupancy,
+                float(state.get("mean_speed", speed_limit)) / speed_limit,
+                float(state.get("vehicle_number", 0.0)) / capacity,
+                float(state.get("halting_number", 0.0)) / capacity))
+        if dynamic_rows:
+            # Preserve float64 normalization and clipping before float32 output,
+            # while avoiding one NumPy scalar dispatch and static copy per edge.
+            dynamic = np.asarray(dynamic_rows, dtype=np.float64)
+            dynamic[:, 0] = np.clip(dynamic[:, 0], 0., 1.)
+            flow[present, :4] = dynamic
         return flow
 
 
@@ -169,13 +171,28 @@ def _load_connections(network: EdgeNetwork, path: Path) -> EdgeNetwork:
 
 
 class NextHopCandidates:
-    """Destination-conditioned successors and reverse distance tables; no path cache."""
+    """Destination-conditioned successors and bounded immutable route caches."""
 
-    def __init__(self, network: EdgeNetwork):
+    def __init__(self, network: EdgeNetwork, forbid_revisit: bool = False, *, traffic_model: str = 'micro'):
+        if traffic_model not in {'micro', 'meso'}:
+            raise TopologyError('traffic_model must be micro or meso')
         self.network = network
+        self.traffic_model = traffic_model
+        self.forbid_revisit = bool(forbid_revisit)
         self.max_candidates = max(1, max(map(len, network.adjacency_list), default=0))
         self._distances: dict[tuple[int, bool], np.ndarray] = {}
         self._candidate_memo: dict[tuple[int, int], tuple[int, ...]] = {}
+        self._legal_candidate_cache: OrderedDict[tuple[int, int, tuple[int, ...]], tuple[int, ...]] = OrderedDict()
+        self._legal_candidate_cache_limit = 1024
+        # Actor static templates are small, immutable and bounded per network instance.
+        self._actor_static_cache: OrderedDict[tuple[int, int], Any] = OrderedDict()
+        self._actor_static_cache_limit = 8192
+        # Deterministic imagined route suffixes depend only on this immutable
+        # topology. Keep initial/suffix rules distinct and memory bounded.
+        self._event_route_cache: OrderedDict[tuple[int, int, bool], int] = OrderedDict()
+        self._event_route_cache_limit = 8192
+        self._full_route_cache: OrderedDict[tuple[int, int], tuple[np.ndarray, tuple[int, ...]]] = OrderedDict()
+        self._full_route_cache_limit = 8192
         self._stack_caches: dict[bool, dict[bytes, tuple[np.ndarray, np.ndarray, np.ndarray]]] = {False: {}, True: {}}
         self._predecessors = [[] for _ in network.edge_ids]
         for source, targets in enumerate(network.adjacency_list):
@@ -228,8 +245,45 @@ class NextHopCandidates:
         return self._candidate_memo[key]
 
     def junction(self, current: int, target: int) -> tuple[float, float]:
-        return (self.network.connection_lengths_m.get((current, target), 0.),
+        # MESO crosses the external-edge connection without traversing the
+        # microscopic internal lanes. Keep the network itself unchanged so
+        # micro and meso candidate views can coexist without cache pollution.
+        return (0. if self.traffic_model == 'meso' else self.network.connection_lengths_m.get((current, target), 0.),
                 max(.1, self.network.connection_speeds_mps.get((current, target), float(self.network.speed_limits_mps[target]))))
+
+    def legal_candidates(self, current: int, destination: int,
+                         visited_edges: tuple[int, ...] = ()) -> tuple[int, ...]:
+        """Successors with a destination path avoiding the vehicle's used edges.
+
+        Static candidates stay history-independent for feature template reuse.
+        Reverse traversal is sparse. A bounded FIFO reuses repeated validations
+        of the same vehicle history within a decision/window.
+        """
+        choices = self.candidates(current, destination)
+        if not self.forbid_revisit or current == destination:
+            return choices
+        key = (current, destination, tuple(visited_edges))
+        cached = self._legal_candidate_cache.get(key)
+        if cached is not None:
+            return cached
+        blocked = set(visited_edges) | {current}
+        reachable = set()
+        pending = []
+        if destination not in blocked and self.network.passenger_allowed[destination]:
+            reachable.add(destination)
+            pending.append(destination)
+        while pending:
+            for source in self._predecessors[pending.pop()]:
+                if source not in blocked and source not in reachable and self.network.passenger_allowed[source]:
+                    reachable.add(source)
+                    pending.append(source)
+        result = tuple(edge for edge in choices if edge in reachable)
+        if not result:
+            raise TopologyError(f"no no-revisit destination-reachable successor from edge {current} to {destination}")
+        self._legal_candidate_cache[key] = result
+        while len(self._legal_candidate_cache) > self._legal_candidate_cache_limit:
+            self._legal_candidate_cache.popitem(last=False)
+        return result
 
     def temporary_route(self, current: int, next_edge: int, destination: int) -> tuple[int, ...]:
         if next_edge not in self.candidates(current, destination):
@@ -243,7 +297,8 @@ class NextHopCandidates:
             route += (placeholder,)
         return route
 
-    def full_route(self, current: int, next_edge: int, destination: int) -> tuple[int, ...]:
+    def full_route(self, current: int, next_edge: int, destination: int,
+                   visited_edges: tuple[int, ...] = ()) -> tuple[int, ...]:
         """Complete path from ``current`` through ``next_edge`` to ``destination``.
 
         The suffix beyond ``next_edge`` follows the free-flow cost-to-go table
@@ -251,10 +306,17 @@ class NextHopCandidates:
         the lower edge index), so vehicles can cross later junctions without a
         runtime ``findRoute`` even when no decision event fires there.
         """
+        if self.forbid_revisit:
+            return self._no_revisit_route(current, next_edge, destination, visited_edges)
         if next_edge not in self.candidates(current, destination):
             raise TopologyError(f"invalid next edge {next_edge} from {current} to {destination}")
-        route = [current, next_edge]
         costs = self.costs(destination)
+        key = (next_edge, destination)
+        cached = self._full_route_cache.get(key)
+        if cached is not None and cached[0] is costs and not costs.flags.writeable:
+            self._full_route_cache.move_to_end(key)
+            return (current,) + cached[1]
+        route = [current, next_edge]
         edge = next_edge
         while edge != destination:
             if len(route) > self.network.edge_count + 1:
@@ -263,7 +325,63 @@ class NextHopCandidates:
                        key=lambda target: (self.junction(edge, target)[0] / self.junction(edge, target)[1]
                                            + float(self.network.free_flow_travel_seconds[target]) + costs[target], target))
             route.append(edge)
-        return tuple(route)
+        result = tuple(route)
+        if not costs.flags.writeable:
+            self._full_route_cache[key] = (costs, result[1:])
+            while len(self._full_route_cache) > self._full_route_cache_limit:
+                self._full_route_cache.popitem(last=False)
+        return result
+
+    def _no_revisit_route(self, current: int, next_edge: int, destination: int,
+                          visited_edges: tuple[int, ...]) -> tuple[int, ...]:
+        if next_edge not in self.candidates(current, destination):
+            raise TopologyError(f"invalid next edge {next_edge} from {current} to {destination}")
+        blocked = set(visited_edges) | {current}
+        if next_edge in blocked or destination in blocked:
+            raise TopologyError(f"no-revisit route from {current} via {next_edge} to {destination} repeats a visited edge")
+        # An unblocked unconstrained optimum is also a constrained optimum.
+        # Keep legacy local tie-breaking; a blocked/cyclic suffix falls back to
+        # residual Dijkstra (including zero-cost cycles in the static table).
+        static_costs = self.costs(destination)
+        route = [current, next_edge]
+        seen = blocked | {next_edge}
+        while route[-1] != destination:
+            edge = route[-1]
+            target = min(self.candidates(edge, destination),
+                         key=lambda target: (self.junction(edge, target)[0] / self.junction(edge, target)[1]
+                                             + float(self.network.free_flow_travel_seconds[target]) + static_costs[target], target))
+            if target in seen:
+                break
+            route.append(target)
+            seen.add(target)
+        else:
+            return tuple(route)
+        # Reverse Dijkstra stores a successor only toward an already settled node.
+        # This also guarantees a simple suffix if zero-cost edges have tied costs.
+        costs = {destination: 0.}
+        successors: dict[int, int] = {}
+        settled: set[int] = set()
+        queue = [(0., destination)]
+        while queue:
+            cost, target = heapq.heappop(queue)
+            if target in settled or cost != costs[target]:
+                continue
+            settled.add(target)
+            if target == next_edge:
+                route = [current, next_edge]
+                while route[-1] != destination:
+                    route.append(successors[route[-1]])
+                return tuple(route)
+            for source in self._predecessors[target]:
+                if source in blocked or source in settled or not self.network.passenger_allowed[source]:
+                    continue
+                length, speed = self.junction(source, target)
+                candidate_cost = cost + float(self.network.free_flow_travel_seconds[target]) + length / speed
+                old = costs.get(source, math.inf)
+                if candidate_cost < old or (candidate_cost == old and target < successors.get(source, self.network.edge_count)):
+                    costs[source], successors[source] = candidate_cost, target
+                    heapq.heappush(queue, (candidate_cost, source))
+        raise TopologyError(f"no no-revisit route from {current} via {next_edge} to {destination}")
 
     def stacked_distance_tables(self, destinations: np.ndarray, *,
                                 seconds: bool) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -296,7 +414,8 @@ class NextHopCandidates:
             count = network.edge_count
             lengths = np.zeros((count, count), dtype=np.float32)
             speeds = np.broadcast_to(network.speed_limits_mps, (count, count)).copy()
-            for table, values in ((lengths, network.connection_lengths_m), (speeds, network.connection_speeds_mps)):
+            connection_lengths = {} if self.traffic_model == 'meso' else network.connection_lengths_m
+            for table, values in ((lengths, connection_lengths), (speeds, network.connection_speeds_mps)):
                 if values:
                     pairs = np.asarray(list(values), dtype=np.int64)
                     table[pairs[:, 0], pairs[:, 1]] = np.fromiter(values.values(), dtype=np.float32, count=len(pairs))

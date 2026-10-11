@@ -7,8 +7,10 @@ from typing import Any, Iterator, Mapping, Sequence
 import numpy as np
 import torch
 
+from urban_dreamer.learning.action_events import ActionEvent, SparseActionEvents, pack_action_events
 
-REPLAY_SCHEMA_VERSION = 4
+
+REPLAY_SCHEMA_VERSION = 8
 
 
 def _tensor(value: Any, *, name: str, shape: tuple[int, ...] | None = None) -> torch.Tensor:
@@ -41,6 +43,16 @@ class MacroTransition:
     terminal: bool = False
     episode: int = 0
     step_index: int = 0
+    action_events: tuple[ActionEvent, ...] | None = None
+    # Intermediate next boundaries reuse the next transition's snapshots.
+    # Only the episode's last boundary needs separate active snapshots.
+    next_vehicles: tuple[dict[str, Any], ...] | None = None
+
+    started_count: int = 0
+    cumulative_vehicle_seconds: float = 0.0
+    next_started_count: int = 0
+    next_cumulative_vehicle_seconds: float = 0.0
+    global_reward: float | None = None
 
     def __post_init__(self) -> None:
         flow = _tensor(self.flow, name='flow')
@@ -53,7 +65,28 @@ class MacroTransition:
             if bool((value < 0).any()):
                 raise ValueError(f'{name} must be non-negative')
             object.__setattr__(self, name, value)
-        object.__setattr__(self, 'context', _tensor(self.context, name='context', shape=(2,)))
+        context = _tensor(self.context, name='context')
+        # Offline traffic-only records use the legacy two-field context; they
+        # are never used to seed causal policy reward accounting.
+        if context.shape == (2,):
+            context = torch.cat((context, context.new_zeros(2)))
+        object.__setattr__(self, 'context', _tensor(context, name='context', shape=(4,)))
+        for name in ('started_count', 'next_started_count'):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, np.integer)) or value < 0:
+                raise ValueError(f'{name} must be a non-negative integer')
+        for name in ('cumulative_vehicle_seconds', 'next_cumulative_vehicle_seconds'):
+            value = float(getattr(self, name))
+            if not np.isfinite(value) or value < 0:
+                raise ValueError(f'{name} must be finite and non-negative')
+            object.__setattr__(self, name, value)
+        if self.next_started_count < self.started_count or self.next_cumulative_vehicle_seconds < self.cumulative_vehicle_seconds:
+            raise ValueError('reward accounting must be cumulative')
+        if self.global_reward is not None:
+            reward = float(self.global_reward)
+            if not np.isfinite(reward):
+                raise ValueError('global_reward must be finite')
+            object.__setattr__(self, 'global_reward', reward)
         fraction = float(self.active_vehicle_fraction)
         if not np.isfinite(fraction) or not 0. <= fraction <= 1.:
             raise ValueError('active_vehicle_fraction must be in [0, 1]')
@@ -77,10 +110,35 @@ class MacroTransition:
                 if key in snapshot and (not np.isfinite(snapshot[key]) or snapshot[key] < 0):
                     raise ValueError(f'vehicle snapshot {key} must be finite and non-negative')
         object.__setattr__(self, 'vehicles', snapshots)
+        if self.next_vehicles is not None:
+            following = tuple(deepcopy(dict(snapshot)) for snapshot in self.next_vehicles)
+            if len({str(snapshot['vehicle_id']) for snapshot in following}) != len(following):
+                raise ValueError('next boundary snapshots must have unique vehicle_id values')
+            object.__setattr__(self, 'next_vehicles', following)
+        if self.action_events is not None:
+            events = tuple(event if isinstance(event, ActionEvent) else ActionEvent(**event)
+                           for event in self.action_events)
+            indexes = [event.event_index for event in events]
+            if len(set(indexes)) != len(indexes):
+                raise ValueError('window action event indexes must be unique')
+            for event in events:
+                if not self.time <= event.decision_time < self.time + 30.:
+                    raise ValueError('action event is outside its half-open macro window')
+                if max(event.current_edge, event.next_edge, event.destination_edge) >= flow.shape[0]:
+                    raise ValueError('action event edge is outside the road graph')
+            object.__setattr__(self, 'action_events', events)
 
     def state_dict(self) -> dict[str, Any]:
-        result = {field.name: deepcopy(getattr(self, field.name)) for field in fields(self)}
+        # Events contain only immutable scalars. Serialize them once instead of
+        # deep-copying the tuple only to discard it during dictionary conversion.
+        result = {field.name: deepcopy(getattr(self, field.name)) for field in fields(self)
+                  if field.name != 'action_events'}
         result['vehicles'] = list(result['vehicles'])
+        result['action_events'] = None if self.action_events is None else [
+            {'vehicle_id': event.vehicle_id, 'event_index': event.event_index,
+             'decision_time': event.decision_time, 'current_edge': event.current_edge,
+             'next_edge': event.next_edge, 'destination_edge': event.destination_edge}
+            for event in self.action_events]
         return result
 
     @classmethod
@@ -105,6 +163,27 @@ class SequenceBatch:
     episode: torch.Tensor
     start_index: torch.Tensor
     total_vehicle_count: torch.Tensor
+    action_events: SparseActionEvents | None = None
+    boundary_vehicles: tuple[tuple[tuple[dict[str, Any], ...], ...], ...] | None = None
+    arrival_times: tuple[dict[str, float], ...] | None = None
+    transition_flow: torch.Tensor | None = None
+    transition_action: torch.Tensor | None = None
+    transition_action_events: SparseActionEvents | None = None
+    transition_active_vehicle_fraction: torch.Tensor | None = None
+    cohort_count: torch.Tensor | None = None
+    transition_volume_scope: str | None = None
+    transition_capacity_identity: str | None = None
+    # Labels use a newly selected observed population for each interval. They
+    # are separate from the full observed encoder inputs in ``flow``.
+    transition_target_flow: torch.Tensor | None = None
+    transition_cohort_count: torch.Tensor | None = None
+    # Decoder-only labels need the real boundary following each endpoint.
+    # They never enter the dynamics condition or extend the FM sequence.
+    decoder_following_flow: torch.Tensor | None = None
+    decoder_following_valid: torch.Tensor | None = None
+    started_count: torch.Tensor | None = None
+    cumulative_vehicle_seconds: torch.Tensor | None = None
+    global_reward: torch.Tensor | None = None
 
 
 class ReplayBuffer:
@@ -149,11 +228,18 @@ class ReplayBuffer:
                 raise ValueError('episode edge shapes must agree')
             if index and (not torch.equal(rows[index - 1].next_flow, row.flow) or not np.isclose(row.time, rows[index - 1].time + 30., rtol=0., atol=1e-7)):
                 raise ValueError('physical states and 30 second boundaries must be continuous')
+        events = [event for row in rows if row.action_events is not None for event in row.action_events]
+        indexes = [event.event_index for event in events]
+        if any(later <= earlier for earlier, later in zip(indexes, indexes[1:])):
+            raise ValueError('episode action event indexes must strictly increase')
+        if any(later.decision_time < earlier.decision_time for earlier, later in zip(events, events[1:])):
+            raise ValueError('episode action events must be chronological')
 
     def append_episode(
         self, transitions: Sequence[MacroTransition], *, total_travel_minutes: float,
         total_vehicle_count: int,
         require_complete: bool = False,
+        arrival_times: Mapping[str, float] | None = None,
     ) -> bool:
         rows = tuple(row if isinstance(row, MacroTransition) else MacroTransition(**row) for row in transitions)
         if not rows:
@@ -169,8 +255,15 @@ class ReplayBuffer:
         total = float(total_travel_minutes)
         if not np.isfinite(total) or total < 0:
             raise ValueError('total_travel_minutes must be finite and non-negative')
+        arrivals = None
+        if arrival_times is not None:
+            arrivals = {str(key): float(value) for key, value in arrival_times.items()}
+            if len(arrivals) != len(arrival_times) or any(not key or not np.isfinite(value) or value < 0
+                                                       for key, value in arrivals.items()):
+                raise ValueError('observed arrival_times must map unique vehicle IDs to finite nonnegative times')
         self._episodes.append({'storage_id': self._next_storage_id, 'transitions': rows,
-                               'total_travel_minutes': total, 'total_vehicle_count': int(total_vehicle_count)})
+                               'total_travel_minutes': total, 'total_vehicle_count': int(total_vehicle_count),
+                               'arrival_times': arrivals})
         self._next_storage_id += 1
         if self.max_episodes is not None:
             self._episodes = self._episodes[-self.max_episodes:]
@@ -207,14 +300,40 @@ class ReplayBuffer:
         return [(episode['storage_id'], start) for episode in self._episodes
                 for start, row in enumerate(episode['transitions']) if self._has_active_snapshot(row)]
 
-    def sample_active_seeds(self, batch_size: int, rng: np.random.Generator) -> SequenceBatch:
+    def sample_active_seeds(self, batch_size: int, rng: np.random.Generator,
+                            *, initial_only: bool = False) -> SequenceBatch:
         """Sample observed active start states without advancing the training sampler."""
         batch_size = _positive_integer(batch_size, 'batch_size')
         candidates = self._active_seed_candidates()
         if not candidates:
             raise ValueError('cannot sample replay without active vehicle snapshots')
         picks = [candidates[int(index)] for index in rng.integers(len(candidates), size=batch_size)]
-        return self._batch_from_picks(picks)
+        return self._batch_from_picks(picks, seed_only=initial_only)
+
+    def sample_terminal_seeds(
+        self, batch_size: int, rng: np.random.Generator,
+        deadline: float, horizon_seconds: float,
+    ) -> SequenceBatch | None:
+        """Sample observed active states whose imagination can reach the deadline.
+
+        Sampling is uniform with replacement and uses only the supplied RNG;
+        the ordinary replay sampler's order and cursor are left untouched.
+        No future vehicle snapshot is needed to select or initialize a seed.
+        """
+        batch_size = _positive_integer(batch_size, 'batch_size')
+        for name, value in (('deadline', deadline), ('horizon_seconds', horizon_seconds)):
+            if isinstance(value, bool) or not np.isfinite(value) or value <= 0:
+                raise ValueError(f'{name} must be finite and positive')
+        by_id = {episode['storage_id']: episode for episode in self._episodes}
+        candidates = [
+            (key, start) for key, start in self._active_seed_candidates()
+            if (by_id[key]['transitions'][start].time < deadline
+                and by_id[key]['transitions'][start].time + horizon_seconds >= deadline)
+        ]
+        if not candidates:
+            return None
+        picks = [candidates[int(index)] for index in rng.integers(len(candidates), size=batch_size)]
+        return self._batch_from_picks(picks, seed_only=True)
 
     def iter_epoch(self, batch_size: int, rng: np.random.Generator) -> Iterator[SequenceBatch]:
         """Visit each eligible sequence start once, retaining a final partial batch.
@@ -246,17 +365,33 @@ class ReplayBuffer:
             self._sample_cursor += take
         return self._batch_from_picks(picks)
 
-    def _batch_from_picks(self, picks: list[tuple[int, int]]) -> SequenceBatch:
+    def _batch_from_picks(self, picks: list[tuple[int, int]], *, seed_only=False) -> SequenceBatch:
         by_id = {episode['storage_id']: episode for episode in self._episodes}
-        length = min(self._available_length(by_id[key]['transitions'], start) for key, start in picks)
+        length = 1 if seed_only else min(self._available_length(by_id[key]['transitions'], start) for key, start in picks)
         windows = [by_id[key]['transitions'][start:start + length] for key, start in picks]
+        boundaries = []
+        for (key, start), rows in zip(picks, windows):
+            if seed_only:
+                # Imagined motion owns its start snapshot and never reads the
+                # archived future snapshots. Avoid copying those unused cars.
+                boundaries = None
+                break
+            episode_rows = by_id[key]['transitions']
+            endpoint = (episode_rows[start + length].vehicles if start + length < len(episode_rows)
+                        else rows[-1].next_vehicles)
+            if endpoint is None:
+                boundaries = None
+                break
+            boundaries.append(deepcopy(tuple(row.vehicles for row in rows) + (endpoint,)))
+        boundaries = None if boundaries is None else tuple(boundaries)
         def stack(name: str) -> torch.Tensor:
             return torch.stack([torch.stack([getattr(row, name) for row in rows]) for rows in windows])
         return SequenceBatch(
             flow=torch.stack([torch.stack([rows[0].flow, *[row.next_flow for row in rows]]) for rows in windows]),
             action=stack('action'), departure=stack('departure'), context=stack('context'),
             active_vehicle_fraction=torch.tensor([[row.active_vehicle_fraction for row in rows] for rows in windows]),
-            vehicles=tuple(deepcopy(rows[0].vehicles) for rows in windows),
+            vehicles=(tuple(sequence[0] for sequence in boundaries) if boundaries is not None
+                      else tuple(deepcopy(rows[0].vehicles) for rows in windows)),
             time=torch.tensor([rows[0].time for rows in windows], dtype=torch.float64),
             terminal=torch.tensor([[row.terminal for row in rows] for rows in windows], dtype=torch.bool),
             total_travel_minutes=torch.tensor([by_id[key]['total_travel_minutes'] for key, _ in picks]),
@@ -264,6 +399,15 @@ class ReplayBuffer:
             episode=torch.tensor([rows[0].episode for rows in windows]),
             start_index=torch.tensor([start for _, start in picks]),
             total_vehicle_count=torch.tensor([by_id[key]['total_vehicle_count'] for key, _ in picks], dtype=torch.long),
+            started_count=torch.tensor([rows[0].started_count for rows in windows], dtype=torch.long),
+            cumulative_vehicle_seconds=torch.tensor([rows[0].cumulative_vehicle_seconds for rows in windows], dtype=torch.float64),
+            global_reward=(torch.tensor([[row.global_reward for row in rows] for rows in windows])
+                           if all(row.global_reward is not None for rows in windows for row in rows) else None),
+            action_events=pack_action_events(windows) if all(row.action_events is not None
+                                                           for rows in windows for row in rows) else None,
+            boundary_vehicles=boundaries,
+            arrival_times=(tuple(dict(by_id[key]['arrival_times']) for key, _ in picks)
+                           if all(by_id[key]['arrival_times'] is not None for key, _ in picks) else None),
         )
 
     def state_dict(self) -> dict[str, Any]:
@@ -273,6 +417,7 @@ class ReplayBuffer:
             'active_only': self.active_only,
             'episodes': [{'storage_id': episode['storage_id'], 'total_travel_minutes': episode['total_travel_minutes'],
                           'total_vehicle_count': episode['total_vehicle_count'],
+                          'arrival_times': deepcopy(episode['arrival_times']),
                           'transitions': [row.state_dict() for row in episode['transitions']]} for episode in self._episodes],
             'next_storage_id': self._next_storage_id,
             'sample_order': [list(key) for key in self._sample_order], 'sample_cursor': self._sample_cursor,
@@ -287,11 +432,11 @@ class ReplayBuffer:
             raise ValueError('replay configuration mismatch')
         restored = ReplayBuffer(self.sequence_length, self.max_episodes, active_only=self.active_only)
         for raw in state['episodes']:
-            if set(raw) != {'storage_id', 'total_travel_minutes', 'total_vehicle_count', 'transitions'}:
+            if set(raw) != {'storage_id', 'total_travel_minutes', 'total_vehicle_count', 'transitions', 'arrival_times'}:
                 raise ValueError('replay episode has an invalid population schema')
             rows = tuple(MacroTransition.from_state_dict(row) for row in raw['transitions'])
             if not restored.append_episode(rows, total_travel_minutes=raw['total_travel_minutes'],
-                                           total_vehicle_count=raw['total_vehicle_count']):
+                                           total_vehicle_count=raw['total_vehicle_count'], arrival_times=raw['arrival_times']):
                 raise ValueError('replay contains an empty episode')
             restored._episodes[-1]['storage_id'] = raw['storage_id']
         ids = [episode['storage_id'] for episode in restored._episodes]

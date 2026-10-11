@@ -2,8 +2,8 @@
 
 The policy side is the global-only variant of the reference actor-critic
 (NextHopActor updated by ``common.policy_gradient_step`` with per-window team
-advantages from ``common.GlobalTrafficCritic`` plus an individual terminal
-timeout cost, kept out of the shared critic and model reward labels). A 5-member probabilistic ensemble predicts the one-window flow
+advantages from ``common.GlobalTrafficCritic``). The default shared reward is
+-delta(C/max(B,1))/60; individual timeout shaping is an explicit legacy mode. A 5-member probabilistic ensemble predicts the one-window flow
 delta N(delta_flow; mean, var) and the global window reward from (flow, action,
 departure, context). Each episode branches k=2 imagined windows from M=16
 observed window seeds through the identity-preserving physical imagination
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections import deque
 import copy
+import time
 
 import numpy as np
 import torch
@@ -24,10 +25,11 @@ import torch.nn.functional as F
 
 from ...models.policy import attach_timeout_penalties, NextHopActor
 from ...traffic.environment import NextHopDecision, safe_microstep_seconds
-from ..imagination import advance_imagined_window
-from ..observations import build_actor_observations
+from ..imagination import advance_imagined_window, clip_road_speed_fractions
+from ..observations import build_actor_observations, prepare_actor_window
 from . import METHODS
-from .common import GlobalTrafficCritic, global_critic_update, policy_gradient_step
+from ..global_reward import causal_context
+from .common import reward_objective, window_accounting, reward_context_dim, GlobalTrafficCritic, global_critic_update, policy_gradient_step
 
 FLOW_FEATURE_DIM = 8
 WINDOW_SECONDS = 30.0
@@ -53,12 +55,12 @@ GRAD_CLIP = 10.0
 class EnsembleMember(nn.Module):
     """Gaussian flow-delta model with a scalar global window-reward head."""
 
-    def __init__(self, edge_count: int) -> None:
+    def __init__(self, edge_count: int, context_dim: int = 4) -> None:
         super().__init__()
         self.edge_count = int(edge_count)
         flat = self.edge_count * FLOW_FEATURE_DIM
         self.trunk = nn.Sequential(
-            nn.Linear(flat + 2 * self.edge_count + 2, HIDDEN_DIM), nn.Tanh(),
+            nn.Linear(flat + 2 * self.edge_count + context_dim, HIDDEN_DIM), nn.Tanh(),
             nn.Linear(HIDDEN_DIM, HIDDEN_DIM), nn.Tanh())
         self.head = nn.Linear(HIDDEN_DIM, 2 * flat + 1)
 
@@ -77,6 +79,8 @@ class EnsembleMember(nn.Module):
 class MbpoMethod:
     """MBPO method wrapper: ensemble model rollouts mixed into global-reward actor updates."""
 
+    entropy_coef = .002
+
     needs_window_records = True
     needs_row_flow = False
 
@@ -90,18 +94,20 @@ class MbpoMethod:
         self.deadline = float(runner.deadline)
         self.edge_count = int(self.network.edge_count)
         self.vehicle_max_speed = float(runner.config.simulation.vehicle_max_speed_mps)
+        self.traffic_model = runner.config.simulation.traffic_model
         lengths = tuple(self.network.external_lane_lengths_m.values()) \
             or self.network.lengths_m[self.network.passenger_allowed]
-        self.microstep_seconds = safe_microstep_seconds(lengths, self.vehicle_max_speed)
+        self.microstep_seconds = (float(args.step_seconds) if self.traffic_model == 'meso'
+            else safe_microstep_seconds(lengths, self.vehicle_max_speed))
         self.speed_limits = np.asarray(self.network.speed_limits_mps, dtype=np.float64)
         self.actor = NextHopActor().to(self.device)
         # The added global critic must not change actor initialization (reference parity).
         with torch.random.fork_rng(devices=[]):
             torch.manual_seed(args.seed + 73861)
-            self.global_critic = GlobalTrafficCritic(self.edge_count).to(self.device)
+            self.global_critic = GlobalTrafficCritic(self.edge_count, reward_context_dim(args)).to(self.device)
         self.global_optimizer = torch.optim.Adam(self.global_critic.parameters(),
             lr=getattr(args, 'global_critic_lr', args.critic_lr))
-        self.ensemble = nn.ModuleList(EnsembleMember(self.edge_count) for _ in range(ENSEMBLE_SIZE)).to(self.device)
+        self.ensemble = nn.ModuleList(EnsembleMember(self.edge_count, reward_context_dim(args)) for _ in range(ENSEMBLE_SIZE)).to(self.device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=args.actor_lr)
         self.model_optimizer = torch.optim.Adam(self.ensemble.parameters(), lr=MODEL_LR)
         self.window_buffer: deque = deque(maxlen=MODEL_BUFFER_EPISODES)
@@ -110,14 +116,14 @@ class MbpoMethod:
         self.rng = np.random.default_rng(args.seed + 911519)
 
     # --------------------------------------------------------------- policy
-    def select(self, vehicles, actor_obs, frozen_flow, now, *, explore=True):
+    def select(self, vehicles, actor_obs, frozen_flow, now, *, explore=True, temperature=1., sample_actions=None):
         with torch.no_grad():
             selection = self.actor.sample_action(
                 torch.as_tensor(actor_obs.features, dtype=torch.float32, device=self.device),
-                torch.as_tensor(actor_obs.mask, device=self.device), deterministic=not explore)
-        indices = selection.candidate_index.cpu().tolist()
-        aux = [dict(entropy=float(value)) for value in selection.entropy.cpu().tolist()]
-        return indices, aux
+                torch.as_tensor(actor_obs.mask, device=self.device), deterministic=not (explore if sample_actions is None else sample_actions),
+                temperature=temperature)
+        indices, entropies = selection.indices_and_entropy()
+        return indices, [dict(entropy=value) for value in entropies]
 
     def _compute_logits(self, rows):
         features = torch.as_tensor(np.stack([row['features'] for row in rows]), dtype=torch.float32, device=self.device)
@@ -126,18 +132,30 @@ class MbpoMethod:
 
     # ------------------------------------------------------------ episode hook
     def on_episode(self, rows, windows, *, episode):
+        learning_started = time.monotonic()
         self._sync_model_rows_prior()
         if not windows:
             return dict(model_nll=0., reward_loss=0., global_critic_loss=0., actor_loss=0.,
-                        imagined_events=0., model_rows=float(len(self.model_rows)))
+                        imagined_events=0., model_rows=float(len(self.model_rows)),
+                        world_model_seconds=0., imagination_seconds=0., actor_update_seconds=0.,
+                        critic_update_seconds=0., learning_seconds=0.)
         self.window_buffer.append([self._model_sample(window) for window in windows])
+        world_started = time.monotonic()
         metrics = self._train_model()
+        metrics['world_model_seconds'] = time.monotonic() - world_started
+        critic_started = time.monotonic()
         advantages, critic_metrics = global_critic_update(global_critic=self.global_critic,
             global_optimizer=self.global_optimizer, windows=windows, update=True)
         metrics.update(critic_metrics)
+        metrics['critic_update_seconds'] = time.monotonic() - critic_started
+        imagination_started = time.monotonic()
         metrics['imagined_events'] = float(self._generate_model_rows(windows))
+        metrics['imagination_seconds'] = time.monotonic() - imagination_started
+        actor_started = time.monotonic()
         metrics.update(self._policy_updates(rows, advantages))
+        metrics['actor_update_seconds'] = time.monotonic() - actor_started
         metrics['model_rows'] = float(len(self.model_rows))
+        metrics['learning_seconds'] = time.monotonic() - learning_started
         return metrics
 
     def _model_sample(self, window):
@@ -188,7 +206,7 @@ class MbpoMethod:
             delta = (mean + torch.randn_like(mean) * torch.exp(0.5 * logvar)).squeeze(0).cpu().numpy()
         next_flow = flow + delta.reshape(self.edge_count, FLOW_FEATURE_DIM)
         next_flow[:, 0] = np.clip(next_flow[:, 0], 0., 1.2)
-        next_flow[:, 1] = np.clip(next_flow[:, 1], 0.05, 1.5)
+        next_flow[:, 1] = clip_road_speed_fractions(next_flow[:, 1], self.traffic_model)
         next_flow[:, 2] = np.clip(next_flow[:, 2], 0., 1.2)
         next_flow[:, 3] = np.clip(next_flow[:, 3], 0., 1.2)
         next_flow[:, 4:] = flow[:, 4:]
@@ -196,16 +214,20 @@ class MbpoMethod:
 
     # --------------------------------------------------------------- rollouts
     def _speeds(self, flow):
-        speeds = np.clip(flow[:, 1], 0.05, 1.5) * self.speed_limits
+        speeds = clip_road_speed_fractions(flow[:, 1], self.traffic_model) * self.speed_limits
         return np.minimum(speeds, self.vehicle_max_speed)
 
     @staticmethod
     def _active_count(states):
         return sum(1 for state in states if state.get('departed') and not state.get('arrived'))
 
-    def _context(self, states, timestamp, population):
-        return np.asarray([min(timestamp / self.deadline, 1.),
-                           self._active_count(states) / max(population, 1)], dtype=np.float32)
+    def _context(self, states, timestamp, population, *, started_count=None, cumulative_seconds=0.):
+        if reward_objective(self.args) == 'legacy_exposure':
+            return np.asarray([min(timestamp / self.deadline, 1.),
+                               self._active_count(states) / max(population, 1)], dtype=np.float32)
+        return causal_context(timestamp=timestamp, deadline=self.deadline,
+            active_count=self._active_count(states), started_count=int(started_count),
+            cumulative_seconds=cumulative_seconds)
 
     @staticmethod
     def _global_obs(flow, context):
@@ -220,14 +242,18 @@ class MbpoMethod:
             return []
         flow = np.asarray(window['flow'], dtype=np.float32).copy()
         timestamp = float(window['time'])
+        started_count, cumulative_seconds = (window_accounting(window)
+            if reward_objective(self.args) != 'legacy_exposure' else (population, 0.))
         rows, imagined_windows = [], []
         for step in range(ROLLOUT_LENGTH):
-            context = self._context(states, timestamp, population)
+            context = self._context(states, timestamp, population,
+                started_count=started_count, cumulative_seconds=cumulative_seconds)
             obs = self._global_obs(flow, context)
+            actor_window = prepare_actor_window(flow[:, [2, 1]], self.edge_count)
 
             def decide(pending, frozen, now):
                 actor_obs = build_actor_observations(
-                    policy_edge_features=np.asarray(frozen[:, [2, 1]], dtype=np.float32),
+                    policy_edge_features=actor_window,
                     vehicle_states=pending, candidates=self.candidates,
                     episode_progress=float(context[0]), active_vehicle_fraction=float(context[1]))
                 with torch.no_grad():
@@ -241,8 +267,7 @@ class MbpoMethod:
                         features=actor_obs.features[i].copy(), mask=actor_obs.mask[i].copy(),
                         action=int(indices[i]), current_edge=int(state['current_edge']),
                         sp_prior_weight=float(getattr(self.actor, 'prior_weight', 0.)),
-                        edge_indices=actor_obs.edge_indices[i].copy(),
-                        flow=np.asarray(frozen, dtype=np.float32).copy()))
+                        edge_indices=actor_obs.edge_indices[i].copy()))
                     decisions.append(NextHopDecision(str(state['vehicle_id']), int(state['current_edge']),
                         int(actor_obs.edge_indices[i, indices[i]]), float(now)))
                 return decisions
@@ -250,22 +275,28 @@ class MbpoMethod:
             result = advance_imagined_window(states, candidates=self.candidates,
                 edge_speeds_mps=self._speeds(flow), frozen_flow=flow, start_time=timestamp,
                 total_vehicle_count=population, decide=decide, observation_step_seconds=self.microstep_seconds,
-                vehicle_max_speed_mps=self.vehicle_max_speed)
+                vehicle_max_speed_mps=self.vehicle_max_speed, traffic_model=self.traffic_model,
+                session_protocol='event' if self.traffic_model == 'meso' else 'legacy')
+            cumulative_seconds += float(getattr(result, 'active_vehicle_seconds', 0.) if reward_objective(self.args) == 'legacy_exposure'
+                                        else result.active_vehicle_seconds)
             next_timestamp = timestamp + WINDOW_SECONDS
             terminal = next_timestamp >= self.deadline or self._active_count(states) == 0
             flow, reward = self._predict_transition(flow, result.action, result.departure, context)
             imagined_windows.append(dict(obs=obs, reward=reward, terminal=bool(terminal),
-                next_obs=self._global_obs(flow, self._context(states, next_timestamp, population))))
+                next_obs=self._global_obs(flow, self._context(states, next_timestamp, population,
+                    started_count=started_count, cumulative_seconds=cumulative_seconds))))
             timestamp = next_timestamp
             if terminal:
                 break
         failed_ids = {str(state['vehicle_id']) for state in states if not state.get('arrived')} \
             if timestamp >= self.deadline else set()
-        attach_timeout_penalties(rows, failed_ids)
+        if not getattr(self.args, 'global_reward_only', True):
+            attach_timeout_penalties(rows, failed_ids)
         advantages, _ = global_critic_update(global_critic=self.global_critic,
                                              windows=imagined_windows, update=False)
+        window_advantages = advantages.cpu().tolist()
         for row in rows:
-            row['advantage'] = float(advantages[row['window']])
+            row['advantage'] = window_advantages[row['window']]
         return rows
 
     def _sync_model_rows_prior(self):
@@ -296,7 +327,8 @@ class MbpoMethod:
             raise ValueError('MBPO real rows use a different shortest-path prior weight')
         if not rows and not self.model_rows:
             return dict(actor_loss=0.)
-        real_advantages = [float(advantages[row['window']]) for row in rows]
+        window_advantages = advantages.cpu().tolist()
+        real_advantages = [window_advantages[row['window']] for row in rows]
         updates = []
         model_rows = list(self.model_rows)
         for _ in range(POLICY_UPDATES_PER_EPISODE):
@@ -311,7 +343,9 @@ class MbpoMethod:
                 break
             updates.append(policy_gradient_step(compute_logits=self._compute_logits,
                 actor_parameters=self.actor.parameters(), actor_optimizer=self.actor_optimizer,
-                rows=batch_rows, advantages=batch_advantages))
+                rows=batch_rows, advantages=batch_advantages,
+                entropy_coef=self.entropy_coef,
+                include_individual_timeout=not getattr(self.args, 'global_reward_only', True)))
         return dict(actor_loss=float(np.mean([entry['actor_loss'] for entry in updates])) if updates else 0.)
 
     # ------------------------------------------------------------- checkpoint
@@ -333,7 +367,9 @@ class MbpoMethod:
         self.global_optimizer.load_state_dict(state['global_optimizer'])
         self.model_optimizer.load_state_dict(state['model_optimizer'])
         self.model_rows.clear()
-        self.model_rows.extend(copy.deepcopy(state['model_rows']))
+        # Older checkpoints carried unused full-network flow per imagined event.
+        self.model_rows.extend(copy.deepcopy({key: value for key, value in row.items() if key != 'flow'})
+                               for row in state['model_rows'])
         self.model_rows_prior_weight = float(state.get('model_rows_prior_weight', 0.))
         self.rng.bit_generator.state = copy.deepcopy(state['rng'])
 

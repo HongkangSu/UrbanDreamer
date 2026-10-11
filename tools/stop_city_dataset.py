@@ -19,7 +19,7 @@ from tools.compact_episode_archives import committed_episode
 
 def command(pid):
     try:
-        return Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')
+        return [arg for arg in Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0') if arg]
     except (FileNotFoundError, PermissionError):
         return []
 
@@ -96,7 +96,10 @@ def main():
         stream.flush()
         os.fsync(stream.fileno())
     for entry in manifest['runs']:
-        directory = os.open(str(Path(entry['output_dir']) / 'episodes' / 'train'), os.O_RDONLY | os.O_DIRECTORY)
+        archive_directory = Path(entry['output_dir']) / 'episodes' / 'train'
+        if not archive_directory.is_dir():
+            continue  # A newly started run may not yet have saved its first episode.
+        directory = os.open(str(archive_directory), os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(directory)
         finally:
@@ -120,7 +123,8 @@ def main():
     for entry in manifest['runs']:
         state_path = Path(entry['state'])
         state = json.loads(state_path.read_text())
-        state.update(status='stopped_by_user', stopped_at=timestamp)
+        if state.get('status') != 'completed':
+            state.update(status='stopped_by_user', stopped_at=timestamp)
         state_path.write_text(json.dumps(state, indent=2) + '\n')
         subprocess.run(['/usr/bin/tmux', 'kill-session', '-t', entry['tmux_session']],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

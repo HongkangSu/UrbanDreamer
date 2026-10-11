@@ -11,7 +11,7 @@ import numpy as np
 import torch
 
 
-CHECKPOINT_SCHEMA_VERSION = 5
+CHECKPOINT_SCHEMA_VERSION = 10
 LATEST_CHECKPOINT_FILENAME = "latest.pt"
 _ROOT_KEYS = frozenset(
     {
@@ -33,8 +33,8 @@ class CheckpointError(ValueError):
 
 
 class CheckpointPhase(str, Enum):
-    WARMUP = "warmup"
-    WORLD_MODEL_INITIALIZATION = "world_model_initialization"
+    CODEC_PRETRAIN = 'codec_pretrain'
+    PRETRAIN = "pretrain"
     ONLINE_TRAINING = "online_training"
     FINAL_EVALUATION = "final_evaluation"
     COMPLETED = "completed"
@@ -253,8 +253,13 @@ def _normalize_training_state(value: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise CheckpointError("training_state must be an object")
     _validate_exact_keys(value, _TRAINING_STATE_KEYS, "training_state")
-    if value['reward_contract'] != 'global_physical_individual_timeout_v1':
-        raise CheckpointError('unsupported individual timeout reward contract')
+    # Structural readers must be able to inspect immutable pretraining sources.
+    # MainlineTrainer requires the current contract before loading for learning;
+    # legacy online state needs an explicit, recorded reward migration.
+    if value['reward_contract'] not in {
+            'event_q_counterfactual_global_individual_timeout_v2',
+            'causal_cumulative_mean_global_v1'}:
+        raise CheckpointError('unsupported global reward contract')
     episode = value["next_environment_episode"]
     if isinstance(episode, bool) or not isinstance(episode, int) or episode < 0:
         raise CheckpointError("next_environment_episode must be a non-negative integer")
@@ -262,6 +267,10 @@ def _normalize_training_state(value: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_plain_value(value: Any, *, path: str) -> Any:
+    # Replay snapshots contain millions of plain scalars. Avoid the tensor and
+    # NumPy checks for those leaves; subclasses still use the checks below.
+    if value is None or type(value) in (str, float, int, bool):
+        return value
     if isinstance(value, torch.Tensor):
         return value.detach().cpu()
     if isinstance(value, np.ndarray):

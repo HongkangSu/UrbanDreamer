@@ -18,6 +18,7 @@ from urban_dreamer.learning.baselines.dreamer import (DETERMINISTIC_DIM, STOCHAS
                                                       DreamerMethod)
 from urban_dreamer.learning.baselines.mbpo import ENSEMBLE_SIZE, MbpoMethod
 from urban_dreamer.learning.replay import MacroTransition
+from micro_config_fixture import write_micro_config
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / 'tools/train_toy_baseline.py'
@@ -31,7 +32,7 @@ def module():
 
 
 def make_args(tmp_path, method='dreamer', **overrides):
-    values = dict(method=method, config=ROOT / 'configs/toy_cross_bottleneck.toml',
+    values = dict(reward_objective='legacy_exposure', global_reward_only=False, method=method, config=write_micro_config(tmp_path), session='microstep',
         output_dir=tmp_path, episodes=1, eval_every=1, eval_seeds=1, seed=42, device='cpu',
         threads=1, actor_lr=2e-4, critic_lr=3e-4, critic_updates=1, vehicle_limit=8, resume=False)
     values.update(overrides)
@@ -131,8 +132,9 @@ def assert_actor_rows(rows):
     assert rows, 'expected at least one imagined event row'
     for row in rows:
         for key in ('rollout', 'window', 'features', 'mask', 'action', 'current_edge',
-                    'edge_indices', 'flow'):
+                    'edge_indices'):
             assert key in row, key
+        assert 'flow' not in row
         assert row['features'].shape[-1] == 10
         assert row['mask'].any()
         assert 0 <= row['action'] < row['mask'].shape[0]
@@ -252,7 +254,7 @@ def test_ensemble_member_nll_shapes_and_logvar_clamp(tmp_path):
     assert len(method.ensemble) == ENSEMBLE_SIZE
     edge_count = runner.network.edge_count
     member = method.ensemble[0]
-    in_dim = edge_count * 8 + 2 * edge_count + 2
+    in_dim = edge_count * 8 + 2 * edge_count + common.reward_context_dim(args)
     x = torch.randn(4, in_dim) * 100.
     mean, logvar, reward = member(x)
     logvar = logvar.detach()
@@ -424,6 +426,8 @@ def test_model_based_checkpoint_roundtrip(tmp_path, method_name, method_cls):
         for key, value in original['global_critic'].items():
             torch.testing.assert_close(method.global_critic.state_dict()[key], value, rtol=0, atol=0)
         assert len(method.model_rows) == 1
+        assert 'flow' not in method.model_rows[0]
+        assert method.model_rows[0]['advantage'] == -.5
     assert method.rng.bit_generator.state['state']['state'] == original['rng']['state']['state']
 
 
@@ -442,6 +446,12 @@ def test_model_based_cli_smoke(tmp_path, method_name):
     for record in train:
         assert math.isfinite(record['global_reward_sum'])
         assert math.isfinite(record['actor_loss'])
+        for key in ('collection_seconds', 'archive_seconds', 'world_model_seconds',
+                    'imagination_seconds', 'actor_update_seconds', 'critic_update_seconds',
+                    'learning_seconds', 'episode_total_seconds'):
+            assert math.isfinite(record[key]) and record[key] >= 0., key
+        assert record['episode_total_seconds'] >= record['collection_seconds']
+        assert record['episode_total_seconds'] >= record['learning_seconds']
         if method_name == 'dreamer':
             for key in ('world_model_loss', 'kl', 'reward_loss', 'latent_critic_loss',
                         'imagined_events'):

@@ -1,0 +1,11 @@
+{
+  "score": 94,
+  "verdict": "pass",
+  "category_match": true,
+  "differences": [],
+  "suggestions": [],
+  "reasoning": "Scientific chart inspection: all15 process series represented, axis units and smoothing readable, prior and restart markers visible. No external reference image comparison.",
+  "threshold": 90,
+  "threshold_pass": true,
+  "next_actions": []
+}

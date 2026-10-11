@@ -13,7 +13,7 @@ from .checkpoint import (
     decide_output_directory,
     save_checkpoint,
 )
-from .config import MainlineConfig
+from .config import ConfigError, MainlineConfig
 from ..traffic.routing import PreparedInputs, validate_prepared_inputs
 from ..traffic.topology import TrafficTopology, load_traffic_topology
 
@@ -24,15 +24,21 @@ class MainlineRunError(RuntimeError):
 
 # Units between full boundary checkpoints per phase; None saves only at phase end.
 _CHECKPOINT_SAVE_INTERVALS: dict[CheckpointPhase, int | None] = {
-    CheckpointPhase.WARMUP: 1,
-    CheckpointPhase.WORLD_MODEL_INITIALIZATION: 1,
+    CheckpointPhase.CODEC_PRETRAIN: 1,
+    CheckpointPhase.PRETRAIN: 1,
     CheckpointPhase.ONLINE_TRAINING: 100,
     CheckpointPhase.FINAL_EVALUATION: 1,
 }
 
 
 class MainlineTrainerProtocol(Protocol):
-    def collect_warmup_episode(self, episode_index: int) -> dict[str, Any]: ...
+    def validate_pretraining_data(self) -> None: ...
+
+    def initialize_codec_epoch(self, epoch_index: int) -> dict[str, Any]: ...
+
+    def codec_ready(self) -> bool: ...
+
+    def validate_codec_ready(self) -> None: ...
 
     def initialize_world_model_epoch(self, epoch_index: int) -> dict[str, Any]: ...
 
@@ -58,10 +64,12 @@ class MainlinePipeline:
         config: MainlineConfig,
         input_hash: str,
         trainer_factory: Callable[[], MainlineTrainerProtocol],
+        pretrain_only: bool = False,
     ) -> None:
         self.config = config
         self.input_hash = str(input_hash)
         self._trainer_factory = trainer_factory
+        self.pretrain_only = bool(pretrain_only)
 
     def run(self) -> dict[str, Any]:
         status = decide_output_directory(
@@ -86,7 +94,8 @@ class MainlinePipeline:
                 next_unit = status.checkpoint.next_unit
                 trainer.load_state_dict(status.checkpoint.training_state)
             else:
-                phase = CheckpointPhase.WARMUP
+                trainer.validate_pretraining_data()
+                phase = CheckpointPhase.CODEC_PRETRAIN
                 next_unit = 0
                 self._save_boundary(trainer, phase=phase, next_unit=next_unit)
                 _atomic_write_json(
@@ -99,6 +108,10 @@ class MainlinePipeline:
                 phase=phase,
                 next_unit=next_unit,
             )
+            if self.pretrain_only and phase is CheckpointPhase.ONLINE_TRAINING and next_unit == 0:
+                summary = {"status": "pretrained", **trainer.summary()}
+                _atomic_write_json(self.config.run.output_dir / 'pretrain_summary.json', summary)
+                return summary
             if phase is not CheckpointPhase.COMPLETED or next_unit != 0:
                 raise AssertionError("phase coordinator did not reach completed")
 
@@ -128,12 +141,12 @@ class MainlinePipeline:
             ...,
         ] = (
             (
-                CheckpointPhase.WARMUP,
-                self.config.run.warmup_episodes,
-                trainer.collect_warmup_episode,
+                CheckpointPhase.CODEC_PRETRAIN,
+                self.config.run.codec_pretraining_epochs,
+                trainer.initialize_codec_epoch,
             ),
             (
-                CheckpointPhase.WORLD_MODEL_INITIALIZATION,
+                CheckpointPhase.PRETRAIN,
                 self.config.run.world_model_initialization_epochs,
                 trainer.initialize_world_model_epoch,
             ),
@@ -155,6 +168,15 @@ class MainlinePipeline:
         for index in range(stage_index, len(stages)):
             current_phase, target_units, execute_unit = stages[index]
             cursor = next_unit if index == stage_index else 0
+            if current_phase is CheckpointPhase.PRETRAIN and hasattr(trainer, 'validate_codec_pretraining_ready'):
+                trainer.validate_codec_pretraining_ready()
+            elif current_phase is not CheckpointPhase.CODEC_PRETRAIN:
+                trainer.validate_codec_ready()
+            if self.pretrain_only and current_phase in {
+                    CheckpointPhase.ONLINE_TRAINING, CheckpointPhase.FINAL_EVALUATION}:
+                if current_phase is not CheckpointPhase.ONLINE_TRAINING or cursor != 0:
+                    raise MainlineRunError('--pretrain-only cannot resume a run that has started online training')
+                return CheckpointPhase.ONLINE_TRAINING, 0
             if cursor > target_units:
                 raise MainlineRunError(
                     f"checkpoint cursor {cursor} exceeds {current_phase.value} "
@@ -162,6 +184,8 @@ class MainlinePipeline:
                 )
             save_interval = _CHECKPOINT_SAVE_INTERVALS[current_phase]
             for unit_index in range(cursor, target_units):
+                if current_phase is CheckpointPhase.CODEC_PRETRAIN and trainer.codec_ready():
+                    break
                 execute_unit(unit_index)
                 # A full boundary checkpoint serializes the entire replay and
                 # is saved after each initialization epoch. Online training
@@ -174,6 +198,13 @@ class MainlinePipeline:
                         phase=current_phase,
                         next_unit=unit_index + 1,
                     )
+                if current_phase is CheckpointPhase.CODEC_PRETRAIN and trainer.codec_ready():
+                    break
+            if current_phase is CheckpointPhase.CODEC_PRETRAIN:
+                # Exhausting a training budget never substitutes for held-out
+                # reconstruction validation. Keep the codec-phase checkpoint
+                # if validation fails, and never begin FM with an unready codec.
+                trainer.validate_codec_ready()
             next_phase = (
                 stages[index + 1][0]
                 if index + 1 < len(stages)
@@ -204,10 +235,12 @@ class MainlinePipeline:
         )
 
 
-def run_mainline(config: MainlineConfig) -> dict[str, Any]:
+def run_mainline(config: MainlineConfig, *, pretrain_only: bool = False) -> dict[str, Any]:
     """Validate prepared inputs and execute or strictly resume the sole mainline."""
     if not isinstance(config, MainlineConfig):
         raise TypeError("run_mainline expects a MainlineConfig from load_config()")
+    if not config.data.archive_roots and config.data.pretrain_cache_manifest is None:
+        raise ConfigError('offline pretraining requires [data].archive_roots or pretrain_cache_manifest with compatible training data')
     prepared = validate_prepared_inputs(config)
     topology = load_traffic_topology(prepared)
     input_hash = combined_input_hash(prepared)
@@ -215,6 +248,7 @@ def run_mainline(config: MainlineConfig) -> dict[str, Any]:
         config=config,
         input_hash=input_hash,
         trainer_factory=lambda: _build_trainer(config, prepared, topology),
+        pretrain_only=pretrain_only,
     ).run()
 
 
@@ -242,8 +276,8 @@ def _build_trainer(
 
 def _phase_index(phase: CheckpointPhase) -> int:
     ordered = (
-        CheckpointPhase.WARMUP,
-        CheckpointPhase.WORLD_MODEL_INITIALIZATION,
+        CheckpointPhase.CODEC_PRETRAIN,
+        CheckpointPhase.PRETRAIN,
         CheckpointPhase.ONLINE_TRAINING,
         CheckpointPhase.FINAL_EVALUATION,
         CheckpointPhase.COMPLETED,

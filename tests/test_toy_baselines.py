@@ -15,6 +15,7 @@ from urban_dreamer.learning.baselines import METHODS, build_method
 from urban_dreamer.learning.baselines import common
 from urban_dreamer.learning.baselines.gnac import GraphActorCriticMethod, GraphNextHopActor
 from urban_dreamer.models.policy import NextHopActor
+from micro_config_fixture import write_micro_config
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / 'tools/train_toy_baseline.py'
@@ -28,7 +29,7 @@ def module():
 
 
 def make_args(tmp_path, **overrides):
-    values = dict(method='gnac', config=ROOT / 'configs/toy_cross_bottleneck.toml',
+    values = dict(reward_objective='legacy_exposure', global_reward_only=False, method='gnac', config=write_micro_config(tmp_path), session='microstep',
         output_dir=tmp_path, episodes=1, eval_every=1, eval_seeds=1, seed=42, device='cpu',
         threads=1, actor_lr=2e-4, critic_lr=3e-4, critic_updates=1, vehicle_limit=8, resume=False)
     values.update(overrides)
@@ -40,13 +41,13 @@ def sumo_available():
 
 
 def test_method_registry_and_placeholders():
-    assert set(METHODS) == {'gnac', 'dreamer', 'mbpo', 'dta'}
+    assert set(METHODS) == {'gnac', 'dreamer', 'mbpo', 'dta', 'ippo', 'mappo', 'iql', 'mamba'}
     assert METHODS['gnac'] is GraphActorCriticMethod
     for name in ('dreamer', 'mbpo', 'dta'):
         with pytest.raises(NotImplementedError, match='not implemented yet'):
             build_method(name, None, None)
     with pytest.raises(ValueError, match='unknown baseline method'):
-        build_method('iql', None, None)
+        build_method('unknown', None, None)
 
 
 def graph_actor_inputs(batch=3):
@@ -307,7 +308,7 @@ def test_gnac_cli_smoke(tmp_path):
     assert any(r['phase'] == 'holdout_best' for r in records)
     protocol = json.loads((output / 'protocol.json').read_text())
     assert protocol['method'] == 'gnac'
-    assert protocol['reward_mode'] == 'global_with_individual_timeout'
+    assert protocol['reward_mode'] == 'global_only'
     assert protocol['training_policy'] == 'stochastic'
     assert protocol['evaluation_policy'] == 'argmax'
     assert 'local_reward_weight' not in protocol and 'global_reward_weight' not in protocol

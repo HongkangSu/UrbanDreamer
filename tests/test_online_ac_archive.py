@@ -59,6 +59,8 @@ def test_episode_archive_observes_real_windows_independently_of_training_collect
             return dict(time=now, done=self.done, flow=runner.network.extract_flow({}),
                         active_vehicle_count=population if not self.done else 0,
                         vehicles=[dict(vehicle_id=v.vehicle_id, departed=True,
+                                       destination_edge=runner.network.edge_to_index[
+                                           runner.topology.destinations[v.destination_index]],
                                        arrived=self.done) for v in vehicles])
 
         def reset(self):
@@ -104,7 +106,9 @@ def test_episode_archive_observes_real_windows_independently_of_training_collect
     plain_rows, plain_metrics = runner.run_episode(policy='random', seed=43)
     assert not observed and plain_rows == rows
     for value in (archived_metrics, plain_metrics):
-        value.pop('wall_seconds')
+        assert value['collection_seconds'] >= value['archive_seconds'] >= 0.
+        for key in ('wall_seconds', 'collection_seconds', 'archive_seconds'):
+            value.pop(key)
     assert archived_metrics == plain_metrics
 
 
@@ -161,16 +165,19 @@ def test_skip_initial_evaluation_preserves_initial_checkpoints_and_resume_protoc
     import json
     import torch
     implementation = module()
+    legacy_args = args(tmp_path)
+    output = tmp_path / 'run'
     monkeypatch.setattr(implementation, 'evaluate',
                         lambda *a, **kw: pytest.fail('zero-budget run should skip evaluation'))
-    implementation.main(['--output-dir', str(tmp_path), '--episodes', '0',
-                         '--skip-initial-evaluation', '--vehicle-limit', '8'])
+    implementation.main(['--config', str(legacy_args.config), '--session', 'microstep', '--backend', 'traci',
+                         '--output-dir', str(output), '--episodes', '0',
+                         '--skip-initial-evaluation', '--vehicle-limit', '8', '--no-global-reward-only'])
     for name in ('initial.pt', 'best.pt', 'latest.pt'):
-        state = torch.load(tmp_path / name, weights_only=False)
+        state = torch.load(output / name, weights_only=False)
         assert state['episode'] == 0 and state['best'] == float('inf')
-    assert json.loads((tmp_path / 'protocol.json').read_text())['skip_initial_evaluation'] is True
-    runner = implementation.RealActorCritic(args(tmp_path))
+    assert json.loads((output / 'protocol.json').read_text())['skip_initial_evaluation'] is True
+    runner = implementation.RealActorCritic(legacy_args)
     with pytest.raises(ValueError, match='initial evaluation protocol'):
-        runner.load(tmp_path / 'latest.pt')
+        runner.load(output / 'latest.pt')
     runner.args.skip_initial_evaluation = True
-    assert runner.load(tmp_path / 'latest.pt') == (1, float('inf'))
+    assert runner.load(output / 'latest.pt') == (1, float('inf'))

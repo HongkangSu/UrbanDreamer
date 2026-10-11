@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import copy
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,89 @@ decoder_bpr_supervision_loss = wm.decoder_bpr_supervision_loss
 decoder_reconstruction_loss = wm.decoder_reconstruction_loss
 episode_t_all_supervision_loss = wm.episode_t_all_supervision_loss
 transition_decoded_supervision_loss = wm.transition_decoded_supervision_loss
+
+
+def _reference_attention(module, value, *, causal=False, all_true_mask=False):
+    batch, length, width = value.shape
+    q, k, v = module.qkv(value).chunk(3, dim=-1)
+    q, k, v = [item.reshape(batch, length, module.n_heads, module.head_dim).transpose(1, 2)
+               for item in (q, k, v)]
+    mask = torch.ones(batch, 1, length, length, dtype=torch.bool) if all_true_mask else None
+    result = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask,
+        dropout_p=0., is_causal=causal)
+    return module.output(result.transpose(1, 2).contiguous().reshape(batch, length, width))
+
+
+@pytest.mark.parametrize('chunk', [0, 2])
+def test_space_attention_matches_explicit_all_true_sdpa_outputs_and_gradients(chunk):
+    torch.set_num_threads(1)
+    torch.manual_seed(124)
+    attention = wm.SpaceSelfAttention(7)
+    attention.attention_batch_chunk_size = chunk
+    reference = copy.deepcopy(attention.attention)
+    x = torch.randn(2, 3, 7, wm.WORLD_MODEL_DIM, requires_grad=True)
+    x_reference = x.detach().clone().requires_grad_(True)
+    actual = attention(x)
+    expected = _reference_attention(reference, x_reference.reshape(6, 7, wm.WORLD_MODEL_DIM),
+                                    all_true_mask=True).reshape_as(actual)
+    weight = torch.randn_like(actual)
+    (actual * weight).sum().backward()
+    (expected * weight).sum().backward()
+    torch.testing.assert_close(actual, expected, rtol=1e-5, atol=2e-6)
+    torch.testing.assert_close(x.grad, x_reference.grad, rtol=2e-5, atol=2e-6)
+    for name, parameter in attention.attention.named_parameters():
+        torch.testing.assert_close(parameter.grad, dict(reference.named_parameters())[name].grad,
+                                   rtol=2e-5, atol=2e-5, msg=name)
+
+
+@pytest.mark.parametrize('time_steps', [1, 2])
+def test_time_attention_matches_full_causal_sdpa_and_all_gradients(time_steps):
+    torch.set_num_threads(1)
+    torch.manual_seed(125)
+    attention = wm.TimeSelfAttention()
+    attention.attention_batch_chunk_size = 3
+    reference = copy.deepcopy(attention.attention)
+    x = torch.randn(2, time_steps, 5, wm.WORLD_MODEL_DIM, requires_grad=True)
+    x_reference = x.detach().clone().requires_grad_(True)
+    actual = attention(x)
+    flat = x_reference.permute(0, 2, 1, 3).reshape(10, time_steps, wm.WORLD_MODEL_DIM)
+    expected = _reference_attention(reference, flat, causal=True).reshape(
+        2, 5, time_steps, wm.WORLD_MODEL_DIM).permute(0, 2, 1, 3)
+    weight = torch.randn_like(actual)
+    (actual * weight).sum().backward()
+    (expected * weight).sum().backward()
+    torch.testing.assert_close(actual, expected, rtol=1e-5, atol=2e-6)
+    torch.testing.assert_close(x.grad, x_reference.grad, rtol=2e-5, atol=2e-6)
+    for name, parameter in attention.attention.named_parameters():
+        torch.testing.assert_close(parameter.grad, dict(reference.named_parameters())[name].grad,
+                                   rtol=2e-5, atol=2e-5, msg=name)
+    if time_steps == 1:
+        assert attention.attention.qkv.weight.grad[:2 * wm.WORLD_MODEL_DIM].eq(0).all()
+        assert attention.attention.qkv.bias.grad[:2 * wm.WORLD_MODEL_DIM].eq(0).all()
+    else:
+        changed = x.detach().clone()
+        changed[:, 1] += 100.
+        torch.testing.assert_close(attention(changed)[:, 0], actual.detach()[:, 0], rtol=0., atol=0.)
+
+
+def test_event_aggregation_under_cpu_bfloat16_preserves_integer_counts_and_fp32_additive_features():
+    from urban_dreamer.learning.action_events import ActionEvent, pack_action_events
+    adjacency = torch.ones(3, 3) - torch.eye(3)
+    encoder = wm.EventActionEncoder(adjacency=adjacency, static_features=torch.ones(3, 4))
+    events = pack_action_events([[(ActionEvent('a', 0, 2., 0, 1, 2),
+                                  ActionEvent('b', 1, 2., 0, 1, 2))]])
+    expected_counts = encoder.aggregate(events).count
+    with torch.autocast('cpu', dtype=torch.bfloat16):
+        aggregate = encoder.aggregate(events)
+        output = encoder.readout(aggregate)
+        loss = output.float().square().mean() + aggregate.feature_sum.square().mean()
+    assert aggregate.count.dtype == torch.long
+    assert aggregate.feature_sum.dtype == torch.float32
+    assert torch.equal(aggregate.count, expected_counts)
+    loss.backward()
+    for parameter in (encoder.edge_embedding.weight, encoder.event_mlp[0].weight):
+        assert parameter.grad is not None and torch.isfinite(parameter.grad).all()
+        assert parameter.grad.abs().sum() > 0
 
 
 class ConstantVelocityDynamics(torch.nn.Module):
@@ -153,6 +237,7 @@ def test_world_model_fixed_architecture_chunk_profiles_and_nonpersistent_buffers
         "cfm_loss",
         "cfm_predict_one_timestep",
         "recursive_fm_loss",
+        "independent_transition_fm_loss",
         "decoder_bpr_supervision_loss",
         "decoder_reconstruction_loss",
         "episode_t_all_supervision_loss",

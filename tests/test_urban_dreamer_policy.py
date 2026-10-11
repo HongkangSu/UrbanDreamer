@@ -25,7 +25,7 @@ def test_all_invalid_is_error_not_an_arbitrary_action():
 
 
 def test_global_critic_supports_two_context_fields():
-    assert CentralizedLatentValueCritic()(torch.zeros(2,3,64), torch.zeros(2,2)).shape == (2,1)
+    assert CentralizedLatentValueCritic()(torch.zeros(2,3,64), torch.zeros(2,4)).shape == (2,1)
 
 
 def test_lambda_return_retains_bootstrap_at_truncated_horizon():

@@ -1,0 +1,2836 @@
+{
+  "policy": "Preserve latest, best variants, newest numbered snapshot, migration backups and all trajectories. Remove superseded initialization and numbered snapshots.",
+  "candidates": [
+    {
+      "path": "outputs/toy_ac_global_deterministic_5000_seed42_20260929/initial.pt",
+      "keep": "outputs/toy_ac_global_deterministic_5000_seed42_20260929/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2081,
+      "bytes": 656508,
+      "allocated": 659456,
+      "links": 1,
+      "identity": [
+        2050,
+        69608274,
+        656508,
+        1790703161858412503
+      ]
+    },
+    {
+      "path": "outputs/dta_gretz_armainvilliers_seed42_20260930/initial.pt",
+      "keep": "outputs/dta_gretz_armainvilliers_seed42_20260930/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 503,
+      "bytes": 10505385,
+      "allocated": 10506240,
+      "links": 1,
+      "identity": [
+        2050,
+        69608350,
+        10505385,
+        1790798495199506136
+      ]
+    },
+    {
+      "path": "outputs/dta_fontenay_en_parisis_seed42_20260930/initial.pt",
+      "keep": "outputs/dta_fontenay_en_parisis_seed42_20260930/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 334,
+      "bytes": 46577577,
+      "allocated": 46579712,
+      "links": 1,
+      "identity": [
+        2050,
+        69608369,
+        46577577,
+        1790799588689664602
+      ]
+    },
+    {
+      "path": "outputs/toy_baseline_dta_5000_seed42_20260929/initial.pt",
+      "keep": "outputs/toy_baseline_dta_5000_seed42_20260929/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 56,
+      "bytes": 24553,
+      "allocated": 24576,
+      "links": 1,
+      "identity": [
+        2050,
+        69608253,
+        24553,
+        1790693896743685328
+      ]
+    },
+    {
+      "path": "outputs/toy_baseline_mbpo_5000_seed42_20260929/initial.pt",
+      "keep": "outputs/toy_baseline_mbpo_5000_seed42_20260929/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 803,
+      "bytes": 5119330,
+      "allocated": 5120000,
+      "links": 1,
+      "identity": [
+        2050,
+        69608259,
+        5119330,
+        1790693111595327378
+      ]
+    },
+    {
+      "path": "outputs/toy_ac_global_fleet_seed42_20260929/initial.pt",
+      "keep": "outputs/toy_ac_global_fleet_seed42_20260929/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 102,
+      "bytes": 937898,
+      "allocated": 937984,
+      "links": 1,
+      "identity": [
+        2050,
+        69607893,
+        937898,
+        1790673986082395704
+      ]
+    },
+    {
+      "path": "outputs/toy_ac_real_seed42_20260929/initial.pt",
+      "keep": "outputs/toy_ac_real_seed42_20260929/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 150,
+      "bytes": 570172,
+      "allocated": 573440,
+      "links": 1,
+      "identity": [
+        2050,
+        69606865,
+        570172,
+        1790670035513075984
+      ]
+    },
+    {
+      "path": "outputs/toy_ac_global_smoke_20260929/initial.pt",
+      "keep": "outputs/toy_ac_global_smoke_20260929/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1,
+      "bytes": 937898,
+      "allocated": 937984,
+      "links": 1,
+      "identity": [
+        2050,
+        69607741,
+        937898,
+        1790673043731003495
+      ]
+    },
+    {
+      "path": "outputs/toy_ac_real_smoke_20260929/initial.pt",
+      "keep": "outputs/toy_ac_real_smoke_20260929/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1,
+      "bytes": 570108,
+      "allocated": 573440,
+      "links": 1,
+      "identity": [
+        2050,
+        69606854,
+        570108,
+        1790669888438401408
+      ]
+    },
+    {
+      "path": "outputs/toy_ac_global_only_smoke_20260929/initial.pt",
+      "keep": "outputs/toy_ac_global_only_smoke_20260929/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1,
+      "bytes": 656380,
+      "allocated": 659456,
+      "links": 1,
+      "identity": [
+        2050,
+        69607966,
+        656380,
+        1790675764971414890
+      ]
+    },
+    {
+      "path": "outputs/toy_baseline_gnac_5000_seed42_20260929/initial.pt",
+      "keep": "outputs/toy_baseline_gnac_5000_seed42_20260929/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1147,
+      "bytes": 774055,
+      "allocated": 774144,
+      "links": 1,
+      "identity": [
+        2050,
+        69608262,
+        774055,
+        1790693117155664954
+      ]
+    },
+    {
+      "path": "outputs/dta_ingolstadt_custom_seed42_20260930/initial.pt",
+      "keep": "outputs/dta_ingolstadt_custom_seed42_20260930/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 360,
+      "bytes": 1000361,
+      "allocated": 1003520,
+      "links": 1,
+      "identity": [
+        2050,
+        69608342,
+        1000361,
+        1790797869982844862
+      ]
+    },
+    {
+      "path": "outputs/toy_baseline_gnac_global_5000_seed42_20260930/initial.pt",
+      "keep": "outputs/toy_baseline_gnac_global_5000_seed42_20260930/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 5000,
+      "bytes": 860071,
+      "allocated": 860160,
+      "links": 1,
+      "identity": [
+        2050,
+        69608310,
+        860071,
+        1790744045753686717
+      ]
+    },
+    {
+      "path": "outputs/toy_ac_global_deterministic_smoke_20260929/initial.pt",
+      "keep": "outputs/toy_ac_global_deterministic_smoke_20260929/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 656444,
+      "allocated": 659456,
+      "links": 1,
+      "identity": [
+        2050,
+        69608268,
+        656444,
+        1790703066575789723
+      ]
+    },
+    {
+      "path": "outputs/toy_ac_global_seed42_20260929/initial.pt",
+      "keep": "outputs/toy_ac_global_seed42_20260929/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 150,
+      "bytes": 937898,
+      "allocated": 937984,
+      "links": 1,
+      "identity": [
+        2050,
+        69607747,
+        937898,
+        1790673266644176447
+      ]
+    },
+    {
+      "path": "outputs/toy_ac_local_only_5000_seed42_20260929/initial.pt",
+      "keep": "outputs/toy_ac_local_only_5000_seed42_20260929/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 4165,
+      "bytes": 570428,
+      "allocated": 573440,
+      "links": 1,
+      "identity": [
+        2050,
+        69608216,
+        570428,
+        1790686427226834018
+      ]
+    },
+    {
+      "path": "outputs/toy_ac_global_only_seed42_20260929/initial.pt",
+      "keep": "outputs/toy_ac_global_only_seed42_20260929/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 5000,
+      "bytes": 656444,
+      "allocated": 659456,
+      "links": 1,
+      "identity": [
+        2050,
+        69608023,
+        656444,
+        1790676142271473224
+      ]
+    },
+    {
+      "path": "outputs/toy_ac_global_only_checked_smoke_20260929/initial.pt",
+      "keep": "outputs/toy_ac_global_only_checked_smoke_20260929/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1,
+      "bytes": 656444,
+      "allocated": 659456,
+      "links": 1,
+      "identity": [
+        2050,
+        69607979,
+        656444,
+        1790675996132274418
+      ]
+    },
+    {
+      "path": "outputs/toy_baseline_dreamer_5000_seed42_20260929/initial.pt",
+      "keep": "outputs/toy_baseline_dreamer_5000_seed42_20260929/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 382,
+      "bytes": 5200266,
+      "allocated": 5201920,
+      "links": 1,
+      "identity": [
+        2050,
+        69608256,
+        5200266,
+        1790693111447318368
+      ]
+    },
+    {
+      "path": "outputs/toy_baseline_mbpo_global_5000_seed42_20260930/initial.pt",
+      "keep": "outputs/toy_baseline_mbpo_global_5000_seed42_20260930/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 5000,
+      "bytes": 5205346,
+      "allocated": 5206016,
+      "links": 1,
+      "identity": [
+        2050,
+        69608304,
+        5205346,
+        1790744040426035953
+      ]
+    },
+    {
+      "path": "outputs/toy_baseline_dreamer_global_5000_seed42_20260930/initial.pt",
+      "keep": "outputs/toy_baseline_dreamer_global_5000_seed42_20260930/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2978,
+      "bytes": 4918492,
+      "allocated": 4919296,
+      "links": 1,
+      "identity": [
+        2050,
+        69608307,
+        4918492,
+        1790744041085992436
+      ]
+    },
+    {
+      "path": "outputs/montereau_dynamic_prior_ac_500_20261011/run/initial.pt",
+      "keep": "outputs/montereau_dynamic_prior_ac_500_20261011/run/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 199,
+      "bytes": 18300533,
+      "allocated": 18300928,
+      "links": 1,
+      "identity": [
+        2050,
+        71588524,
+        18300533,
+        1791701221964031216
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/ingolstadt_custom/gnac/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/ingolstadt_custom/gnac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 7170253,
+      "allocated": 7172096,
+      "links": 1,
+      "identity": [
+        2050,
+        70552502,
+        7170253,
+        1791301888743629849
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/ingolstadt_custom/mbpo/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/ingolstadt_custom/mbpo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 119229747,
+      "allocated": 119230464,
+      "links": 1,
+      "identity": [
+        2050,
+        70552510,
+        119229747,
+        1791301889563653267
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/ingolstadt_custom/dreamer/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/ingolstadt_custom/dreamer/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1,
+      "bytes": 19383367,
+      "allocated": 19386368,
+      "links": 1,
+      "identity": [
+        2050,
+        70552506,
+        19383367,
+        1791301888859633163
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/ingolstadt_custom/online_ac/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/ingolstadt_custom/online_ac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 4057717,
+      "allocated": 4059136,
+      "links": 1,
+      "identity": [
+        2050,
+        70552485,
+        4057717,
+        1791301888339618310
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/gretz_armainvilliers/gnac/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/gretz_armainvilliers/gnac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 99597453,
+      "allocated": 99598336,
+      "links": 1,
+      "identity": [
+        2050,
+        70552524,
+        99597453,
+        1791301900303959657
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/gretz_armainvilliers/mbpo/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/gretz_armainvilliers/mbpo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1,
+      "bytes": 618760563,
+      "allocated": 618766336,
+      "links": 1,
+      "identity": [
+        2050,
+        70552528,
+        618760563,
+        1791301904308073728
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/gretz_armainvilliers/dreamer/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/gretz_armainvilliers/dreamer/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1,
+      "bytes": 82725447,
+      "allocated": 82731008,
+      "links": 1,
+      "identity": [
+        2050,
+        70552520,
+        82725447,
+        1791301899683941986
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/gretz_armainvilliers/online_ac/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/gretz_armainvilliers/online_ac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 18934389,
+      "allocated": 18935808,
+      "links": 1,
+      "identity": [
+        2050,
+        70552516,
+        18934389,
+        1791301898847918156
+      ]
+    },
+    {
+      "path": "outputs/baseline_algorithm_repair_20261007/toy/iql/initial.pt",
+      "keep": "outputs/baseline_algorithm_repair_20261007/toy/iql/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 572925,
+      "allocated": 573440,
+      "links": 1,
+      "identity": [
+        2050,
+        70947247,
+        572925,
+        1791387113601257077
+      ]
+    },
+    {
+      "path": "outputs/baseline_algorithm_repair_20261007/toy/mappo/initial.pt",
+      "keep": "outputs/baseline_algorithm_repair_20261007/toy/mappo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 663037,
+      "allocated": 663552,
+      "links": 1,
+      "identity": [
+        2050,
+        70947234,
+        663037,
+        1791387106713354789
+      ]
+    },
+    {
+      "path": "outputs/baseline_algorithm_repair_20261007/toy/gnac/initial.pt",
+      "keep": "outputs/baseline_algorithm_repair_20261007/toy/gnac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 866499,
+      "allocated": 868352,
+      "links": 1,
+      "identity": [
+        2050,
+        70947179,
+        866499,
+        1791387087685636958
+      ]
+    },
+    {
+      "path": "outputs/baseline_algorithm_repair_20261007/toy/mbpo/initial.pt",
+      "keep": "outputs/baseline_algorithm_repair_20261007/toy/mbpo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 5212009,
+      "allocated": 5214208,
+      "links": 1,
+      "identity": [
+        2050,
+        70947206,
+        5212009,
+        1791387096337506402
+      ]
+    },
+    {
+      "path": "outputs/baseline_algorithm_repair_20261007/toy/dreamer/initial.pt",
+      "keep": "outputs/baseline_algorithm_repair_20261007/toy/dreamer/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 4925245,
+      "allocated": 4927488,
+      "links": 1,
+      "identity": [
+        2050,
+        70947201,
+        4925245,
+        1791387096069510385
+      ]
+    },
+    {
+      "path": "outputs/baseline_algorithm_repair_20261007/toy/ippo/initial.pt",
+      "keep": "outputs/baseline_algorithm_repair_20261007/toy/ippo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 367869,
+      "allocated": 368640,
+      "links": 1,
+      "identity": [
+        2050,
+        70947225,
+        367869,
+        1791387105301375107
+      ]
+    },
+    {
+      "path": "outputs/baseline_algorithm_repair_20261007/toy/online_ac/initial.pt",
+      "keep": "outputs/baseline_algorithm_repair_20261007/toy/online_ac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 661749,
+      "allocated": 663552,
+      "links": 1,
+      "identity": [
+        2050,
+        70947183,
+        661749,
+        1791387087717636468
+      ]
+    },
+    {
+      "path": "outputs/baseline_algorithm_repair_20261007/toy/mamba/initial.pt",
+      "keep": "outputs/baseline_algorithm_repair_20261007/toy/mamba/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 41880035,
+      "allocated": 41881600,
+      "links": 1,
+      "identity": [
+        2050,
+        71077792,
+        41880035,
+        1791388549344871867
+      ]
+    },
+    {
+      "path": "outputs/no_revisit_validation_20261004_195622/staged_gnac/initial.pt",
+      "keep": "outputs/no_revisit_validation_20261004_195622/staged_gnac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 866189,
+      "allocated": 868352,
+      "links": 1,
+      "identity": [
+        2050,
+        69607807,
+        866189,
+        1791144398059666320
+      ]
+    },
+    {
+      "path": "outputs/no_revisit_validation_20261004_195622/gnac/initial.pt",
+      "keep": "outputs/no_revisit_validation_20261004_195622/gnac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 865273,
+      "allocated": 868352,
+      "links": 1,
+      "identity": [
+        2050,
+        69607513,
+        865273,
+        1791143784681103057
+      ]
+    },
+    {
+      "path": "outputs/no_revisit_validation_20261004_195622/mbpo/initial.pt",
+      "keep": "outputs/no_revisit_validation_20261004_195622/mbpo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 5210783,
+      "allocated": 5214208,
+      "links": 1,
+      "identity": [
+        2050,
+        69607517,
+        5210783,
+        1791143784741102519
+      ]
+    },
+    {
+      "path": "outputs/no_revisit_validation_20261004_195622/staged_dreamer/initial.pt",
+      "keep": "outputs/no_revisit_validation_20261004_195622/staged_dreamer/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 4925255,
+      "allocated": 4927488,
+      "links": 1,
+      "identity": [
+        2050,
+        69607806,
+        4925255,
+        1791144398063666371
+      ]
+    },
+    {
+      "path": "outputs/no_revisit_validation_20261004_195622/staged_mbpo/initial.pt",
+      "keep": "outputs/no_revisit_validation_20261004_195622/staged_mbpo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 3,
+      "bytes": 5212019,
+      "allocated": 5214208,
+      "links": 1,
+      "identity": [
+        2050,
+        69607791,
+        5212019,
+        1791144397791662830
+      ]
+    },
+    {
+      "path": "outputs/no_revisit_validation_20261004_195622/dreamer/initial.pt",
+      "keep": "outputs/no_revisit_validation_20261004_195622/dreamer/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 4923955,
+      "allocated": 4927488,
+      "links": 1,
+      "identity": [
+        2050,
+        69607507,
+        4923955,
+        1791143784641103416
+      ]
+    },
+    {
+      "path": "outputs/no_revisit_validation_20261004_195622/online_ac/initial.pt",
+      "keep": "outputs/no_revisit_validation_20261004_195622/online_ac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 661109,
+      "allocated": 663552,
+      "links": 1,
+      "identity": [
+        2050,
+        69607500,
+        661109,
+        1791143784561104134
+      ]
+    },
+    {
+      "path": "outputs/no_revisit_validation_20261004_195622/staged_online_ac/initial.pt",
+      "keep": "outputs/no_revisit_validation_20261004_195622/staged_online_ac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 3,
+      "bytes": 661749,
+      "allocated": 663552,
+      "links": 1,
+      "identity": [
+        2050,
+        69607782,
+        661749,
+        1791144397415657936
+      ]
+    },
+    {
+      "path": "outputs/dta_so_current_networks_50iter_20261008/montereau_fault_yonne/assignment_0000.pt",
+      "keep": "outputs/dta_so_current_networks_50iter_20261008/montereau_fault_yonne/assignment_0005.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 0,
+      "keep_episode": 5,
+      "bytes": 11269725,
+      "allocated": 11272192,
+      "links": 1,
+      "identity": [
+        2050,
+        71310618,
+        11269725,
+        1791461674054043093
+      ]
+    },
+    {
+      "path": "outputs/dta_so_current_networks_50iter_20261008/montereau_fault_yonne/assignment_0001.pt",
+      "keep": "outputs/dta_so_current_networks_50iter_20261008/montereau_fault_yonne/assignment_0005.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 1,
+      "keep_episode": 5,
+      "bytes": 11491933,
+      "allocated": 11493376,
+      "links": 1,
+      "identity": [
+        2050,
+        71310617,
+        11491933,
+        1791461912705557835
+      ]
+    },
+    {
+      "path": "outputs/dta_so_current_networks_50iter_20261008/coulommiers/assignment_0000.pt",
+      "keep": "outputs/dta_so_current_networks_50iter_20261008/coulommiers/assignment_0040.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 0,
+      "keep_episode": 40,
+      "bytes": 9955037,
+      "allocated": 9957376,
+      "links": 1,
+      "identity": [
+        2050,
+        71310586,
+        9955037,
+        1791461539482300694
+      ]
+    },
+    {
+      "path": "outputs/dta_so_current_networks_50iter_20261008/coulommiers/assignment_0001.pt",
+      "keep": "outputs/dta_so_current_networks_50iter_20261008/coulommiers/assignment_0040.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 1,
+      "keep_episode": 40,
+      "bytes": 9994077,
+      "allocated": 9994240,
+      "links": 1,
+      "identity": [
+        2050,
+        71310585,
+        9994077,
+        1791461588816562862
+      ]
+    },
+    {
+      "path": "outputs/dta_so_current_networks_50iter_20261008/coulommiers/assignment_0005.pt",
+      "keep": "outputs/dta_so_current_networks_50iter_20261008/coulommiers/assignment_0040.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 5,
+      "keep_episode": 40,
+      "bytes": 10077469,
+      "allocated": 10080256,
+      "links": 1,
+      "identity": [
+        2050,
+        71310584,
+        10077469,
+        1791461668390193104
+      ]
+    },
+    {
+      "path": "outputs/dta_so_current_networks_50iter_20261008/coulommiers/assignment_0010.pt",
+      "keep": "outputs/dta_so_current_networks_50iter_20261008/coulommiers/assignment_0040.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 10,
+      "keep_episode": 40,
+      "bytes": 10107293,
+      "allocated": 10108928,
+      "links": 1,
+      "identity": [
+        2050,
+        71310599,
+        10107293,
+        1791461751916207058
+      ]
+    },
+    {
+      "path": "outputs/dta_so_current_networks_50iter_20261008/coulommiers/assignment_0020.pt",
+      "keep": "outputs/dta_so_current_networks_50iter_20261008/coulommiers/assignment_0040.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 20,
+      "keep_episode": 40,
+      "bytes": 10124765,
+      "allocated": 10125312,
+      "links": 1,
+      "identity": [
+        2050,
+        71310622,
+        10124765,
+        1791461913085553128
+      ]
+    },
+    {
+      "path": "outputs/dta_so_current_networks_50iter_20261008/coulommiers/assignment_0030.pt",
+      "keep": "outputs/dta_so_current_networks_50iter_20261008/coulommiers/assignment_0040.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 30,
+      "keep_episode": 40,
+      "bytes": 10140317,
+      "allocated": 10141696,
+      "links": 1,
+      "identity": [
+        2050,
+        71310641,
+        10140317,
+        1791462082336046781
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/ingolstadt_custom/iql/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/ingolstadt_custom/iql/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 566,
+      "bytes": 572413,
+      "allocated": 573440,
+      "links": 2,
+      "identity": [
+        2050,
+        70684799,
+        572413,
+        1791308803835198766
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/ingolstadt_custom/mappo/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/ingolstadt_custom/mappo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 755,
+      "bytes": 4057789,
+      "allocated": 4059136,
+      "links": 2,
+      "identity": [
+        2050,
+        70684804,
+        4057789,
+        1791308803899209833
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/ingolstadt_custom/ippo/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/ingolstadt_custom/ippo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 531,
+      "bytes": 367037,
+      "allocated": 368640,
+      "links": 2,
+      "identity": [
+        2050,
+        70684794,
+        367037,
+        1791308803803193232
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/ingolstadt_custom/mamba/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/ingolstadt_custom/mamba/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 493,
+      "bytes": 41280141,
+      "allocated": 41283584,
+      "links": 2,
+      "identity": [
+        2050,
+        70684806,
+        41280141,
+        1791308804151253370
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/fontenay_en_parisis/iql/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/fontenay_en_parisis/iql/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 92,
+      "bytes": 572413,
+      "allocated": 573440,
+      "links": 2,
+      "identity": [
+        2050,
+        70684841,
+        572413,
+        1791308867309657406
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/fontenay_en_parisis/mappo/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/fontenay_en_parisis/mappo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 99,
+      "bytes": 31632061,
+      "allocated": 31633408,
+      "links": 2,
+      "identity": [
+        2050,
+        70684851,
+        31632061,
+        1791308876459084691
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/fontenay_en_parisis/ippo/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/fontenay_en_parisis/ippo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 84,
+      "bytes": 367037,
+      "allocated": 368640,
+      "links": 2,
+      "identity": [
+        2050,
+        70684846,
+        367037,
+        1791308871174262644
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/fontenay_en_parisis/mamba/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/fontenay_en_parisis/mamba/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 87,
+      "bytes": 41339597,
+      "allocated": 41340928,
+      "links": 2,
+      "identity": [
+        2050,
+        70684801,
+        41339597,
+        1791308867249647985
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/gretz_armainvilliers/iql/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/gretz_armainvilliers/iql/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 405,
+      "bytes": 572413,
+      "allocated": 573440,
+      "links": 2,
+      "identity": [
+        2050,
+        70684815,
+        572413,
+        1791308824050638938
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/gretz_armainvilliers/mappo/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/gretz_armainvilliers/mappo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 563,
+      "bytes": 18934461,
+      "allocated": 18935808,
+      "links": 2,
+      "identity": [
+        2050,
+        70684823,
+        18934461,
+        1791308824754756851
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/gretz_armainvilliers/ippo/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/gretz_armainvilliers/ippo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 425,
+      "bytes": 367037,
+      "allocated": 368640,
+      "links": 2,
+      "identity": [
+        2050,
+        70684819,
+        367037,
+        1791308824170659037
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/gretz_armainvilliers/mamba/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/gretz_armainvilliers/mamba/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 336,
+      "bytes": 41369357,
+      "allocated": 41369600,
+      "links": 2,
+      "identity": [
+        2050,
+        70684811,
+        41369357,
+        1791308823858606743
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/ingolstadt_custom/iql/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/ingolstadt_custom/iql/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 554,
+      "bytes": 572413,
+      "allocated": 573440,
+      "links": 2,
+      "identity": [
+        2050,
+        70684799,
+        572413,
+        1791308803835198766
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/ingolstadt_custom/mappo/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/ingolstadt_custom/mappo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 742,
+      "bytes": 4057789,
+      "allocated": 4059136,
+      "links": 2,
+      "identity": [
+        2050,
+        70684804,
+        4057789,
+        1791308803899209833
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/ingolstadt_custom/ippo/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/ingolstadt_custom/ippo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 519,
+      "bytes": 367037,
+      "allocated": 368640,
+      "links": 2,
+      "identity": [
+        2050,
+        70684794,
+        367037,
+        1791308803803193232
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/ingolstadt_custom/mamba/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/ingolstadt_custom/mamba/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 484,
+      "bytes": 41280141,
+      "allocated": 41283584,
+      "links": 2,
+      "identity": [
+        2050,
+        70684806,
+        41280141,
+        1791308804151253370
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/fontenay_en_parisis/iql/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/fontenay_en_parisis/iql/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 90,
+      "bytes": 572413,
+      "allocated": 573440,
+      "links": 2,
+      "identity": [
+        2050,
+        70684841,
+        572413,
+        1791308867309657406
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/fontenay_en_parisis/mappo/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/fontenay_en_parisis/mappo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 98,
+      "bytes": 31632061,
+      "allocated": 31633408,
+      "links": 2,
+      "identity": [
+        2050,
+        70684851,
+        31632061,
+        1791308876459084691
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/fontenay_en_parisis/ippo/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/fontenay_en_parisis/ippo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 83,
+      "bytes": 367037,
+      "allocated": 368640,
+      "links": 2,
+      "identity": [
+        2050,
+        70684846,
+        367037,
+        1791308871174262644
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/fontenay_en_parisis/mamba/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/fontenay_en_parisis/mamba/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 85,
+      "bytes": 41339597,
+      "allocated": 41340928,
+      "links": 2,
+      "identity": [
+        2050,
+        70684801,
+        41339597,
+        1791308867249647985
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/gretz_armainvilliers/iql/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/gretz_armainvilliers/iql/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 399,
+      "bytes": 572413,
+      "allocated": 573440,
+      "links": 2,
+      "identity": [
+        2050,
+        70684815,
+        572413,
+        1791308824050638938
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/gretz_armainvilliers/mappo/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/gretz_armainvilliers/mappo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 550,
+      "bytes": 18934461,
+      "allocated": 18935808,
+      "links": 2,
+      "identity": [
+        2050,
+        70684823,
+        18934461,
+        1791308824754756851
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/gretz_armainvilliers/ippo/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/gretz_armainvilliers/ippo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 414,
+      "bytes": 367037,
+      "allocated": 368640,
+      "links": 2,
+      "identity": [
+        2050,
+        70684819,
+        367037,
+        1791308824170659037
+      ]
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/gretz_armainvilliers/mamba/initial.pt",
+      "keep": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632/restarts/throughput_20261007_123133/preserved/gretz_armainvilliers/mamba/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 329,
+      "bytes": 41369357,
+      "allocated": 41369600,
+      "links": 2,
+      "identity": [
+        2050,
+        70684811,
+        41369357,
+        1791308823858606743
+      ]
+    },
+    {
+      "path": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000454.pt",
+      "keep": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000465.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 454,
+      "keep_episode": 465,
+      "bytes": 12140187,
+      "allocated": 12140544,
+      "links": 1,
+      "identity": [
+        2050,
+        70422675,
+        12140187,
+        1791191339990725056
+      ]
+    },
+    {
+      "path": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000455.pt",
+      "keep": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000465.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 455,
+      "keep_episode": 465,
+      "bytes": 12140187,
+      "allocated": 12140544,
+      "links": 1,
+      "identity": [
+        2050,
+        70422678,
+        12140187,
+        1791191387846527063
+      ]
+    },
+    {
+      "path": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000456.pt",
+      "keep": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000465.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 456,
+      "keep_episode": 465,
+      "bytes": 12140187,
+      "allocated": 12140544,
+      "links": 1,
+      "identity": [
+        2050,
+        70422677,
+        12140187,
+        1791191441666394046
+      ]
+    },
+    {
+      "path": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000457.pt",
+      "keep": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000465.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 457,
+      "keep_episode": 465,
+      "bytes": 12140187,
+      "allocated": 12140544,
+      "links": 1,
+      "identity": [
+        2050,
+        70422679,
+        12140187,
+        1791191497582346576
+      ]
+    },
+    {
+      "path": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000458.pt",
+      "keep": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000465.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 458,
+      "keep_episode": 465,
+      "bytes": 12140187,
+      "allocated": 12140544,
+      "links": 1,
+      "identity": [
+        2050,
+        70422680,
+        12140187,
+        1791191546814373783
+      ]
+    },
+    {
+      "path": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000459.pt",
+      "keep": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000465.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 459,
+      "keep_episode": 465,
+      "bytes": 12140187,
+      "allocated": 12140544,
+      "links": 1,
+      "identity": [
+        2050,
+        70422681,
+        12140187,
+        1791191597806463493
+      ]
+    },
+    {
+      "path": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000460.pt",
+      "keep": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000465.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 460,
+      "keep_episode": 465,
+      "bytes": 12140187,
+      "allocated": 12140544,
+      "links": 1,
+      "identity": [
+        2050,
+        70422682,
+        12140187,
+        1791191642638589419
+      ]
+    },
+    {
+      "path": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000461.pt",
+      "keep": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000465.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 461,
+      "keep_episode": 465,
+      "bytes": 12140187,
+      "allocated": 12140544,
+      "links": 1,
+      "identity": [
+        2050,
+        70422683,
+        12140187,
+        1791191689702764770
+      ]
+    },
+    {
+      "path": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000462.pt",
+      "keep": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000465.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 462,
+      "keep_episode": 465,
+      "bytes": 12140187,
+      "allocated": 12140544,
+      "links": 1,
+      "identity": [
+        2050,
+        70422684,
+        12140187,
+        1791191735770975539
+      ]
+    },
+    {
+      "path": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000463.pt",
+      "keep": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000465.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 463,
+      "keep_episode": 465,
+      "bytes": 12140187,
+      "allocated": 12140544,
+      "links": 1,
+      "identity": [
+        2050,
+        70422685,
+        12140187,
+        1791191783931233629
+      ]
+    },
+    {
+      "path": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000464.pt",
+      "keep": "outputs/convergence_diagnosis_20261005/real_feedback/checkpoint_000465.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 464,
+      "keep_episode": 465,
+      "bytes": 12140187,
+      "allocated": 12140544,
+      "links": 1,
+      "identity": [
+        2050,
+        70422686,
+        12140187,
+        1791191829643511182
+      ]
+    },
+    {
+      "path": "outputs/montereau_ac_prior_ablation_500_20261011/no_prior/run/initial.pt",
+      "keep": "outputs/montereau_ac_prior_ablation_500_20261011/no_prior/run/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 101,
+      "bytes": 18305781,
+      "allocated": 18309120,
+      "links": 1,
+      "identity": [
+        2050,
+        71589707,
+        18305781,
+        1791716831954083104
+      ]
+    },
+    {
+      "path": "outputs/montereau_ac_prior_ablation_500_20261011/decaying_prior/run/initial.pt",
+      "keep": "outputs/montereau_ac_prior_ablation_500_20261011/decaying_prior/run/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 126,
+      "bytes": 18305845,
+      "allocated": 18309120,
+      "links": 1,
+      "identity": [
+        2050,
+        71590326,
+        18305845,
+        1791716832378091832
+      ]
+    },
+    {
+      "path": "outputs/penalty_baselines_smoke_20261007/iql/initial.pt",
+      "keep": "outputs/penalty_baselines_smoke_20261007/iql/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1,
+      "bytes": 573245,
+      "allocated": 573440,
+      "links": 1,
+      "identity": [
+        2050,
+        71077944,
+        573245,
+        1791393341014704003
+      ]
+    },
+    {
+      "path": "outputs/penalty_baselines_smoke_20261007/mappo/initial.pt",
+      "keep": "outputs/penalty_baselines_smoke_20261007/mappo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1,
+      "bytes": 663357,
+      "allocated": 663552,
+      "links": 1,
+      "identity": [
+        2050,
+        71077933,
+        663357,
+        1791393334058755537
+      ]
+    },
+    {
+      "path": "outputs/penalty_baselines_smoke_20261007/gnac/initial.pt",
+      "keep": "outputs/penalty_baselines_smoke_20261007/gnac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1,
+      "bytes": 866819,
+      "allocated": 868352,
+      "links": 1,
+      "identity": [
+        2050,
+        71077889,
+        866819,
+        1791393307438985757
+      ]
+    },
+    {
+      "path": "outputs/penalty_baselines_smoke_20261007/mbpo/initial.pt",
+      "keep": "outputs/penalty_baselines_smoke_20261007/mbpo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1,
+      "bytes": 5212649,
+      "allocated": 5214208,
+      "links": 1,
+      "identity": [
+        2050,
+        71077911,
+        5212649,
+        1791393321226859898
+      ]
+    },
+    {
+      "path": "outputs/penalty_baselines_smoke_20261007/dreamer/initial.pt",
+      "keep": "outputs/penalty_baselines_smoke_20261007/dreamer/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1,
+      "bytes": 4925885,
+      "allocated": 4927488,
+      "links": 1,
+      "identity": [
+        2050,
+        71077901,
+        4925885,
+        1791393314118922978
+      ]
+    },
+    {
+      "path": "outputs/penalty_baselines_smoke_20261007/ippo/initial.pt",
+      "keep": "outputs/penalty_baselines_smoke_20261007/ippo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1,
+      "bytes": 368189,
+      "allocated": 368640,
+      "links": 1,
+      "identity": [
+        2050,
+        71077922,
+        368189,
+        1791393327882804248
+      ]
+    },
+    {
+      "path": "outputs/penalty_baselines_smoke_20261007/mamba/initial.pt",
+      "keep": "outputs/penalty_baselines_smoke_20261007/mamba/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1,
+      "bytes": 41883661,
+      "allocated": 41885696,
+      "links": 1,
+      "identity": [
+        2050,
+        71077955,
+        41883661,
+        1791393348034655523
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/iql/initial.pt",
+      "keep": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/iql/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 895,
+      "bytes": 573309,
+      "allocated": 573440,
+      "links": 1,
+      "identity": [
+        2050,
+        71444204,
+        573309,
+        1791568369784276368
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/mappo/initial.pt",
+      "keep": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/mappo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1647,
+      "bytes": 18186173,
+      "allocated": 18186240,
+      "links": 1,
+      "identity": [
+        2050,
+        71444209,
+        18186173,
+        1791568370332289124
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/gnac/initial.pt",
+      "keep": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/gnac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 668,
+      "bytes": 92418179,
+      "allocated": 92426240,
+      "links": 1,
+      "identity": [
+        2050,
+        71571611,
+        92418179,
+        1791632372253194528
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/mbpo/initial.pt",
+      "keep": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/mbpo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 11,
+      "bytes": 593604201,
+      "allocated": 593608704,
+      "links": 1,
+      "identity": [
+        2050,
+        71697791,
+        593604201,
+        1791732444851074436
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/dreamer/initial.pt",
+      "keep": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/dreamer/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 239,
+      "bytes": 79543613,
+      "allocated": 79548416,
+      "links": 1,
+      "identity": [
+        2050,
+        71571603,
+        79543613,
+        1791632369717373571
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/ippo/initial.pt",
+      "keep": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/ippo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2359,
+      "bytes": 368317,
+      "allocated": 368640,
+      "links": 1,
+      "identity": [
+        2050,
+        71444198,
+        368317,
+        1791568369292264917
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/online_ac/initial.pt",
+      "keep": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/online_ac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2258,
+      "bytes": 18184309,
+      "allocated": 18186240,
+      "links": 1,
+      "identity": [
+        2050,
+        71444194,
+        18184309,
+        1791568369116260821
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/mamba/initial.pt",
+      "keep": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/montereau_fault_yonne/mamba/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 181,
+      "bytes": 156047501,
+      "allocated": 156053504,
+      "links": 1,
+      "identity": [
+        2050,
+        71444385,
+        156047501,
+        1791568721404753795
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/iql/initial.pt",
+      "keep": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/iql/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1060,
+      "bytes": 573245,
+      "allocated": 573440,
+      "links": 1,
+      "identity": [
+        2050,
+        71444180,
+        573245,
+        1791568368208239693
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/mappo/initial.pt",
+      "keep": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/mappo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1302,
+      "bytes": 18927485,
+      "allocated": 18927616,
+      "links": 1,
+      "identity": [
+        2050,
+        71444189,
+        18927485,
+        1791568369008258307
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/gnac/initial.pt",
+      "keep": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/gnac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1193,
+      "bytes": 99517763,
+      "allocated": 99524608,
+      "links": 1,
+      "identity": [
+        2050,
+        71444176,
+        99517763,
+        1791568367792230014
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/mbpo/initial.pt",
+      "keep": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/mbpo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 499,
+      "bytes": 618485801,
+      "allocated": 618491904,
+      "links": 1,
+      "identity": [
+        2050,
+        71444075,
+        618485801,
+        1791568373528363554
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/dreamer/initial.pt",
+      "keep": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/dreamer/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 120,
+      "bytes": 82690941,
+      "allocated": 82698240,
+      "links": 1,
+      "identity": [
+        2050,
+        71444389,
+        82690941,
+        1791568722028769255
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/ippo/initial.pt",
+      "keep": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/ippo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1955,
+      "bytes": 368253,
+      "allocated": 368640,
+      "links": 1,
+      "identity": [
+        2050,
+        71444173,
+        368253,
+        1791568366860208334
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/online_ac/initial.pt",
+      "keep": "outputs/city_baselines_v5_1500_noprior_penalty_20261009/coulommiers/online_ac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1808,
+      "bytes": 18925685,
+      "allocated": 18927616,
+      "links": 1,
+      "identity": [
+        2050,
+        71444167,
+        18925685,
+        1791568366448198752
+      ]
+    },
+    {
+      "path": "outputs/shortedge10m_completion_dta5_20261007/montereau_fault_yonne/assignment_0001.pt",
+      "keep": "outputs/shortedge10m_completion_dta5_20261007/montereau_fault_yonne/assignment_0005.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 1,
+      "keep_episode": 5,
+      "bytes": 12004445,
+      "allocated": 12005376,
+      "links": 1,
+      "identity": [
+        2050,
+        71077538,
+        12004445,
+        1791388136181348194
+      ]
+    },
+    {
+      "path": "outputs/shortedge10m_completion_dta5_20261007/montereau_fault_yonne/assignment_0002.pt",
+      "keep": "outputs/shortedge10m_completion_dta5_20261007/montereau_fault_yonne/assignment_0005.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 2,
+      "keep_episode": 5,
+      "bytes": 12082461,
+      "allocated": 12083200,
+      "links": 1,
+      "identity": [
+        2050,
+        71077537,
+        12082461,
+        1791388334186941464
+      ]
+    },
+    {
+      "path": "outputs/shortedge10m_completion_dta5_20261007/montereau_fault_yonne/assignment_0003.pt",
+      "keep": "outputs/shortedge10m_completion_dta5_20261007/montereau_fault_yonne/assignment_0005.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 3,
+      "keep_episode": 5,
+      "bytes": 12174685,
+      "allocated": 12177408,
+      "links": 1,
+      "identity": [
+        2050,
+        71077770,
+        12174685,
+        1791388427379756740
+      ]
+    },
+    {
+      "path": "outputs/shortedge10m_completion_dta5_20261007/montereau_fault_yonne/assignment_0004.pt",
+      "keep": "outputs/shortedge10m_completion_dta5_20261007/montereau_fault_yonne/assignment_0005.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 4,
+      "keep_episode": 5,
+      "bytes": 12256157,
+      "allocated": 12259328,
+      "links": 1,
+      "identity": [
+        2050,
+        71077780,
+        12256157,
+        1791388522644623630
+      ]
+    },
+    {
+      "path": "outputs/shortedge10m_completion_dta5_20261007/coulommiers/assignment_0001.pt",
+      "keep": "outputs/shortedge10m_completion_dta5_20261007/coulommiers/assignment_0005.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 1,
+      "keep_episode": 5,
+      "bytes": 10716957,
+      "allocated": 10719232,
+      "links": 1,
+      "identity": [
+        2050,
+        71077323,
+        10716957,
+        1791387949460083176
+      ]
+    },
+    {
+      "path": "outputs/shortedge10m_completion_dta5_20261007/coulommiers/assignment_0002.pt",
+      "keep": "outputs/shortedge10m_completion_dta5_20261007/coulommiers/assignment_0005.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 2,
+      "keep_episode": 5,
+      "bytes": 10745437,
+      "allocated": 10747904,
+      "links": 1,
+      "identity": [
+        2050,
+        71077322,
+        10745437,
+        1791387991892345575
+      ]
+    },
+    {
+      "path": "outputs/shortedge10m_completion_dta5_20261007/coulommiers/assignment_0003.pt",
+      "keep": "outputs/shortedge10m_completion_dta5_20261007/coulommiers/assignment_0005.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 3,
+      "keep_episode": 5,
+      "bytes": 10749277,
+      "allocated": 10752000,
+      "links": 1,
+      "identity": [
+        2050,
+        71077324,
+        10749277,
+        1791388033092615413
+      ]
+    },
+    {
+      "path": "outputs/shortedge10m_completion_dta5_20261007/coulommiers/assignment_0004.pt",
+      "keep": "outputs/shortedge10m_completion_dta5_20261007/coulommiers/assignment_0005.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 4,
+      "keep_episode": 5,
+      "bytes": 10773853,
+      "allocated": 10776576,
+      "links": 1,
+      "identity": [
+        2050,
+        71077530,
+        10773853,
+        1791388080020939361
+      ]
+    },
+    {
+      "path": "outputs/incident_ablation_dta_sp_20261007/no_incident/assignment_0000.pt",
+      "keep": "outputs/incident_ablation_dta_sp_20261007/no_incident/assignment_0050.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 0,
+      "keep_episode": 50,
+      "bytes": 1053789,
+      "allocated": 1056768,
+      "links": 1,
+      "identity": [
+        2050,
+        70815869,
+        1053789,
+        1791374414844813673
+      ]
+    },
+    {
+      "path": "outputs/incident_ablation_dta_sp_20261007/no_incident/assignment_0001.pt",
+      "keep": "outputs/incident_ablation_dta_sp_20261007/no_incident/assignment_0050.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 1,
+      "keep_episode": 50,
+      "bytes": 1056797,
+      "allocated": 1060864,
+      "links": 1,
+      "identity": [
+        2050,
+        70815868,
+        1056797,
+        1791374439614394950
+      ]
+    },
+    {
+      "path": "outputs/incident_ablation_dta_sp_20261007/no_incident/assignment_0010.pt",
+      "keep": "outputs/incident_ablation_dta_sp_20261007/no_incident/assignment_0050.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 10,
+      "keep_episode": 50,
+      "bytes": 1061789,
+      "allocated": 1064960,
+      "links": 1,
+      "identity": [
+        2050,
+        70815874,
+        1061789,
+        1791374534380080861
+      ]
+    },
+    {
+      "path": "outputs/incident_ablation_dta_sp_20261007/no_incident/assignment_0025.pt",
+      "keep": "outputs/incident_ablation_dta_sp_20261007/no_incident/assignment_0050.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 25,
+      "keep_episode": 50,
+      "bytes": 1062429,
+      "allocated": 1064960,
+      "links": 1,
+      "identity": [
+        2050,
+        70815870,
+        1062429,
+        1791374657802745878
+      ]
+    },
+    {
+      "path": "outputs/incident_ablation_dta_sp_20261007/with_incident/assignment_0000.pt",
+      "keep": "outputs/incident_ablation_dta_sp_20261007/with_incident/assignment_0050.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 0,
+      "keep_episode": 50,
+      "bytes": 1053789,
+      "allocated": 1056768,
+      "links": 1,
+      "identity": [
+        2050,
+        70815872,
+        1053789,
+        1791374422557310572
+      ]
+    },
+    {
+      "path": "outputs/incident_ablation_dta_sp_20261007/with_incident/assignment_0001.pt",
+      "keep": "outputs/incident_ablation_dta_sp_20261007/with_incident/assignment_0050.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 1,
+      "keep_episode": 50,
+      "bytes": 1059037,
+      "allocated": 1060864,
+      "links": 1,
+      "identity": [
+        2050,
+        70815871,
+        1059037,
+        1791374454235308874
+      ]
+    },
+    {
+      "path": "outputs/incident_ablation_dta_sp_20261007/with_incident/assignment_0010.pt",
+      "keep": "outputs/incident_ablation_dta_sp_20261007/with_incident/assignment_0050.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 10,
+      "keep_episode": 50,
+      "bytes": 1065885,
+      "allocated": 1069056,
+      "links": 1,
+      "identity": [
+        2050,
+        70815875,
+        1065885,
+        1791374540364422076
+      ]
+    },
+    {
+      "path": "outputs/incident_ablation_dta_sp_20261007/with_incident/assignment_0025.pt",
+      "keep": "outputs/incident_ablation_dta_sp_20261007/with_incident/assignment_0050.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 25,
+      "keep_episode": 50,
+      "bytes": 1069149,
+      "allocated": 1073152,
+      "links": 1,
+      "identity": [
+        2050,
+        70815884,
+        1069149,
+        1791374680687903190
+      ]
+    },
+    {
+      "path": "outputs/maule_nangis_dta_sp_20261007/maule/assignment_0000.pt",
+      "keep": "outputs/maule_nangis_dta_sp_20261007/maule/assignment_0025.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 0,
+      "keep_episode": 25,
+      "bytes": 1944349,
+      "allocated": 1945600,
+      "links": 1,
+      "identity": [
+        2050,
+        70946879,
+        1944349,
+        1791377928184184178
+      ]
+    },
+    {
+      "path": "outputs/maule_nangis_dta_sp_20261007/maule/assignment_0001.pt",
+      "keep": "outputs/maule_nangis_dta_sp_20261007/maule/assignment_0025.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 1,
+      "keep_episode": 25,
+      "bytes": 1950813,
+      "allocated": 1953792,
+      "links": 1,
+      "identity": [
+        2050,
+        70946878,
+        1950813,
+        1791378065079321576
+      ]
+    },
+    {
+      "path": "outputs/maule_nangis_dta_sp_20261007/maule/assignment_0010.pt",
+      "keep": "outputs/maule_nangis_dta_sp_20261007/maule/assignment_0025.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 10,
+      "keep_episode": 25,
+      "bytes": 1992285,
+      "allocated": 1994752,
+      "links": 1,
+      "identity": [
+        2050,
+        70946874,
+        1992285,
+        1791378449144469768
+      ]
+    },
+    {
+      "path": "outputs/maule_nangis_dta_sp_20261007/nangis/assignment_0000.pt",
+      "keep": "outputs/maule_nangis_dta_sp_20261007/nangis/assignment_0050.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 0,
+      "keep_episode": 50,
+      "bytes": 3630173,
+      "allocated": 3633152,
+      "links": 1,
+      "identity": [
+        2050,
+        70946869,
+        3630173,
+        1791377795377183058
+      ]
+    },
+    {
+      "path": "outputs/maule_nangis_dta_sp_20261007/nangis/assignment_0001.pt",
+      "keep": "outputs/maule_nangis_dta_sp_20261007/nangis/assignment_0050.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 1,
+      "keep_episode": 50,
+      "bytes": 3633885,
+      "allocated": 3637248,
+      "links": 1,
+      "identity": [
+        2050,
+        70946868,
+        3633885,
+        1791377836518107563
+      ]
+    },
+    {
+      "path": "outputs/maule_nangis_dta_sp_20261007/nangis/assignment_0010.pt",
+      "keep": "outputs/maule_nangis_dta_sp_20261007/nangis/assignment_0050.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 10,
+      "keep_episode": 50,
+      "bytes": 3651357,
+      "allocated": 3653632,
+      "links": 1,
+      "identity": [
+        2050,
+        70946872,
+        3651357,
+        1791377967297076530
+      ]
+    },
+    {
+      "path": "outputs/maule_nangis_dta_sp_20261007/nangis/assignment_0025.pt",
+      "keep": "outputs/maule_nangis_dta_sp_20261007/nangis/assignment_0050.pt",
+      "reason": "older numbered snapshot in same directory",
+      "old_episode": 25,
+      "keep_episode": 50,
+      "bytes": 3662685,
+      "allocated": 3665920,
+      "links": 1,
+      "identity": [
+        2050,
+        70946877,
+        3662685,
+        1791378165553646522
+      ]
+    },
+    {
+      "path": "outputs/baseline_throughput_first_two_20261002/cpu_online_ac_old/initial.pt",
+      "keep": "outputs/baseline_throughput_first_two_20261002/cpu_online_ac_old/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 661173,
+      "allocated": 663552,
+      "links": 1,
+      "identity": [
+        2050,
+        70290402,
+        661173,
+        1790935591089356123
+      ]
+    },
+    {
+      "path": "outputs/baseline_throughput_first_two_20261002/cpu_online_ac_new/initial.pt",
+      "keep": "outputs/baseline_throughput_first_two_20261002/cpu_online_ac_new/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 661109,
+      "allocated": 663552,
+      "links": 1,
+      "identity": [
+        2050,
+        70290413,
+        661109,
+        1790935597273542361
+      ]
+    },
+    {
+      "path": "outputs/baseline_throughput_first_two_20261002/gpu_mbpo/initial.pt",
+      "keep": "outputs/baseline_throughput_first_two_20261002/gpu_mbpo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 5211625,
+      "allocated": 5214208,
+      "links": 1,
+      "identity": [
+        2050,
+        70290384,
+        5211625,
+        1790935366170605637
+      ]
+    },
+    {
+      "path": "outputs/baseline_throughput_first_two_20261002/gpu_dreamer/initial.pt",
+      "keep": "outputs/baseline_throughput_first_two_20261002/gpu_dreamer/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2,
+      "bytes": 4924861,
+      "allocated": 4927488,
+      "links": 1,
+      "identity": [
+        2050,
+        70290373,
+        4924861,
+        1790935351826176897
+      ]
+    },
+    {
+      "path": "outputs/baseline_algorithm_audit_20261007/mamba_review/toy_v2_final/initial.pt",
+      "keep": "outputs/baseline_algorithm_audit_20261007/mamba_review/toy_v2_final/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 3,
+      "bytes": 41879907,
+      "allocated": 41881600,
+      "links": 1,
+      "identity": [
+        2050,
+        70947260,
+        41879907,
+        1791387145816830178
+      ]
+    },
+    {
+      "path": "outputs/baseline_algorithm_audit_20261007/mamba_review/toy_v2/initial.pt",
+      "keep": "outputs/baseline_algorithm_audit_20261007/mamba_review/toy_v2/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 3,
+      "bytes": 41879779,
+      "allocated": 41881600,
+      "links": 1,
+      "identity": [
+        2050,
+        70947158,
+        41879779,
+        1791387019678801759
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/iql/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/iql/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 4271,
+      "bytes": 573309,
+      "allocated": 573440,
+      "links": 1,
+      "identity": [
+        2050,
+        71312039,
+        573309,
+        1791464309484025770
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 5000,
+      "bytes": 1007940,
+      "allocated": 1011712,
+      "links": 1,
+      "identity": [
+        2050,
+        71311860,
+        1007940,
+        1791464097105751361
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/mappo/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/mappo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2754,
+      "bytes": 4059069,
+      "allocated": 4059136,
+      "links": 1,
+      "identity": [
+        2050,
+        71311877,
+        4059069,
+        1791464098105762012
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 5000,
+      "bytes": 7170627,
+      "allocated": 7172096,
+      "links": 1,
+      "identity": [
+        2050,
+        71434649,
+        7170627,
+        1791524288991050346
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2222,
+      "bytes": 19383741,
+      "allocated": 19386368,
+      "links": 1,
+      "identity": [
+        2050,
+        71311869,
+        19383741,
+        1791464097913759967
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 5000,
+      "bytes": 368317,
+      "allocated": 368640,
+      "links": 1,
+      "identity": [
+        2050,
+        71311872,
+        368317,
+        1791464097893759753
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 5000,
+      "bytes": 4057205,
+      "allocated": 4059136,
+      "links": 1,
+      "identity": [
+        2050,
+        71311865,
+        4057205,
+        1791464097369754173
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/mamba/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/mamba/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1529,
+      "bytes": 64001421,
+      "allocated": 64004096,
+      "links": 1,
+      "identity": [
+        2050,
+        71312257,
+        64001421,
+        1791465218961916940
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/montereau_fault_yonne/iql/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/montereau_fault_yonne/iql/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 125,
+      "bytes": 573309,
+      "allocated": 573440,
+      "links": 1,
+      "identity": [
+        2050,
+        71434659,
+        573309,
+        1791524300219334644
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/montereau_fault_yonne/dta/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/montereau_fault_yonne/dta/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 2499,
+      "bytes": 11148932,
+      "allocated": 11149312,
+      "links": 1,
+      "identity": [
+        2050,
+        71311893,
+        11148932,
+        1791464110809897368
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/montereau_fault_yonne/mappo/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/montereau_fault_yonne/mappo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 499,
+      "bytes": 18186173,
+      "allocated": 18186240,
+      "links": 1,
+      "identity": [
+        2050,
+        71313289,
+        18186173,
+        1791466044179298027
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/montereau_fault_yonne/ippo/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/montereau_fault_yonne/ippo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 207,
+      "bytes": 368317,
+      "allocated": 368640,
+      "links": 1,
+      "identity": [
+        2050,
+        71434654,
+        368317,
+        1791524300167333327
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/montereau_fault_yonne/online_ac/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/montereau_fault_yonne/online_ac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 437,
+      "bytes": 18184309,
+      "allocated": 18186240,
+      "links": 1,
+      "identity": [
+        2050,
+        71311903,
+        18184309,
+        1791464110025889013
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/iql/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/iql/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 540,
+      "bytes": 573309,
+      "allocated": 573440,
+      "links": 1,
+      "identity": [
+        2050,
+        71312879,
+        573309,
+        1791465562081674053
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/dta/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/dta/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 5000,
+      "bytes": 9868996,
+      "allocated": 9871360,
+      "links": 1,
+      "identity": [
+        2050,
+        71311900,
+        9868996,
+        1791464110065889439
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/mappo/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/mappo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1327,
+      "bytes": 18927549,
+      "allocated": 18927616,
+      "links": 1,
+      "identity": [
+        2050,
+        71312654,
+        18927549,
+        1791465230858047089
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/gnac/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/gnac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 265,
+      "bytes": 99517827,
+      "allocated": 99524608,
+      "links": 1,
+      "identity": [
+        2050,
+        71434664,
+        99517827,
+        1791524301171358764
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/mbpo/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/mbpo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 265,
+      "bytes": 618485801,
+      "allocated": 618491904,
+      "links": 1,
+      "identity": [
+        2050,
+        71434669,
+        618485801,
+        1791524305843477169
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/ippo/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/ippo/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1180,
+      "bytes": 368317,
+      "allocated": 368640,
+      "links": 1,
+      "identity": [
+        2050,
+        71312649,
+        368317,
+        1791465230514043325
+      ]
+    },
+    {
+      "path": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/online_ac/initial.pt",
+      "keep": "outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/coulommiers/online_ac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 1040,
+      "bytes": 18925685,
+      "allocated": 18927616,
+      "links": 1,
+      "identity": [
+        2050,
+        71311891,
+        18925685,
+        1791464107101857850
+      ]
+    },
+    {
+      "path": "outputs/city_online_ac_dta_so_poisson_seed42_20261001/ingolstadt_custom/dta_so/initial.pt",
+      "keep": "outputs/city_online_ac_dta_so_poisson_seed42_20261001/ingolstadt_custom/dta_so/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 382,
+      "bytes": 1054249,
+      "allocated": 1056768,
+      "links": 1,
+      "identity": [
+        2050,
+        69730764,
+        1054249,
+        1790872503926055735
+      ]
+    },
+    {
+      "path": "outputs/city_online_ac_dta_so_poisson_seed42_20261001/ingolstadt_custom/online_ac/initial.pt",
+      "keep": "outputs/city_online_ac_dta_so_poisson_seed42_20261001/ingolstadt_custom/online_ac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 49,
+      "bytes": 4056374,
+      "allocated": 4059136,
+      "links": 1,
+      "identity": [
+        2050,
+        69730776,
+        4056374,
+        1790872601381454842
+      ]
+    },
+    {
+      "path": "outputs/city_online_ac_dta_so_poisson_seed42_20261001/fontenay_en_parisis/dta_so/initial.pt",
+      "keep": "outputs/city_online_ac_dta_so_poisson_seed42_20261001/fontenay_en_parisis/dta_so/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 49,
+      "bytes": 46708265,
+      "allocated": 46714880,
+      "links": 1,
+      "identity": [
+        2050,
+        69730801,
+        46708265,
+        1790872681150925011
+      ]
+    },
+    {
+      "path": "outputs/city_online_ac_dta_so_poisson_seed42_20261001/fontenay_en_parisis/online_ac/initial.pt",
+      "keep": "outputs/city_online_ac_dta_so_poisson_seed42_20261001/fontenay_en_parisis/online_ac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 13,
+      "bytes": 31630646,
+      "allocated": 31633408,
+      "links": 1,
+      "identity": [
+        2050,
+        69730806,
+        31630646,
+        1790873147687801597
+      ]
+    },
+    {
+      "path": "outputs/city_online_ac_dta_so_poisson_seed42_20261001/gretz_armainvilliers/dta_so/initial.pt",
+      "keep": "outputs/city_online_ac_dta_so_poisson_seed42_20261001/gretz_armainvilliers/dta_so/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 180,
+      "bytes": 10543593,
+      "allocated": 10547200,
+      "links": 1,
+      "identity": [
+        2050,
+        69730770,
+        10543593,
+        1790872530780181136
+      ]
+    },
+    {
+      "path": "outputs/city_online_ac_dta_so_poisson_seed42_20261001/gretz_armainvilliers/online_ac/initial.pt",
+      "keep": "outputs/city_online_ac_dta_so_poisson_seed42_20261001/gretz_armainvilliers/online_ac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 49,
+      "bytes": 18933046,
+      "allocated": 18935808,
+      "links": 1,
+      "identity": [
+        2050,
+        69730798,
+        18933046,
+        1790872674366478105
+      ]
+    },
+    {
+      "path": "outputs/city_online_ac_dta_so_individual_timeout_seed42_20261001/ingolstadt_custom/dta_so/initial.pt",
+      "keep": "outputs/city_online_ac_dta_so_individual_timeout_seed42_20261001/ingolstadt_custom/dta_so/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 500,
+      "bytes": 1054249,
+      "allocated": 1056768,
+      "links": 1,
+      "identity": [
+        2050,
+        69730898,
+        1054249,
+        1790877206675461007
+      ]
+    },
+    {
+      "path": "outputs/city_online_ac_dta_so_individual_timeout_seed42_20261001/ingolstadt_custom/online_ac/initial.pt",
+      "keep": "outputs/city_online_ac_dta_so_individual_timeout_seed42_20261001/ingolstadt_custom/online_ac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 500,
+      "bytes": 4056438,
+      "allocated": 4059136,
+      "links": 1,
+      "identity": [
+        2050,
+        69730909,
+        4056438,
+        1790877307950361531
+      ]
+    },
+    {
+      "path": "outputs/city_online_ac_dta_so_individual_timeout_seed42_20261001/fontenay_en_parisis/dta_so/initial.pt",
+      "keep": "outputs/city_online_ac_dta_so_individual_timeout_seed42_20261001/fontenay_en_parisis/dta_so/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 500,
+      "bytes": 46708329,
+      "allocated": 46714880,
+      "links": 1,
+      "identity": [
+        2050,
+        69730920,
+        46708329,
+        1790877387832533574
+      ]
+    },
+    {
+      "path": "outputs/city_online_ac_dta_so_individual_timeout_seed42_20261001/fontenay_en_parisis/online_ac/initial.pt",
+      "keep": "outputs/city_online_ac_dta_so_individual_timeout_seed42_20261001/fontenay_en_parisis/online_ac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 500,
+      "bytes": 31630710,
+      "allocated": 31633408,
+      "links": 1,
+      "identity": [
+        2050,
+        69730924,
+        31630710,
+        1790877830383307846
+      ]
+    },
+    {
+      "path": "outputs/city_online_ac_dta_so_individual_timeout_seed42_20261001/gretz_armainvilliers/dta_so/initial.pt",
+      "keep": "outputs/city_online_ac_dta_so_individual_timeout_seed42_20261001/gretz_armainvilliers/dta_so/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 500,
+      "bytes": 10543593,
+      "allocated": 10547200,
+      "links": 1,
+      "identity": [
+        2050,
+        69730903,
+        10543593,
+        1790877228628105163
+      ]
+    },
+    {
+      "path": "outputs/city_online_ac_dta_so_individual_timeout_seed42_20261001/gretz_armainvilliers/online_ac/initial.pt",
+      "keep": "outputs/city_online_ac_dta_so_individual_timeout_seed42_20261001/gretz_armainvilliers/online_ac/latest.pt",
+      "reason": "initial episode 0 superseded by trained checkpoint",
+      "old_episode": 0,
+      "keep_episode": 500,
+      "bytes": 18933110,
+      "allocated": 18935808,
+      "links": 1,
+      "identity": [
+        2050,
+        69730917,
+        18933110,
+        1790877369300037831
+      ]
+    }
+  ],
+  "skipped_initial": [
+    {
+      "path": "outputs/shortest_ingolstadt_custom_seed42_20260930/initial.pt",
+      "old_episode": 0,
+      "latest_episode": 0
+    },
+    {
+      "path": "outputs/shortest_gretz_armainvilliers_seed42_20260930/initial.pt",
+      "old_episode": 0,
+      "latest_episode": 0
+    },
+    {
+      "path": "outputs/shortest_fontenay_en_parisis_seed42_20260930/initial.pt",
+      "old_episode": 0,
+      "latest_episode": 0
+    },
+    {
+      "path": "outputs/montereau_dynamic_prior_ac_500_20261011/before_collection_speed_migration/initial.pt",
+      "old_episode": 0,
+      "latest_episode": 36
+    },
+    {
+      "path": "outputs/montereau_dynamic_prior_ac_500_20261011/before_actor_only_evaluation/initial.pt",
+      "old_episode": 0,
+      "latest_episode": 183
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/fontenay_en_parisis/gnac/initial.pt",
+      "old_episode": 0,
+      "latest_episode": 0
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/fontenay_en_parisis/mbpo/initial.pt",
+      "old_episode": 0,
+      "latest_episode": 0
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/fontenay_en_parisis/dreamer/initial.pt",
+      "old_episode": 0,
+      "latest_episode": 0
+    },
+    {
+      "path": "outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101/fontenay_en_parisis/online_ac/initial.pt",
+      "old_episode": 0,
+      "latest_episode": 0
+    }
+  ]
+}

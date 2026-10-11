@@ -1,0 +1,9 @@
+{
+  "score": 94,
+  "verdict": "pass",
+  "category_match": true,
+  "differences": [],
+  "suggestions": [],
+  "reasoning": "Full and early views have readable labels and consistent method colors. Training raw values are faint, evaluation ranges and holdout markers are explicit. No reference image was supplied.",
+  "next_actions": []
+}

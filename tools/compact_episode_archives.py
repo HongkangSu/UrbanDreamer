@@ -168,7 +168,7 @@ def watch(root: Path, *, workers: int, interval: float) -> None:
         for run in manifest['runs']:
             state_path = Path(run['state'])
             state = json.loads(state_path.read_text()) if state_path.exists() else {}
-            all_done &= state.get('status') in {'completed', 'failed', 'blocked_disk', 'incomplete_archives'}
+            all_done &= state.get('status') in {'completed', 'failed', 'blocked_disk', 'incomplete_archives', 'blocked_gpu_capacity'}
             try:
                 boundary = committed_episode(run)
             except (OSError, ValueError, StopIteration, zipfile.BadZipFile) as error:

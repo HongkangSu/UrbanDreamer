@@ -40,7 +40,8 @@ def test_city_configs_use_repository_network_bundles() -> None:
         assert inputs["network_dir"] == bundle_path
         assert set(inputs) == {"network_name", "network_dir"}
         assert config["simulation"]["vehicle_max_speed_mps"] == 40.0
-        assert config["run"]["output_dir"] == f"../outputs/{city_name}"
+        assert config["run"]["output_dir"] == f"../outputs/{city_name}_per_transition_pretrain_eventq_meso"
+        assert config["simulation"]["traffic_model"] == 'meso'
 
 
 def test_package_exposes_only_the_supported_mainline_api() -> None:
@@ -59,22 +60,38 @@ def test_mainline_has_one_small_semantic_module_tree() -> None:
         "learning/__init__.py",
         "learning/baselines/__init__.py",
         "learning/baselines/common.py",
+        "learning/baselines/collection_policy.py",
         "learning/baselines/dreamer.py",
         "learning/baselines/dta.py",
         "learning/baselines/gnac.py",
+        "learning/baselines/iql.py",
+        "learning/baselines/mamba.py",
+        "learning/baselines/mamba_core/__init__.py",
+        "learning/baselines/mamba_core/config.py",
+        "learning/baselines/mamba_core/networks.py",
+        "learning/baselines/ppo.py",
         "learning/baselines/mbpo.py",
         "learning/observations.py",
         "learning/episode_archive.py",
+        "learning/codec_training.py",
+        "learning/cohort_targets.py",
+        "learning/pretrain_cache.py",
+        "learning/action_events.py",
+        "learning/offline_data.py",
         "learning/imagination.py",
+        "learning/parallel_imagination.py",
         "learning/replay.py",
+        "learning/sumo_sampling.py",
         "learning/training.py",
         "models/__init__.py",
         "models/policy.py",
+        "models/event_critic.py",
         "models/world_model.py",
         "traffic/__init__.py",
         "traffic/demand.py",
         "traffic/environment.py",
         "traffic/event_session.py",
+        "traffic/simulation_settings.py",
         "traffic/routing.py",
         "traffic/topology.py",
         "workflow/__init__.py",

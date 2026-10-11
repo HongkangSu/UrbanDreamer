@@ -1,0 +1,220 @@
+{
+  "utc": "2026-10-11T11:18:50.807992+00:00",
+  "phase": "incremental_cache_running_supplement_queues_active",
+  "output_root": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/two_city_urbandreamer_pretrain_supplement_20261011",
+  "additional_full_corpus_epochs": 1,
+  "source_files_verified": 209,
+  "cities": {
+    "coulommiers": {
+      "preparation": {
+        "added_unique_trajectories": 3946,
+        "base_config": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/two_city_urbandreamer_pretrain_supplement_20261011/coulommiers/base_config.toml",
+        "census_dir": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/two_city_urbandreamer_pretrain_supplement_20261011/coulommiers/census",
+        "city": "coulommiers",
+        "committed_bounds": {
+          "dreamer": {
+            "committed_episode": 120,
+            "files": 120
+          },
+          "gnac": {
+            "committed_episode": 1055,
+            "files": 1055
+          },
+          "ippo": {
+            "committed_episode": 1823,
+            "files": 1823
+          },
+          "iql": {
+            "committed_episode": 948,
+            "files": 948
+          },
+          "mamba": {
+            "committed_episode": 488,
+            "files": 477
+          },
+          "mappo": {
+            "committed_episode": 1302,
+            "files": 1302
+          },
+          "mbpo": {
+            "committed_episode": 499,
+            "files": 499
+          },
+          "online_ac": {
+            "committed_episode": 1658,
+            "files": 1634
+          }
+        },
+        "duplicates": 4,
+        "frozen_files": 7858,
+        "full_train_episodes": 6638,
+        "full_validation_episodes": 1216,
+        "heldout_demand_groups": 285,
+        "latest_committed_files": 7858,
+        "methods": {
+          "dreamer": 120,
+          "gnac": 1055,
+          "ippo": 1823,
+          "iql": 948,
+          "mamba": 477,
+          "mappo": 1302,
+          "mbpo": 499,
+          "online_ac": 1634
+        },
+        "new_census_dir": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/two_city_urbandreamer_pretrain_supplement_20261011/coulommiers/new_census",
+        "new_demand_groups": 748,
+        "new_files": 3946,
+        "new_methods": {
+          "gnac": 697,
+          "ippo": 748,
+          "iql": 570,
+          "mamba": 293,
+          "mappo": 738,
+          "online_ac": 900
+        },
+        "pilot_dir": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/two_city_urbandreamer_pretrain_supplement_20261011/coulommiers/pilot",
+        "previous_city_dir": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/two_city_urbandreamer_pretrain_20261010/coulommiers",
+        "previous_demand_groups": 1075,
+        "previous_files": 3912,
+        "previous_methods": {
+          "dreamer": 120,
+          "gnac": 358,
+          "ippo": 1075,
+          "iql": 378,
+          "mamba": 184,
+          "mappo": 564,
+          "mbpo": 499,
+          "online_ac": 734
+        },
+        "previous_partition_preserved": true,
+        "previous_unique_trajectories": 3908,
+        "unique_trajectories": 7854
+      },
+      "freeze": "2026-10-11T11:12:13.471071+00:00",
+      "supervisor": {
+        "source_dir": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/two_city_urbandreamer_pretrain_supplement_20261011/source",
+        "device": "cuda:0",
+        "previous_city_dir": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/two_city_urbandreamer_pretrain_20261010/coulommiers",
+        "stages": {},
+        "phase": "waiting_for_supplement_cache",
+        "child_pids": {},
+        "pid": 648916,
+        "heartbeat_unix_seconds": 1791717524.9524314,
+        "utc": "2026-10-11 11:18:44 UTC"
+      },
+      "verified_reuse_receipts": 1089
+    },
+    "montereau_fault_yonne": {
+      "preparation": {
+        "added_unique_trajectories": 4449,
+        "base_config": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/two_city_urbandreamer_pretrain_supplement_20261011/montereau_fault_yonne/base_config.toml",
+        "census_dir": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/two_city_urbandreamer_pretrain_supplement_20261011/montereau_fault_yonne/census",
+        "city": "montereau_fault_yonne",
+        "committed_bounds": {
+          "dreamer": {
+            "committed_episode": 205,
+            "files": 205
+          },
+          "gnac": {
+            "committed_episode": 569,
+            "files": 569
+          },
+          "ippo": {
+            "committed_episode": 2201,
+            "files": 2201
+          },
+          "iql": {
+            "committed_episode": 798,
+            "files": 798
+          },
+          "mamba": {
+            "committed_episode": 175,
+            "files": 175
+          },
+          "mappo": {
+            "committed_episode": 1473,
+            "files": 1473
+          },
+          "online_ac": {
+            "committed_episode": 1980,
+            "files": 1980
+          }
+        },
+        "duplicates": 3,
+        "frozen_files": 7401,
+        "full_train_episodes": 6306,
+        "full_validation_episodes": 1092,
+        "heldout_demand_groups": 319,
+        "latest_committed_files": 7401,
+        "methods": {
+          "dreamer": 205,
+          "gnac": 569,
+          "ippo": 2201,
+          "iql": 798,
+          "mamba": 175,
+          "mappo": 1473,
+          "online_ac": 1980
+        },
+        "new_census_dir": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/two_city_urbandreamer_pretrain_supplement_20261011/montereau_fault_yonne/new_census",
+        "new_demand_groups": 1120,
+        "new_files": 4449,
+        "new_methods": {
+          "dreamer": 205,
+          "gnac": 569,
+          "ippo": 1120,
+          "iql": 516,
+          "mappo": 825,
+          "online_ac": 1214
+        },
+        "pilot_dir": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/two_city_urbandreamer_pretrain_supplement_20261011/montereau_fault_yonne/pilot",
+        "previous_city_dir": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/two_city_urbandreamer_pretrain_20261010/montereau_fault_yonne",
+        "previous_demand_groups": 1081,
+        "previous_files": 2952,
+        "previous_methods": {
+          "ippo": 1081,
+          "iql": 282,
+          "mamba": 175,
+          "mappo": 648,
+          "online_ac": 766
+        },
+        "previous_partition_preserved": true,
+        "previous_unique_trajectories": 2949,
+        "unique_trajectories": 7398
+      },
+      "freeze": "2026-10-11T11:12:15.059361+00:00",
+      "supervisor": {
+        "source_dir": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/two_city_urbandreamer_pretrain_supplement_20261011/source",
+        "device": "cuda:1",
+        "previous_city_dir": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/two_city_urbandreamer_pretrain_20261010/montereau_fault_yonne",
+        "stages": {},
+        "phase": "waiting_for_supplement_cache",
+        "child_pids": {},
+        "pid": 648917,
+        "heartbeat_unix_seconds": 1791717524.9521554,
+        "utc": "2026-10-11 11:18:44 UTC"
+      },
+      "verified_reuse_receipts": 905
+    }
+  },
+  "tests": {
+    "passed": 157,
+    "failed": 0
+  },
+  "runtime": {
+    "batch_size": 64,
+    "precision": "bf16",
+    "accumulation_steps": 1,
+    "gpu_memory_fraction": 0.25,
+    "admission_margin_mib": 2048,
+    "activation_offload": true,
+    "tail_execution_batch": 32
+  },
+  "mainline_ingo_pid": 625178,
+  "notes": [
+    "Existing demand-group partitions remain anchored",
+    "All model and optimizer state and RNG preserved at corpus handoff",
+    "Full heldout codec revalidation required before any supplemental FM update",
+    "Coulommiers active previous epoch completes first",
+    "Montereau waiting watcher replaced only after safe empty-child handoff"
+  ]
+}

@@ -2,7 +2,7 @@
 
 On-policy event actor-critic over the real SUMO environment, aligned with the
 reference global-only setting:
-the team reward is the shared window reward -active_vehicle_seconds/(N*60),
+the team reward is the causal cumulative mean-time difference -delta(C/max(B,1))/60,
 a global critic values the flattened physical flow state, and per-window
 lambda-return advantages are broadcast to each event row by its window index.
 There is no vehicle-level critic, world model, or imagination.
@@ -14,6 +14,8 @@ candidate features.
 """
 from __future__ import annotations
 
+import time
+
 import numpy as np
 import torch
 from torch import nn
@@ -23,7 +25,7 @@ from ...models.policy import (ActionSelection, CANDIDATE_FEATURE_DIM, HIDDEN_DIM
                               _initialize, _make_mlp, apply_shortest_path_prior,
                               set_shortest_path_prior)
 from . import METHODS
-from .common import GlobalTrafficCritic, global_critic_update, policy_gradient_step
+from .common import reward_context_dim, GlobalTrafficCritic, global_critic_update, policy_gradient_step
 
 FLOW_FEATURE_DIM = 8
 EDGE_EMBEDDING_DIM = 64
@@ -109,15 +111,20 @@ class GraphNextHopActor(nn.Module):
                                          temperature_seconds=self.prior_temperature_seconds)
 
     def sample_action(self, features: torch.Tensor, mask: torch.Tensor, edge_indices: torch.Tensor,
-                      current_edges: torch.Tensor, flow: torch.Tensor, *, deterministic: bool = False) -> ActionSelection:
+                      current_edges: torch.Tensor, flow: torch.Tensor, *, deterministic: bool = False,
+                      temperature: float = 1.) -> ActionSelection:
         logits = self.forward_logits(features, mask, edge_indices, current_edges, flow)
-        distribution = Categorical(logits=logits)
+        if isinstance(temperature, bool) or not np.isfinite(temperature) or temperature <= 0:
+            raise ValueError("action temperature must be finite and positive")
+        distribution = Categorical(logits=logits / temperature)
         selected = logits.argmax(dim=-1) if deterministic else distribution.sample()
         return ActionSelection(selected, distribution.log_prob(selected), distribution.entropy())
 
 
 class GraphActorCriticMethod:
     """GNAC method wrapper: graph actor + global traffic critic, shared window reward only."""
+
+    entropy_coef = .002
 
     def __init__(self, args, runner):
         self.args, self.runner = args, runner
@@ -127,10 +134,10 @@ class GraphActorCriticMethod:
         # The added critic must not change actor initialization.
         with torch.random.fork_rng(devices=[]):
             torch.manual_seed(args.seed + 73861)
-            self.global_critic = GlobalTrafficCritic(runner.network.edge_count).to(self.device)
+            self.global_critic = GlobalTrafficCritic(runner.network.edge_count, reward_context_dim(args)).to(self.device)
         self.global_optimizer = torch.optim.Adam(self.global_critic.parameters(), lr=args.critic_lr)
 
-    def select(self, vehicles, actor_obs, frozen_flow, now, *, explore=True):
+    def select(self, vehicles, actor_obs, frozen_flow, now, *, explore=True, temperature=1., sample_actions=None):
         with torch.no_grad():
             selection = self.actor.sample_action(
                 torch.as_tensor(actor_obs.features, dtype=torch.float32, device=self.device),
@@ -139,10 +146,10 @@ class GraphActorCriticMethod:
                 torch.as_tensor([int(vehicle['current_edge']) for vehicle in vehicles],
                                 dtype=torch.long, device=self.device),
                 torch.as_tensor(np.asarray(frozen_flow), dtype=torch.float32, device=self.device),
-                deterministic=not explore)
-        indices = selection.candidate_index.cpu().tolist()
-        aux = [dict(entropy=float(value)) for value in selection.entropy.cpu().tolist()]
-        return indices, aux
+                deterministic=not (explore if sample_actions is None else sample_actions),
+                temperature=temperature)
+        indices, entropies = selection.indices_and_entropy()
+        return indices, [dict(entropy=value) for value in entropies]
 
     def _compute_logits(self, rows):
         features = torch.as_tensor(np.stack([r['features'] for r in rows]), dtype=torch.float32, device=self.device)
@@ -164,13 +171,22 @@ class GraphActorCriticMethod:
             flow_indices=torch.as_tensor(flow_indices, dtype=torch.long, device=self.device))
 
     def on_episode(self, rows, windows, *, episode):
+        learning_started = time.monotonic()
+        critic_started = time.monotonic()
         advantages, metrics = global_critic_update(global_critic=self.global_critic,
             global_optimizer=self.global_optimizer, windows=windows)
+        metrics['critic_update_seconds'] = time.monotonic() - critic_started
+        actor_started = time.monotonic()
         event_windows = torch.as_tensor([r['window'] for r in rows], dtype=torch.long,
                                         device=advantages.device)
         update = policy_gradient_step(compute_logits=self._compute_logits,
             actor_parameters=self.actor.parameters(), actor_optimizer=self.actor_optimizer,
-            rows=rows, advantages=advantages[event_windows])
+            rows=rows, advantages=advantages[event_windows],
+            entropy_coef=self.entropy_coef,
+            include_individual_timeout=not getattr(self.args, 'global_reward_only', True))
+        metrics.update(actor_update_seconds=time.monotonic() - actor_started,
+                       world_model_seconds=0., imagination_seconds=0.,
+                       learning_seconds=time.monotonic() - learning_started)
         return dict(metrics, **update)
 
     def state_dict(self):

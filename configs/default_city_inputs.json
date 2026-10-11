@@ -1,0 +1,53 @@
+{
+  "description": "Accepted default input bundles; expected Poisson populations, actual episode counts vary.",
+  "accepted_at": "2026-10-09",
+  "release_seconds": 1800,
+  "training_deadline_seconds": 3810,
+  "incidents": false,
+  "sp_prior_weight": 0,
+  "baseline_methods": [
+    "online_ac",
+    "gnac",
+    "dreamer",
+    "mbpo",
+    "ippo",
+    "mappo",
+    "iql",
+    "mamba"
+  ],
+  "cities": {
+    "coulommiers": {
+      "network_dir": "networks/coulommiers",
+      "revision": "v5_short_cycles",
+      "expected_vehicles": 1811,
+      "active_od_pairs": 489,
+      "input_hashes": {
+        "network_xml": "7e39cc1a64d4a922dedb376a942076280fd0d38c010d70056862630cf37d2436",
+        "network_agents": "c93cbdbe5842bf87e9843e2720965931334be1ac6d73e7c1f8139cdf96112c62",
+        "od_file": "2aefd4a4dd45d72482cb3cff14bc8e3ea323b30e36ee60771506234268fb9c8c",
+        "edge_registry": "55164a123f88f008aaddb91208a37ee20afd638fd5aef7f98cdd2dc27dea0f79"
+      }
+    },
+    "montereau_fault_yonne": {
+      "network_dir": "networks/montereau_fault_yonne",
+      "revision": "occupancy1500",
+      "expected_vehicles": 1500,
+      "active_od_pairs": 283,
+      "input_hashes": {
+        "network_xml": "8dde6520b77ee8e0cf8d8071464c7578144b7ba2c7cfc3d75a17ec0973d9c3f3",
+        "network_agents": "59421f908e4373e48524cdec55372768321a447c768ec80b6e4d9ad296d6a0e6",
+        "od_file": "3cc05fae3f1ef181bc6ab7d21449a8c0d2a98688ff4b8dbb56ee6639cf7e86f8",
+        "edge_registry": "a70cc06b911d8a6faf4c70cf8917e67b973e83cab08d3b4c9386537089fcb810"
+      }
+    }
+  },
+  "entropy_schedule": {
+    "mode": "annealed",
+    "initial_coefficient": 0.002,
+    "final_coefficient": 0.0001,
+    "hold_fraction": 0.1,
+    "end_fraction": 0.8,
+    "clock": "completed real training episodes / original full episode budget",
+    "population_scaling": false
+  }
+}

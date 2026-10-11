@@ -38,11 +38,11 @@ def test_prior_schedule_releases_and_restores_next_episode():
 def test_prior_profile_rejects_resume_changes(key, value):
     tool = module()
     args = prior_args()
-    saved = tool.prior_profile(args)
+    saved = dict(tool.prior_profile(args), reward_objective=common.reward_objective(args))
     saved[key] = value
     with pytest.raises(ValueError, match=key):
         tool.validate_prior_resume(saved, args)
-    tool.validate_prior_resume({}, SimpleNamespace(**tool.PRIOR_DEFAULTS))
+    tool.validate_prior_resume({}, SimpleNamespace(**tool.PRIOR_DEFAULTS, reward_objective='legacy_exposure'))
 
 
 @pytest.mark.parametrize('fail', [False, True])
@@ -105,11 +105,11 @@ def test_real_and_imagined_decisions_share_frozen_prior(tmp_path, monkeypatch, n
     flow = runner.network.extract_flow({})
     timestamp = method.deadline - 30.
     seen = []
-    sample = method.actor.sample_action
+    sample = method.actor.forward_logits
     def capture(*args, **kwargs):
         seen.append(method.actor.prior_weight)
         return sample(*args, **kwargs)
-    monkeypatch.setattr(method.actor, 'sample_action', capture)
+    monkeypatch.setattr(method.actor, 'forward_logits', capture)
     obs = build_actor_observations(policy_edge_features=flow[:, [2, 1]], vehicle_states=[vehicle],
         candidates=runner.candidates, episode_progress=0., active_vehicle_fraction=1.)
     method.select([vehicle], obs, flow, timestamp)

@@ -1,0 +1,11 @@
+{
+  "active": true,
+  "run": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/online_bounded_noprior_fresh_t2_2000_20261011",
+  "pid": 840021,
+  "phase": "online_running",
+  "evaluation_policy": "argmax",
+  "evaluation_temperature": null,
+  "prior_weight": 0,
+  "completed_episodes": 4,
+  "verification": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/online_bounded_noprior_fresh_t2_2000_20261011/argmax_verification.json"
+}

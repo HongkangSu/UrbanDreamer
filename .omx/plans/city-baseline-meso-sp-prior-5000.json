@@ -1,0 +1,28 @@
+{
+  "status": "stopped_by_user",
+  "output_root": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_meso_sp_prior_5000ep_20261006_160058",
+  "previous_output_root": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101",
+  "episode_budget_per_run": 5000,
+  "target_episodes": 75000,
+  "traffic_model": "meso",
+  "forbid_revisit": false,
+  "policy_prior": {
+    "enabled": true,
+    "initial_weight": 1.0,
+    "temperature_seconds": 30.0,
+    "hold_episodes": 200,
+    "off_episode": 1000,
+    "decay": "cosine",
+    "schedule_clock": "real_training_episode",
+    "cost": "model-specific junction_time + candidate_edge_free_flow_time + downstream_remaining_time; meso junction_time=0",
+    "bias": "-weight * (cost - minimum_legal_cost) / temperature_seconds",
+    "evaluation": "scheduled_prior and zero_prior on identical fixed demand seeds",
+    "best_selection": "zero_prior",
+    "random_control": "uniform legal actions; no prior",
+    "mbpo_synthetic_buffer": "discard old-weight rows whenever scheduled weight changes"
+  },
+  "verification": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_meso_sp_prior_5000ep_20261006_160058/restart_verification.json",
+  "preserved_episodes": 9340,
+  "stopped_at": "2026-10-07T12:55:24.582092+00:00",
+  "preservation_record": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_meso_sp_prior_5000ep_20261006_160058/preservation_and_stop.json"
+}

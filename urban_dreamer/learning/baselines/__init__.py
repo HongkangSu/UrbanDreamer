@@ -21,3 +21,6 @@ from . import gnac  # noqa: E402,F401
 from . import dreamer  # noqa: E402,F401
 from . import mbpo  # noqa: E402,F401
 from . import dta  # noqa: E402,F401
+from . import ppo  # noqa: E402,F401
+from . import iql  # noqa: E402,F401
+from . import mamba  # noqa: E402,F401

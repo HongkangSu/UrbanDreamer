@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import torch
+from micro_config_fixture import write_micro_config
 
 PATH = Path(__file__).resolve().parents[1] / 'tools/train_toy_actor_critic.py'
 
@@ -17,7 +18,7 @@ def module():
 
 
 def args(tmp_path):
-    return SimpleNamespace(config=PATH.parents[1] / 'configs/toy_cross_bottleneck.toml',
+    return SimpleNamespace(reward_objective='legacy_exposure', global_reward_only=False, config=write_micro_config(tmp_path / 'legacy_micro'),
         output_dir=tmp_path, episodes=1, eval_every=1, eval_seeds=1, seed=42, device='cpu',
         threads=1, actor_lr=2e-4, global_critic_lr=3e-4, vehicle_limit=8,
         session='microstep', step_seconds=1., backend='traci', resume=False)
@@ -139,6 +140,8 @@ def test_checkpoint_schema_optimizer_and_rng_resume(tmp_path):
     torch.testing.assert_close(torch.rand(4), expected_torch)
     np.testing.assert_array_equal(np.random.random(4), expected_numpy)
     assert random.random() == expected_python
+    # Direct update calls must use the same restored episode clock as the CLI.
+    runner_module.set_episode_entropy(runner, 18)
     runner.update(rows(), windows(runner, [-.5, -2.]))
     restored.update(rows(), windows(restored, [-.5, -2.]))
     for model in ('actor', 'global_critic'):
@@ -219,7 +222,8 @@ def test_checkpoint_ranking_and_protocol_keep_timeout_scope_explicit(tmp_path, m
             vehicle_timeout_penalty_sum=-5000. if phase == 'baseline' else 0.,
             selection_score=-5000.5 if phase == 'baseline' else -1.)]
     monkeypatch.setattr(runner_module, 'evaluate', evaluate)
-    assert runner_module.main(['--output-dir', str(tmp_path), '--episodes', '1', '--vehicle-limit', '2']) == 0
+    assert runner_module.main(['--output-dir', str(tmp_path), '--episodes', '1', '--vehicle-limit', '2',
+                              '--no-global-reward-only', '--reward-objective', 'legacy_exposure']) == 0
     checkpoint = torch.load(tmp_path/'best.pt', weights_only=False)
     assert checkpoint['episode'] == 1 and checkpoint['best'] == 1.
     protocol = json.loads((tmp_path/'protocol.json').read_text())
@@ -312,7 +316,7 @@ def test_evaluate_uses_argmax_and_forbids_stochastic(tmp_path):
     runner_module = module()
     calls = []
     runner = SimpleNamespace(run_episode=lambda **kwargs: (calls.append(kwargs) or [], {}))
-    runner_module.evaluate(runner, tmp_path, episode=1, seeds=[42], phase='evaluation')
+    runner_module.evaluate(runner, tmp_path, episode=1, seeds=[42], phase='evaluation', policies=('deterministic',))
     assert calls[0]['policy'] == 'deterministic'
     with pytest.raises(ValueError, match='argmax'):
         runner_module.evaluate(runner, tmp_path, episode=1, seeds=[42], phase='holdout_final', policies=('stochastic',))

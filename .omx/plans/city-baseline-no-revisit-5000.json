@@ -1,0 +1,13 @@
+{
+  "status": "running",
+  "started_at": "2026-10-04T20:10:04.541037+00:00",
+  "output_root": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_no_revisit_5000ep_20261004_201004",
+  "episodes_per_run": 5000,
+  "run_count": 15,
+  "forbid_revisit": true,
+  "policy_prior_weight": 0,
+  "node_definition": "directed external road edge",
+  "checkpoint_every": 1,
+  "old_batch_preserved_episodes": 29241,
+  "validation_root": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/no_revisit_validation_20261004_195622"
+}

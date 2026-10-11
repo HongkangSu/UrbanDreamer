@@ -3,6 +3,8 @@ import argparse
 import importlib.util
 import json
 from pathlib import Path
+
+from urban_dreamer.workflow.config import MethodConfig
 import sys
 from types import SimpleNamespace
 
@@ -119,7 +121,8 @@ def test_cli_archive_only_training_cadence_final_and_resume(tmp_path, monkeypatc
         def __init__(self, args, **kw):
             self.args = args
             self.device = 'cpu'
-            self.config = SimpleNamespace(resolved_snapshot=lambda: {}, semantic_fingerprint='test')
+            self.config = SimpleNamespace(resolved_snapshot=lambda: {}, semantic_fingerprint='test',
+                method=MethodConfig())
             self.prepared = SimpleNamespace(input_hashes={})
             self.deadline = 30
             self.demand = SimpleNamespace(duration_seconds=30, expected_vehicle_count=1, od_rates=[])

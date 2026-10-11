@@ -1,0 +1,9 @@
+{
+  "score": 95,
+  "verdict": "pass",
+  "category_match": true,
+  "differences": [],
+  "suggestions": [],
+  "reasoning": "Log trends and no-update probes are clearly distinguished; normalized probabilities, log-scale gradient ratios and signed cosine panels are readable. Hypothetical legacy case is explicitly labelled.",
+  "next_actions": []
+}

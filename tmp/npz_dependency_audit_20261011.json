@@ -1,0 +1,289 @@
+{
+  "note": "Not referenced by scanned cache manifests does NOT establish safe deletion; other runtime/config/archive users may exist. Shared inodes counted once.",
+  "manifests": [
+    "outputs/ingolstadt_pretrain_cache_20261002/cache_manifest.json",
+    "outputs/ingolstadt_full_retrain_20261009/data/cache_manifest.json",
+    "outputs/two_city_urbandreamer_pretrain_supplement_20261011/montereau_fault_yonne/cache/cache_manifest.json",
+    "outputs/two_city_urbandreamer_pretrain_supplement_20261011/coulommiers/cache/cache_manifest.json",
+    "outputs/two_city_urbandreamer_pretrain_20261010/montereau_fault_yonne/cache/cache_manifest.json",
+    "outputs/two_city_urbandreamer_pretrain_20261010/coulommiers/cache/cache_manifest.json"
+  ],
+  "groups": {
+    "collector_parity_20261007": {
+      "total_bytes": 7503872,
+      "not_referenced_by_cache_manifests_bytes": 7503872
+    },
+    "montereau_actor_only_eval_20261011": {
+      "total_bytes": 25563136,
+      "not_referenced_by_cache_manifests_bytes": 25563136
+    },
+    "montereau_collection_speed_20261011": {
+      "total_bytes": 36700160,
+      "not_referenced_by_cache_manifests_bytes": 36700160
+    },
+    "ingo_reference_reselection_20261007": {
+      "total_bytes": 147456,
+      "not_referenced_by_cache_manifests_bytes": 147456
+    },
+    "event_mainline_verify_20261002_libsumo": {
+      "total_bytes": 24576,
+      "not_referenced_by_cache_manifests_bytes": 24576
+    },
+    "montereau_dynamic_prior_ac_500_20261011": {
+      "total_bytes": 1904648192,
+      "not_referenced_by_cache_manifests_bytes": 1904648192
+    },
+    "city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101": {
+      "total_bytes": 85118976,
+      "not_referenced_by_cache_manifests_bytes": 85118976
+    },
+    "demand_od_screen_20261009": {
+      "total_bytes": 10457088,
+      "not_referenced_by_cache_manifests_bytes": 10457088
+    },
+    "demand_timing_stress_20261011": {
+      "total_bytes": 286199808,
+      "not_referenced_by_cache_manifests_bytes": 286199808
+    },
+    "baseline_algorithm_repair_20261007": {
+      "total_bytes": 192512,
+      "not_referenced_by_cache_manifests_bytes": 192512
+    },
+    "ingolstadt_online_meso_sp_prior_20261007": {
+      "total_bytes": 493895680,
+      "not_referenced_by_cache_manifests_bytes": 493895680
+    },
+    "meso_decline_diagnosis_20261007": {
+      "total_bytes": 28422144,
+      "not_referenced_by_cache_manifests_bytes": 28422144
+    },
+    "ingolstadt_noincident_codec_parallel_20261007": {
+      "total_bytes": 35758080,
+      "manifest_referenced_bytes": 35758080
+    },
+    "online_profile_round2_20261004": {
+      "total_bytes": 37380096,
+      "not_referenced_by_cache_manifests_bytes": 37380096
+    },
+    "noincident_speed_decomposition_20261008": {
+      "total_bytes": 1376256,
+      "not_referenced_by_cache_manifests_bytes": 1376256
+    },
+    "noincident_decline_diagnosis_20261008": {
+      "total_bytes": 33460224,
+      "not_referenced_by_cache_manifests_bytes": 33460224
+    },
+    "no_revisit_validation_20261004_195622": {
+      "total_bytes": 90218496,
+      "not_referenced_by_cache_manifests_bytes": 90218496
+    },
+    "ingolstadt_online_meso_noincident_entropyfix_20261008": {
+      "total_bytes": 3504627712,
+      "not_referenced_by_cache_manifests_bytes": 422531072,
+      "manifest_referenced_bytes": 3082096640
+    },
+    "event_mainline_verify_20261002_completed": {
+      "total_bytes": 24576,
+      "not_referenced_by_cache_manifests_bytes": 24576
+    },
+    "dta_so_current_networks_50iter_20261008": {
+      "total_bytes": 593719296,
+      "not_referenced_by_cache_manifests_bytes": 593719296
+    },
+    "city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632": {
+      "total_bytes": 4102692864,
+      "not_referenced_by_cache_manifests_bytes": 4102692864
+    },
+    "two_city_realtime_shortest_20261011": {
+      "total_bytes": 35430400,
+      "not_referenced_by_cache_manifests_bytes": 35430400
+    },
+    "stall_diagnosis_20261007": {
+      "total_bytes": 14462976,
+      "not_referenced_by_cache_manifests_bytes": 14462976
+    },
+    "city_baselines_paper_reward_20261010": {
+      "total_bytes": 5013504,
+      "not_referenced_by_cache_manifests_bytes": 5013504
+    },
+    "ingolstadt_online_libsumo_20261004": {
+      "total_bytes": 2537058304,
+      "not_referenced_by_cache_manifests_bytes": 2537058304
+    },
+    "event_mainline_verify_20261002_traci_restored": {
+      "total_bytes": 24576,
+      "not_referenced_by_cache_manifests_bytes": 24576
+    },
+    "mappo_probability_diagnosis_20261010": {
+      "total_bytes": 4694016,
+      "not_referenced_by_cache_manifests_bytes": 4694016
+    },
+    "convergence_diagnosis_20261005": {
+      "total_bytes": 318550016,
+      "not_referenced_by_cache_manifests_bytes": 318550016
+    },
+    "montereau_ac_prior_ablation_500_20261011": {
+      "total_bytes": 2264416256,
+      "not_referenced_by_cache_manifests_bytes": 2264416256
+    },
+    "penalty_baselines_smoke_20261007": {
+      "total_bytes": 57344,
+      "not_referenced_by_cache_manifests_bytes": 57344
+    },
+    "city_baselines_v5_1500_noprior_penalty_20261009": {
+      "total_bytes": 64589606912,
+      "manifest_referenced_bytes": 51216113664,
+      "not_referenced_by_cache_manifests_bytes": 13373493248
+    },
+    "city_demand_release_3600s_20261008": {
+      "total_bytes": 31559680,
+      "not_referenced_by_cache_manifests_bytes": 31559680
+    },
+    "ingo_causal_routing_20261010": {
+      "total_bytes": 15499264,
+      "not_referenced_by_cache_manifests_bytes": 15499264
+    },
+    "offline_pretrain_verify_20261002_libsumo": {
+      "total_bytes": 28672,
+      "not_referenced_by_cache_manifests_bytes": 28672
+    },
+    "ingolstadt_noincident_codec_seed50000_20261007": {
+      "total_bytes": 5181440,
+      "manifest_referenced_bytes": 5181440
+    },
+    "ingo_latest_argmax_20261010": {
+      "total_bytes": 97505280,
+      "not_referenced_by_cache_manifests_bytes": 97505280
+    },
+    "ingolstadt_codec_ready_20261002": {
+      "total_bytes": 5271552,
+      "not_referenced_by_cache_manifests_bytes": 5271552
+    },
+    "offline_pretrain_verify_20261002_traci": {
+      "total_bytes": 28672,
+      "not_referenced_by_cache_manifests_bytes": 28672
+    },
+    "city_baselines_argmax_20261011": {
+      "total_bytes": 19546112,
+      "not_referenced_by_cache_manifests_bytes": 19546112
+    },
+    "dta_so_current_networks_5iter_20261008": {
+      "total_bytes": 177958912,
+      "not_referenced_by_cache_manifests_bytes": 177958912
+    },
+    "ingolstadt_online_meso_20261006": {
+      "total_bytes": 2017030144,
+      "not_referenced_by_cache_manifests_bytes": 2017030144
+    },
+    "city_baseline_dataset_meso": {
+      "total_bytes": 10022912,
+      "not_referenced_by_cache_manifests_bytes": 10022912
+    },
+    "city_speed_diagnosis_20261008": {
+      "total_bytes": 285564928,
+      "not_referenced_by_cache_manifests_bytes": 285564928
+    },
+    "ingolstadt_full_retrain_20261009": {
+      "total_bytes": 84000276480,
+      "manifest_referenced_bytes": 80837935104,
+      "not_referenced_by_cache_manifests_bytes": 3162341376
+    },
+    "additional_baselines_alignment_20261006": {
+      "total_bytes": 32768,
+      "not_referenced_by_cache_manifests_bytes": 32768
+    },
+    "baseline_throughput_first_two_20261002": {
+      "total_bytes": 188416,
+      "not_referenced_by_cache_manifests_bytes": 188416
+    },
+    "baseline_algorithm_audit_20261007": {
+      "total_bytes": 57344,
+      "not_referenced_by_cache_manifests_bytes": 57344
+    },
+    "event_mainline_verify_20261002_final": {
+      "total_bytes": 24576,
+      "not_referenced_by_cache_manifests_bytes": 24576
+    },
+    "meso_migration_validation_20261006": {
+      "total_bytes": 1249280,
+      "not_referenced_by_cache_manifests_bytes": 1249280
+    },
+    "ingolstadt_online_pilot_20261003": {
+      "total_bytes": 380616704,
+      "not_referenced_by_cache_manifests_bytes": 380616704
+    },
+    "ingolstadt_pretrain_cache_20261002": {
+      "total_bytes": 2517430272,
+      "manifest_referenced_bytes": 2517430272
+    },
+    "collector_optimization_20261007": {
+      "total_bytes": 163840,
+      "not_referenced_by_cache_manifests_bytes": 163840
+    },
+    "city_baselines_sampling_t2_20261011": {
+      "total_bytes": 12722176,
+      "not_referenced_by_cache_manifests_bytes": 12722176
+    },
+    "city_baselines_noincident_noprior_penalty_5000ep_20261008": {
+      "total_bytes": 88181903360,
+      "not_referenced_by_cache_manifests_bytes": 88181903360
+    },
+    "inflight_reduction_20261008": {
+      "total_bytes": 109166592,
+      "not_referenced_by_cache_manifests_bytes": 109166592
+    },
+    "ingo_cohort_reward_audit_20261011": {
+      "total_bytes": 10768384,
+      "not_referenced_by_cache_manifests_bytes": 10768384
+    },
+    "shortest_30second_observation_20261011": {
+      "total_bytes": 175681536,
+      "not_referenced_by_cache_manifests_bytes": 175681536
+    },
+    "ingo_temperature02_latest_20261011": {
+      "total_bytes": 69091328,
+      "not_referenced_by_cache_manifests_bytes": 69091328
+    },
+    "ga_improvement_20261011": {
+      "total_bytes": 68399104,
+      "not_referenced_by_cache_manifests_bytes": 68399104
+    },
+    "event_mainline_verify_20261002_traci": {
+      "total_bytes": 16384,
+      "not_referenced_by_cache_manifests_bytes": 16384
+    },
+    "three_city_ga_routing_20261010": {
+      "total_bytes": 64917504,
+      "not_referenced_by_cache_manifests_bytes": 64917504
+    },
+    "ingolstadt_online_meso_noincident_noprior_20261007": {
+      "total_bytes": 159215616,
+      "not_referenced_by_cache_manifests_bytes": 159215616
+    },
+    "city_baselines_sampling_t0p2_20261011": {
+      "total_bytes": 31830016,
+      "not_referenced_by_cache_manifests_bytes": 31830016
+    },
+    "city_baselines_entropy_annealed_20261010": {
+      "total_bytes": 28536832,
+      "not_referenced_by_cache_manifests_bytes": 28536832
+    },
+    "two_city_urbandreamer_pretrain_supplement_20261011": {
+      "total_bytes": 34778406912,
+      "manifest_referenced_bytes": 34778406912
+    },
+    "two_city_urbandreamer_pretrain_20261010": {
+      "total_bytes": 26954022912,
+      "not_referenced_by_cache_manifests_bytes": 276525056,
+      "manifest_referenced_bytes": 26677497856
+    },
+    "offline_pretrain_verify_20261002_external_config": {
+      "total_bytes": 28672,
+      "not_referenced_by_cache_manifests_bytes": 28672
+    },
+    "candidate_bidi_length_fix_20261008": {
+      "total_bytes": 24580096,
+      "not_referenced_by_cache_manifests_bytes": 24580096
+    }
+  }
+}

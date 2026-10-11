@@ -1,0 +1,24 @@
+{
+  "active": false,
+  "phase": "baseline_priority_queues_verified",
+  "updated_at": "2026-10-10T15:21:17Z",
+  "completed_at": "2026-10-10T15:21:17Z",
+  "background_training_active": false,
+  "background_supervisors_active": true,
+  "run_root": "outputs/two_city_urbandreamer_pretrain_20261010",
+  "cities": {
+    "coulommiers": {"supervisor_pid": 46667, "device": "cuda:0", "phase": "waiting_for_world_model_gpu", "codec_updates": 4500, "codec_ready": true},
+    "montereau_fault_yonne": {"supervisor_pid": 46673, "device": "cuda:1", "phase": "waiting_for_world_model_gpu", "preserved_world_updates": 420, "preserved_world_samples": 13440}
+  },
+  "verification": "outputs/two_city_urbandreamer_pretrain_20261010/startup_verification.json",
+  "tests_passed": 127,
+  "world_model_epochs": 1,
+  "world_model_batch_size": 64,
+  "gradient_accumulation_steps": 1,
+  "runtime_verification": "outputs/two_city_urbandreamer_pretrain_20261010/ingo_profile_verification.json",
+  "resource_preference_pending": false,
+  "baseline_priority": "keep_all_running",
+  "cuda_oom_recovery": true,
+  "baselines_paused": false,
+  "online_training_requested": false
+}

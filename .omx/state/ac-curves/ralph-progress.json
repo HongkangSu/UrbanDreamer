@@ -1,0 +1,9 @@
+{
+  "score": 95,
+  "verdict": "pass",
+  "category_match": true,
+  "differences": [],
+  "suggestions": [],
+  "reasoning": "All six plot panels are readable without overlap. Raw and smoothed curves, capture time, reward definition and frozen input versions are explicit; no reference image was supplied.",
+  "next_actions": []
+}

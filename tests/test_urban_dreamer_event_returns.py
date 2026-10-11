@@ -6,15 +6,23 @@ import pytest
 import torch
 
 from urban_dreamer.learning.training import MainlineTrainer
+from urban_dreamer.models.world_model import EventActionEncoder
+from urban_dreamer.models.event_critic import EventActionCritic
 
 
 class Candidates:
     def __init__(self, lengths):
-        self.network = SimpleNamespace(edge_count=3, lengths_m=np.array(lengths),
-                                       speed_limits_mps=np.ones(3))
+        lengths = np.array((*lengths, 1000.))
+        self.network = SimpleNamespace(edge_count=4, lengths_m=lengths,
+                                       speed_limits_mps=np.ones(4),
+                                       free_flow_travel_seconds=lengths)
 
     def candidates(self, current, destination):
-        return (current + 1,) if current < destination else ()
+        return ((1, 3) if current == 0 else (2, 3) if current == 1
+                else (2,) if current == 3 else ())
+
+    def costs(self, destination):
+        return np.array([20., 10., 0., 10.])
 
     def junction(self, current, successor):
         return 0., 1.
@@ -33,10 +41,11 @@ class Actor:
     def __init__(self):
         self.logit = torch.nn.Parameter(torch.tensor(0.))
 
-    def sample_action(self, features, mask, deterministic=False):
-        count = len(features)
-        return SimpleNamespace(candidate_index=torch.zeros(count, dtype=torch.long),
-            log_probability=self.logit.expand(count), entropy=torch.zeros(count))
+    def forward_logits(self, features, mask):
+        # Two legal choices make each event a branch; keep the reference route
+        # deterministic so these tests isolate physical return accounting.
+        return torch.stack((self.logit.expand(len(features)),
+                            self.logit.expand(len(features)) - 1000.), dim=-1)
 
 
 def seed(vehicle_id='v', **updates):
@@ -52,31 +61,41 @@ def make_case(*, deadline=30., lengths=(10., 10., 10.), states=None, population=
     trainer.device = torch.device('cpu')
     trainer.candidates = Candidates(lengths)
     trainer.network = trainer.candidates.network
-    trainer.microstep_seconds = .001
+    trainer.microstep_seconds = 1.
     trainer.config = SimpleNamespace(method=SimpleNamespace(disagreement_weight=.25),
         simulation=SimpleNamespace(vehicle_max_speed_mps=10.))
-    trainer._episode_end_time = lambda: deadline
+    trainer._episode_end_time = lambda mode="online": deadline
     trainer._tensor = lambda value: torch.as_tensor(value, dtype=torch.float32)
-    trainer._context = lambda states, timestamp, total_vehicle_count: np.array([
-        timestamp / 300., sum(s['departed'] and not s['arrived'] for s in states) / total_vehicle_count])
     trainer._observations = lambda events, flow, context, now: SimpleNamespace(
-        features=np.zeros((len(events), 1, 10)), mask=np.ones((len(events), 1), dtype=bool),
-        edge_indices=np.array([[s['current_edge'] + 1] for s in events]))
+        features=np.zeros((len(events), 2, 10)), mask=np.ones((len(events), 2), dtype=bool),
+        edge_indices=np.array([trainer.candidates.candidates(s['current_edge'], s['destination_edge'])
+                               for s in events]))
     trainer.actor = Actor()
     trainer.latent_critic = Critic()
+    trainer.event_critic = EventActionCritic()
+    for parameter in trainer.event_critic.parameters():
+        torch.nn.init.zeros_(parameter)
     def decode(z):
-        output = torch.zeros(1, 3, 4)
+        output = torch.zeros(1, 4, 4)
         output[..., 1] = 1.
         return output
-    trainer.world_model = SimpleNamespace(encode=lambda flow: torch.zeros(1, 3, 1), decode=decode)
+    adjacency = torch.zeros(4, 4)
+    for edge in range(4):
+        for target in trainer.candidates.candidates(edge, 2):
+            adjacency[edge, target] = 1.
+    encoder = EventActionEncoder(adjacency=adjacency, static_features=torch.zeros(4, 2))
+    trainer.world_model = SimpleNamespace(encode=lambda flow: torch.zeros(1, 4, 64), decode=decode,
+        dynamics=SimpleNamespace(event_encoder=encoder))
     calls = []
-    def predict(z, action):
+    def predict(z, action, action_events):
+        assert action_events.batch_size == action_events.time_steps == 1
         calls.append(action.copy())
         return z + .1, torch.tensor(2.)
     trainer._predict_with_disagreement = predict
     batch = SimpleNamespace(vehicles=(tuple(states or [seed(remaining_distance=lengths[0])]),),
         time=torch.tensor([0.]), total_vehicle_count=torch.tensor([population]),
-        flow=torch.zeros(1, 1, 3, 8))
+        started_count=torch.tensor([population]), cumulative_vehicle_seconds=torch.zeros(1),
+        flow=torch.zeros(1, 1, 4, 8))
     return trainer, batch, calls
 
 
@@ -88,10 +107,11 @@ def test_late_and_simultaneous_actions_share_global_suffix_and_full_endpoint_ris
     # Original N=4 is retained although this seed contains only two vehicles.
     assert [row['global_return'].item() for row in rows] == pytest.approx([-.75, -.75, -2/3, -2/3])
     assert rows[0]['global_advantage'].item() == pytest.approx(-.75)
-    assert rows[2]['global_advantage'].item() == pytest.approx(-2/3 - 10/300)
+    assert rows[2]['global_advantage'].item() == pytest.approx(-2/3)
+    assert all(row['counterfactual_baseline'].item() == 0. for row in rows)
     assert rows[0]['global_advantage'] == rows[1]['global_advantage']
     assert rows[2]['global_advantage'] == rows[3]['global_advantage']
-    assert all(row['global_reward'].item() == pytest.approx(-.75) for row in rows)
+    assert all(row['global_reward'].item() == pytest.approx(-.25) for row in rows)
     loss.backward()
     assert trainer.latent_critic.bias.grad is not None
     assert trainer.actor.logit.grad is None
@@ -122,7 +142,7 @@ def test_partial_deadline_tail_uses_exact_cost_without_model_or_risk():
     assert calls == []
     assert len(rows) == 1
     assert rows[0]['global_return'].item() == pytest.approx(-25/120)
-    assert rows[0]['timeout_return'] == rows[0]['timeout_penalty'] == -5000.
+    assert rows[0]['timeout_return'] == rows[0]['timeout_penalty'] == 0.
 
 
 def test_midwindow_cohort_arrival_terminates_without_fictitious_full_transition():
@@ -150,7 +170,7 @@ def test_single_cohort_arrival_does_not_terminate_other_vehicles():
     rows, _ = trainer._imagine_from_seed(batch, 0, rollout_index=0)
     assert len(calls) == 2 and len(rows) == 1
     assert rows[0]['global_return'].item() == pytest.approx(-65/180 - 1.)
-    assert rows[0]['timeout_return'] == rows[0]['timeout_penalty'] == -5000.
+    assert rows[0]['timeout_return'] == rows[0]['timeout_penalty'] == 0.
 
 
 def test_undeparted_future_seed_is_excluded_from_cost_actions_and_terminal_penalty():
@@ -161,10 +181,10 @@ def test_undeparted_future_seed_is_excluded_from_cost_actions_and_terminal_penal
     assert not calls and len(rows) == 1
     assert rows[0]['global_return'].item() == pytest.approx(-25/(7*60))
     assert rows[0]['vehicle_id'] == 'active'
-    assert rows[0]['timeout_return'] == rows[0]['timeout_penalty'] == -5000.
+    assert rows[0]['timeout_return'] == rows[0]['timeout_penalty'] == 0.
 
 
-def test_timeout_is_individual_ledger_once_and_does_not_leak_between_rollouts():
+def test_unfinished_trips_add_no_terminal_shaping_or_cross_rollout_cost():
     trainer, batch, _ = make_case(deadline=30., lengths=(2., 3., 5.), population=2,
         states=[seed('arrived', remaining_distance=2.), seed('unfinished', remaining_distance=27.)])
     rows, loss = trainer._imagine_from_seed(batch, 0, rollout_index=0)
@@ -177,9 +197,9 @@ def test_timeout_is_individual_ledger_once_and_does_not_leak_between_rollouts():
     failed = [row for row in rows if row['vehicle_id'] == 'unfinished']
     assert len(successful) == len(failed) == 2
     assert all(row['timeout_return'] == row['timeout_penalty'] == 0. for row in successful)
-    assert [row['timeout_return'] for row in failed] == [-5000., -5000.]
-    assert [row['timeout_penalty'] for row in failed] == [0., -5000.]
-    assert sum(row['timeout_penalty'] for row in rows) == -5000.
+    assert [row['timeout_return'] for row in failed] == [0., 0.]
+    assert [row['timeout_penalty'] for row in failed] == [0., 0.]
+    assert sum(row['timeout_penalty'] for row in rows) == 0.
     assert torch.isfinite(loss)
     batch.vehicles[0][1]['remaining_distance'] = 2.
     next_rows, _ = trainer._imagine_from_seed(batch, 0, rollout_index=1)
@@ -191,3 +211,25 @@ def test_arrival_exactly_at_deadline_has_no_individual_penalty():
     rows, _ = trainer._imagine_from_seed(batch, 0, rollout_index=0)
     assert len(rows) == 2
     assert all(row['timeout_return'] == row['timeout_penalty'] == 0. for row in rows)
+
+
+def test_causal_mean_suffix_uses_started_count_and_keeps_past_cost_constant():
+    trainer, batch, _ = make_case(deadline=25., population=100,
+        states=[seed(remaining_distance=1e6)])
+    batch.started_count = torch.tensor([2])
+    batch.cumulative_vehicle_seconds = torch.tensor([120.])
+    rows, _ = trainer._imagine_from_seed(batch, 0, rollout_index=0)
+    assert rows[0]['global_return'].item() == pytest.approx(-25 / (2 * 60))
+    assert rows[0]['global_reward'].item() == pytest.approx(-25 / (2 * 60))
+    assert rows[0]['timeout_return'] == rows[0]['timeout_penalty'] == 0.
+    # Final episode demand size cannot rescale a next-hop target.
+    batch.total_vehicle_count = torch.tensor([1000])
+    again, _ = trainer._imagine_from_seed(batch, 0, rollout_index=1)
+    torch.testing.assert_close(again[0]['global_return'], rows[0]['global_return'])
+
+
+def test_active_imagination_rejects_missing_reward_history():
+    trainer, batch, _ = make_case()
+    batch.started_count = None
+    with pytest.raises(ValueError, match='causal cumulative reward accounting'):
+        trainer._imagine_from_seed(batch, 0, rollout_index=0)

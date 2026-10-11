@@ -1,0 +1,117 @@
+# Actor startup profile based on the active Ingo training configuration.
+# Start with a fresh actor/online counter to apply the full warm-start schedule.
+# This configuration does not reset a resumed checkpoint or launch a job.
+# Reuses local pretrained-data paths from ingolstadt_full_retrain_20261009.
+[inputs]
+network_name = "ingolstadt_custom"
+network_dir = "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/networks/ingolstadt_custom"
+
+[run]
+output_dir = "../outputs/ingolstadt_actor_warmstart"
+device = "cuda:1"
+seed = 42
+world_model_initialization_epochs = 1
+online_training_episodes = 2000
+evaluation_episodes = 5
+codec_pretraining_epochs = 10
+
+[simulation]
+vehicle_max_speed_mps = 40.0
+world_model_intervals_per_episode = 60
+episode_wall_timeout_seconds = 3600.0
+training_completion_buffer_seconds = 2000
+evaluation_horizon_seconds = 3800
+incident_edge = "201201950#0"
+incident_start_seconds = 1000000.0
+incident_end_seconds = 1001000.0
+incident_speed_mps = 1.0
+sumo_extra_args = ["--collision.action", "warn"]
+demand_duration_seconds = 1800.0
+session_protocol = "event"
+observation_step_seconds = 1.0
+backend = "libsumo"
+traffic_model = "meso"
+meso_junction_control = true
+meso_lane_queue = false
+meso_multi_queue = false
+meso_edge_length_m = 98.0
+meso_interpolate_positions = true
+
+[resources]
+world_model_initialization_batch_size = 64
+world_model_initialization_sequence_length = 1
+world_model_gradient_accumulation_steps = 1
+online_world_model_batch_size = 4
+world_model_pretrain_space_chunk = 64
+world_model_pretrain_time_chunk = 65536
+world_model_pretrain_mlp_chunk = 65536
+world_model_pretrain_activation_checkpointing = true
+world_model_pretrain_precision = "bf16"
+world_model_pretrain_compile_blocks = true
+world_model_imagination_space_chunk = 16
+world_model_imagination_time_chunk = 32768
+world_model_imagination_mlp_chunk = 16384
+world_model_imagination_precision = "bf16"
+world_model_imagination_compile = true
+world_model_imagination_compile_mode = "default"
+imagination_rollouts_per_pass = 16
+imagination_passes_per_episode = 4
+imagination_time_budget_seconds = 0.0
+
+[method]
+low_frequency_rank = 16
+prior_noise_scale = 0.1
+prior_loss_weight = 0.1
+fm_steps = 100
+fm_solver = "euler"
+picard_iterations = 2
+supervision_horizon = 3
+supervision_increment_updates = 100
+disagreement_samples = 2
+disagreement_weight = 0.0
+sp_prior_weight = 1.0
+# Evaluate the learned actor without guidance; training and imagination share the prior.
+sp_prior_evaluation_weight = 0.0
+sp_prior_temperature = 30.0
+sp_prior_hold_episodes = 200
+sp_prior_off_episode = 1000
+evaluation_demand_seed = 314159
+transition_volume_scope = "previous_state_excluding_current_births"
+exposure_readout_supervision = "observed_endpoint"
+actor_entropy_mode = "annealed"
+actor_entropy_initial_coefficient = 0.002
+actor_entropy_final_coefficient = 0.0001
+actor_entropy_hold_fraction = 0.1
+actor_entropy_end_fraction = 0.8
+fm_training_mode = "single_step"
+
+[data]
+archive_roots = []
+cache_episodes = 2
+pretrain_cache_manifest = "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/cache_manifest.json"
+validation_cache_manifest = "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/cache_manifest.json"
+validation_archive_roots = []
+
+[codec]
+learning_rate = 0.0001
+batch_size = 32
+max_updates = 20000
+validation_every = 500
+occupied_vehicle_mae_max = 0.5
+vehicle_mae_max = 0.1
+empty_vehicle_mae_max = 0.05
+total_relative_mae_max = 0.1
+speed_mae_mps_max = 1.5
+speed_positive = true
+decoder_pretrain_enabled = true
+decoder_pretrain_learning_rate = 0.0001
+decoder_online_enabled = true
+decoder_online_learning_rate = 1e-05
+decoder_allow_unready = true
+occupied_speed_weight = 1.0
+slow_speed_weight = 1.0
+slow_speed_mps = 2.0
+slow_min_vehicles = 5.0
+occupied_speed_mae_mps_max = 1.5
+slow_speed_mae_mps_max = 0.5
+slow_validation_min_roads = 1

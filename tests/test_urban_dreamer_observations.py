@@ -1,6 +1,6 @@
 from types import SimpleNamespace
-import subprocess
 import types
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -53,9 +53,10 @@ def test_actor_static_cost_and_distance_include_initial_junction():
 
 
 def _reference_observations_module():
-    source = subprocess.run(['git', 'show', 'HEAD:urban_dreamer/learning/observations.py'],
-                            check=True, capture_output=True, text=True, cwd=ROOT).stdout
-    module = types.ModuleType('reference_observations')
+    source = (ROOT / 'tests/fixtures/scalar_observations_c31c650.py').read_text(encoding='utf-8')
+    module = types.ModuleType('urban_dreamer.learning._reference_observations')
+    module.__package__ = 'urban_dreamer.learning'
+    sys.modules[module.__name__] = module
     exec(compile(source, 'observations.py', 'exec'), module.__dict__)
     return module
 

@@ -6,7 +6,6 @@ inactive vehicles as well as active ones, including final arrival status.
 """
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -18,8 +17,41 @@ import numpy as np
 from ..traffic.environment import WindowResult, to_plain_state
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 ACTION_SEMANTICS = {"event": "branch-only", "microstep": "all-next-hop"}
+
+
+def archive_physics_identity(metadata: dict[str, Any], *, simulation=None) -> dict[str, Any]:
+    """Resolve physics provenance; archives predating model fields are micro.
+
+    Explicit archive provenance and an embedded/frozen configuration must
+    agree. This prevents relabeling an old trajectory by editing one field.
+    """
+    from ..traffic.simulation_settings import physics_identity
+
+    identities = []
+    recorded = metadata.get('physics_identity')
+    if recorded is not None:
+        if not isinstance(recorded, dict):
+            raise ValueError('archive physics_identity must be a mapping')
+        canonical = physics_identity(recorded)
+        if recorded != canonical:
+            raise ValueError('archive physics_identity is incomplete or invalid')
+        identities.append(canonical)
+    if 'traffic_model' in metadata:
+        identities.append(physics_identity({**(recorded or {}), **metadata}))
+    for name in ('config', 'resolved_config'):
+        snapshot = metadata.get(name)
+        if isinstance(snapshot, dict) and isinstance(snapshot.get('simulation'), dict):
+            identities.append(physics_identity(snapshot['simulation']))
+    identity = identities[0] if identities else physics_identity({})
+    if simulation is not None:
+        identities.append(physics_identity(simulation))
+    if any(value != identity for value in identities):
+        raise ValueError('archive traffic physics provenance mismatch')
+    if identity['traffic_model'] == 'meso' and metadata.get('session_protocol') != 'event':
+        raise ValueError('meso archives require event session protocol')
+    return identity
 
 
 def _json_array(value: Any) -> np.ndarray:
@@ -74,6 +106,9 @@ class EpisodeArchive:
         if self.metadata.get("action_semantics", semantics) != semantics:
             raise ValueError("action_semantics does not match session_protocol")
         self.metadata["action_semantics"] = semantics
+        physics = archive_physics_identity(self.metadata)
+        if physics['traffic_model'] == 'meso':
+            self.metadata['physics_identity'] = physics
         self._states: list[dict[str, Any]] = []
         self._flows: list[np.ndarray] = []
         self._windows: list[dict[str, Any]] = []
@@ -81,14 +116,34 @@ class EpisodeArchive:
 
     def _state(self, state: dict[str, Any], shape: tuple[int, ...] | None = None):
         flow = _flow(state["flow"], shape)
-        plain = deepcopy({key: value for key, value in state.items() if key != "flow"})
-        plain = _decode(_json_array(plain))
+        # The plain-state JSON roundtrip already owns every nested container.
+        plain = _decode(_json_array({key: value for key, value in state.items() if key != "flow"}))
         timestamp = float(plain["time"])
         if not np.isfinite(timestamp) or timestamp < 0:
             raise ValueError("state time must be finite and nonnegative")
         ids = [row["vehicle_id"] for row in plain["vehicles"]]
         if len(ids) != len(set(ids)) or len(ids) != self.metadata["total_vehicle_count"]:
             raise ValueError("boundary snapshots must contain each episode vehicle exactly once")
+        if archive_physics_identity(self.metadata)['traffic_model'] == 'meso':
+            for row in plain['vehicles']:
+                if (row.get('in_junction', False) or row.get('junction_connection') is not None
+                        or row.get('junction_remaining_distance', 0.) != 0.):
+                    raise ValueError('meso snapshots must have zero internal junction state')
+        if self.metadata.get('forbid_revisit', False):
+            for row in plain['vehicles']:
+                history = row.get('visited_edges')
+                if (not isinstance(history, list)
+                        or any(isinstance(edge, bool) or not isinstance(edge, int)
+                               or not 0 <= edge < flow.shape[0] for edge in history)
+                        or len(history) != len(set(history))):
+                    raise ValueError('no-revisit snapshots require unique valid visited_edges')
+                if row.get('departed', False):
+                    if not history or history[-1] != row['current_edge']:
+                        raise ValueError('no-revisit history must end on the current physical edge')
+                elif history:
+                    raise ValueError('undeparted vehicles cannot have visited edges')
+                if row.get('arrived', False) and (not history or history[-1] != row['destination_edge']):
+                    raise ValueError('arrived no-revisit vehicle must finish on its destination')
         return plain, flow
 
     def start(self, state: dict[str, Any]) -> None:
@@ -113,6 +168,12 @@ class EpisodeArchive:
             raise ValueError("next state must coincide with window end")
         if {v["vehicle_id"] for v in state["vehicles"]} != {v["vehicle_id"] for v in self._states[0]["vehicles"]}:
             raise ValueError("vehicle identities changed within episode")
+        if self.metadata.get('forbid_revisit', False):
+            previous = {row['vehicle_id']: row['visited_edges'] for row in self._states[-1]['vehicles']}
+            for row in state['vehicles']:
+                old = previous[row['vehicle_id']]
+                if row['visited_edges'][:len(old)] != old:
+                    raise ValueError('no-revisit history must preserve the previous window prefix')
         edges = flow.shape[0]
         actions, departures = _counts(result.action_counts, edges), _counts(result.departure_counts, edges)
         exposure = float(result.active_vehicle_seconds)
@@ -120,6 +181,7 @@ class EpisodeArchive:
             raise ValueError("invalid active vehicle exposure")
         events, reconstructed = [], np.zeros(edges, dtype=np.uint32)
         vehicle_ids = {v["vehicle_id"] for v in state["vehicles"]}
+        destinations = {v['vehicle_id']: v['destination_edge'] for v in self._states[0]['vehicles']}
         for decision in result.decisions:
             row = to_plain_state(decision)
             if (row["vehicle_id"] not in vehicle_ids or not 0 <= row["current_edge"] < edges
@@ -127,6 +189,8 @@ class EpisodeArchive:
                     or not start <= row["decision_time"] < end):
                 raise ValueError("decision must belong to a known vehicle, edge and half-open window")
             row["window_index"] = len(self._windows)
+            row['event_index'] = len(self._events) + len(events)
+            row['destination_edge'] = destinations[row['vehicle_id']]
             events.append(row)
             reconstructed[row["next_edge"]] += 1
         if not np.array_equal(actions, reconstructed):
@@ -196,17 +260,25 @@ def read_episode_archive(path: Path, *, expected_session_protocol: str | None = 
         result.update(_decode(archive["summary_json"]))
         result["states"] = _decode(archive["states_json"])
         result["decisions"] = _decode(archive["decisions_json"])
-    if result["schema_version"] != SCHEMA_VERSION:
+    if result["schema_version"] not in {1, SCHEMA_VERSION}:
         raise ValueError("unsupported episode archive version")
     protocol = result["metadata"]["session_protocol"]
     if protocol not in ACTION_SEMANTICS or result["metadata"]["action_semantics"] != ACTION_SEMANTICS[protocol]:
         raise ValueError("invalid archived action semantics")
     if expected_session_protocol is not None and expected_session_protocol != protocol:
         raise ValueError(f"session protocol mismatch: expected {expected_session_protocol}, found {protocol}")
+    archive_physics_identity(result['metadata'])
+    # Old archives stored successful next-hop decisions. Preserve every row,
+    # associating its destination through the complete initial vehicle table.
+    destinations = {v['vehicle_id']: v['destination_edge'] for v in result['states'][0]['vehicles']}
+    for index, event in enumerate(result['decisions']):
+        event.setdefault('event_index', index)
+        event.setdefault('destination_edge', destinations.get(event['vehicle_id']))
     return result
 
 
-def to_replay_episode(path: Path, *, expected_session_protocol: str) -> dict[str, Any]:
+def to_replay_episode(path: Path, *, expected_session_protocol: str,
+                      target_deadline_seconds: float | None = None) -> dict[str, Any]:
     """Convert to replay only after explicitly selecting the compatible protocol.
 
     Timeout/censoring never becomes ``MacroTransition.terminal``. Original N
@@ -216,6 +288,41 @@ def to_replay_episode(path: Path, *, expected_session_protocol: str) -> dict[str
     if expected_session_protocol not in ACTION_SEMANTICS:
         raise ValueError("an explicit event or microstep session protocol is required")
     data = read_episode_archive(path, expected_session_protocol=expected_session_protocol)
+    return archive_to_replay_episode(data, target_deadline_seconds=target_deadline_seconds)
+
+
+def observed_arrival_times(data: dict[str, Any]) -> dict[str, float]:
+    """Observed episode arrivals from full final tables, including old archives."""
+    arrivals = {}
+    for vehicle in data['states'][-1]['vehicles']:
+        if not vehicle['arrived']:
+            continue
+        vehicle_id = str(vehicle['vehicle_id'])
+        arrival = vehicle.get('arrival_time')
+        if arrival is None:
+            departure = vehicle.get('actual_departure_time')
+            if departure is None:
+                # Event-session snapshots overwrite departure_time at actual
+                # insertion; it is an observed field in a departed row.
+                departure = vehicle.get('departure_time') if vehicle.get('departed') else None
+            travel = data['travel_times'].get(vehicle_id)
+            if departure is None or travel is None:
+                raise ValueError(f'archive lacks observed arrival metadata for {vehicle_id}')
+            arrival = float(departure) + float(travel)
+        arrival = float(arrival)
+        if not np.isfinite(arrival) or arrival < 0:
+            raise ValueError(f'archive has invalid observed arrival metadata for {vehicle_id}')
+        arrivals[vehicle_id] = arrival
+    return arrivals
+
+
+def archive_to_replay_episode(data: dict[str, Any], *, target_deadline_seconds: float | None = None) -> dict[str, Any]:
+    """Convert a decoded archive, using the target run's context horizon."""
+    from .replay import MacroTransition
+    from .action_events import ActionEvent
+    deadline = data['deadline_seconds'] if target_deadline_seconds is None else target_deadline_seconds
+    if not np.isfinite(deadline) or deadline <= 0:
+        raise ValueError('target deadline must be finite and positive')
     population = data["metadata"]["total_vehicle_count"]
     denominator = max(population, 1)
     rows = []
@@ -223,11 +330,17 @@ def to_replay_episode(path: Path, *, expected_session_protocol: str) -> dict[str
         vehicles = tuple(v for v in state["vehicles"] if v["departed"] and not v["arrived"])
         rows.append(MacroTransition(flow=data["flow"][index], next_flow=data["flow"][index + 1],
             action=data["action"][index], departure=data["departure"][index],
-            context=[min(state["time"] / data["deadline_seconds"], 1.), len(vehicles) / denominator],
+            context=[min(state["time"] / deadline, 1.), len(vehicles) / denominator],
             active_vehicle_fraction=float(np.clip(data["active_vehicle_seconds"][index] / (30 * denominator), 0, 1)),
             vehicles=vehicles, time=state["time"], terminal=bool(data["terminated"][index]),
-            episode=data["metadata"]["episode"], step_index=index))
+            episode=data["metadata"]["episode"], step_index=index,
+            next_vehicles=(tuple(v for v in data['states'][-1]['vehicles'] if v['departed'] and not v['arrived'])
+                           if index == len(data['action']) - 1 else None),
+            action_events=tuple(ActionEvent(**{key: event[key] for key in (
+                'vehicle_id', 'event_index', 'decision_time', 'current_edge', 'next_edge', 'destination_edge')})
+                for event in data['decisions'] if event['window_index'] == index)))
     seconds = (sum(data["travel_times"].values()) if data["completed"]
                else float(data["active_vehicle_seconds"].sum()))
     return {"transitions": tuple(rows), "total_vehicle_count": population,
-            "total_travel_minutes": seconds / (60 * denominator), "completed": data["completed"]}
+            "total_travel_minutes": seconds / (60 * denominator), "completed": data["completed"],
+            'arrival_times': observed_arrival_times(data)}

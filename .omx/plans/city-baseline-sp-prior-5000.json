@@ -1,5 +1,5 @@
 {
-  "status": "running",
+  "status": "stopped_by_user",
   "output_root": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_sp_prior_5000ep_20261002_082844",
   "previous_output_root": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_5000ep_20261001_182056",
   "episode_budget_per_run": 5000,
@@ -19,5 +19,24 @@
     "random_control": "uniform legal actions; no prior",
     "mbpo_synthetic_buffer": "discard old-weight rows whenever scheduled weight changes"
   },
-  "verification": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_sp_prior_5000ep_20261002_082844/verification.json"
+  "verification": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_sp_prior_5000ep_20261002_082844/verification.json",
+  "selective_throughput_restart": {
+    "record": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_sp_prior_5000ep_20261002_082844/restarts/throughput_20261002_111024/restart.json",
+    "verification": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_sp_prior_5000ep_20261002_082844/restarts/throughput_20261002_111024/post_launch_verification.json",
+    "runs": [
+      "fontenay_en_parisis_dreamer",
+      "fontenay_en_parisis_gnac",
+      "fontenay_en_parisis_mbpo",
+      "fontenay_en_parisis_online_ac",
+      "fontenay_en_parisis_random",
+      "gretz_armainvilliers_dreamer",
+      "gretz_armainvilliers_mbpo",
+      "ingolstadt_custom_dreamer",
+      "ingolstadt_custom_mbpo"
+    ],
+    "preserved_episodes": 286,
+    "replayed_episodes": 46
+  },
+  "preserved_episodes": 29241,
+  "preservation_record": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_sp_prior_5000ep_20261002_082844/preservation_and_stop.json"
 }

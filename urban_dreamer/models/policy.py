@@ -9,10 +9,11 @@ import torch.nn as nn
 from torch.distributions import Categorical
 
 from ..workflow.config import NONARRIVAL_PENALTY
+from ..learning.critic_budget import bounded_physical_return, validate_bounded_contract
 
 CANDIDATE_FEATURE_DIM = 10
 LATENT_DIM = 64
-CONTEXT_DIM = 2
+CONTEXT_DIM = 4
 HIDDEN_DIM = 256
 DEFAULT_GAMMA = 1.0
 DEFAULT_LAMBDA = 0.95
@@ -23,6 +24,15 @@ class ActionSelection:
     candidate_index: torch.Tensor
     log_probability: torch.Tensor
     entropy: torch.Tensor
+
+    def indices_and_entropy(self) -> tuple[list[int], list[float]]:
+        """Read collection statistics with one device-to-host transfer on CUDA."""
+        if self.candidate_index.device.type == 'cpu':
+            return self.candidate_index.tolist(), self.entropy.tolist()
+        # Float64 preserves both integer indices and the original entropy values.
+        packed = torch.stack((self.candidate_index.to(torch.float64),
+                              self.entropy.to(torch.float64)), dim=-1).cpu().tolist()
+        return [int(row[0]) for row in packed], [row[1] for row in packed]
 
 
 def _make_mlp(input_dim: int) -> nn.Sequential:
@@ -72,11 +82,13 @@ def shortest_path_prior_weight(episode: int, *, initial_weight: float = 1.,
 
 def apply_shortest_path_prior(logits: torch.Tensor, features: torch.Tensor,
                              mask: torch.Tensor, *, weight: float,
-                             temperature_seconds: float) -> torch.Tensor:
-    """Bias legal logits by full via-candidate free-flow cost, measured in seconds.
+                             temperature_seconds: float,
+                             prior_costs_seconds: torch.Tensor | None = None) -> torch.Tensor:
+    """Bias legal logits by full via-candidate travel cost, measured in seconds.
 
     Feature 4 is log1p(junction + candidate edge + downstream seconds) /
     log1p(3600). Costs are detached conditions, not another learned objective.
+    Explicit snapshot costs override this static prior without changing features.
     Input logits are already legally masked when this is called by an actor.
     """
     _validate_prior(weight, temperature_seconds)
@@ -89,13 +101,19 @@ def apply_shortest_path_prior(logits: torch.Tensor, features: torch.Tensor,
     legal = mask.to(device=logits.device, dtype=torch.bool)
     if not bool(legal.any(dim=-1).all()):
         raise ValueError("every decision must have at least one legal candidate")
-    # Mask before exponentiation: padded candidate features must not introduce NaNs.
-    encoded = features[..., 4].detach().to(logits).masked_fill(~legal, 0.)
-    if not bool(torch.isfinite(encoded).all()) or bool((encoded < 0).any()):
-        raise ValueError("legal free-flow cost features must be finite and nonnegative")
-    costs = torch.expm1(encoded * math.log1p(3600.))
-    if not bool(torch.isfinite(costs).all()) or not bool(torch.isfinite(logits[legal]).all()):
-        raise ValueError("legal free-flow costs and actor logits must be finite")
+    if prior_costs_seconds is None:
+        # Mask before exponentiation: padding must not introduce NaNs.
+        encoded = features[..., 4].detach().to(logits).masked_fill(~legal, 0.)
+        if not bool(torch.isfinite(encoded).all()) or bool((encoded < 0).any()):
+            raise ValueError("legal free-flow cost features must be finite and nonnegative")
+        costs = torch.expm1(encoded * math.log1p(3600.))
+    else:
+        if prior_costs_seconds.shape != logits.shape:
+            raise ValueError("prior_costs_seconds must have shape (B, K)")
+        costs = prior_costs_seconds.detach().to(logits).masked_fill(~legal, 0.)
+    if (not bool(torch.isfinite(costs).all()) or bool((costs < 0).any())
+            or not bool(torch.isfinite(logits[legal]).all())):
+        raise ValueError("legal prior costs and actor logits must be finite with nonnegative costs")
     minimum = costs.masked_fill(~legal, torch.inf).amin(dim=-1, keepdim=True)
     bias = (costs - minimum).masked_fill(~legal, 0.) * (weight / temperature_seconds)
     if not bool(torch.isfinite(bias).all()):
@@ -112,7 +130,8 @@ class NextHopActor(nn.Module):
         _initialize(self, self.policy_head, 0.01)
         set_shortest_path_prior(self, 0., 30.)
 
-    def forward_logits(self, features: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    def forward_logits(self, features: torch.Tensor, mask: torch.Tensor, *,
+                       prior_costs_seconds: torch.Tensor | None = None) -> torch.Tensor:
         if features.ndim != 3 or features.shape[-1] != CANDIDATE_FEATURE_DIM:
             raise ValueError(f"expected candidate features (B, K, {CANDIDATE_FEATURE_DIM})")
         if mask.shape != features.shape[:2] or features.shape[1] == 0:
@@ -124,29 +143,41 @@ class NextHopActor(nn.Module):
             raise ValueError("candidate features must be finite")
         logits = self.policy_head(self.candidate_scorer(features)).squeeze(-1).masked_fill(~mask, -torch.inf)
         return apply_shortest_path_prior(logits, features, mask, weight=self.prior_weight,
-                                         temperature_seconds=self.prior_temperature_seconds)
+                                         temperature_seconds=self.prior_temperature_seconds,
+                                         prior_costs_seconds=prior_costs_seconds)
 
-    def sample_action(self, features: torch.Tensor, mask: torch.Tensor, *, deterministic: bool = False) -> ActionSelection:
-        logits = self.forward_logits(features, mask)
-        distribution = Categorical(logits=logits)
+    def sample_action(self, features: torch.Tensor, mask: torch.Tensor, *, deterministic: bool = False,
+                      prior_costs_seconds: torch.Tensor | None = None,
+                      temperature: float = 1.) -> ActionSelection:
+        if isinstance(temperature, bool) or not math.isfinite(temperature) or temperature <= 0:
+            raise ValueError("action temperature must be finite and positive")
+        logits = (self.forward_logits(features, mask) if prior_costs_seconds is None else
+                  self.forward_logits(features, mask, prior_costs_seconds=prior_costs_seconds))
+        distribution = Categorical(logits=logits / temperature)
         selected = logits.argmax(dim=-1) if deterministic else distribution.sample()
         return ActionSelection(selected, distribution.log_prob(selected), distribution.entropy())
 
 
 class CentralizedLatentValueCritic(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, *, bounded: bool = False) -> None:
         super().__init__()
+        self.bounded = bounded
+        if bounded:
+            self.register_buffer("_bounded_cohort_contract", torch.tensor(1, dtype=torch.int64))
+            self.register_load_state_dict_pre_hook(validate_bounded_contract)
         self.trunk = _make_mlp(LATENT_DIM + CONTEXT_DIM)
         self.value_head = nn.Linear(HIDDEN_DIM, 1)
         _initialize(self, self.value_head, 1.0)
 
-    def forward(self, z: torch.Tensor, context: torch.Tensor) -> torch.Tensor:
+    def forward(self, z: torch.Tensor, context: torch.Tensor, *,
+                budget: torch.Tensor | None = None) -> torch.Tensor:
         if z.ndim != 3 or z.shape[-1] != LATENT_DIM:
             raise ValueError(f"expected z shape (B, E, {LATENT_DIM})")
         if context.shape != (z.shape[0], CONTEXT_DIM):
             raise ValueError(f"expected context shape (B, {CONTEXT_DIM})")
         pooled = z.mean(dim=1)
-        return self.value_head(self.trunk(torch.cat((pooled, context.to(pooled)), dim=-1)))
+        raw = self.value_head(self.trunk(torch.cat((pooled, context.to(pooled)), dim=-1)))
+        return bounded_physical_return(raw, budget) if self.bounded else raw
 
 
 def lambda_return(
@@ -222,6 +253,58 @@ def individual_actor_advantage(global_advantages: torch.Tensor,
     return (global_advantages / scale + timeout_returns).clamp(-2.5, 2.5)
 
 
+def population_scaled_entropy(
+    entropies: torch.Tensor,
+    populations: torch.Tensor,
+    global_advantages: torch.Tensor,
+    *,
+    base_coef: float = 0.002,
+    mode: str = 'population',
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    """Return per-event entropy bonuses in the shared reward's population units.
+
+    ``population`` divides the coefficient by each event's full episode
+    population and the same pass-wide scale used by ``individual_actor_advantage``.
+    ``legacy`` keeps the fixed coefficient; ``annealed`` uses the scheduled
+    coefficient passed by the caller without population or advantage scaling.
+    ``off`` provides a controlled ablation.
+    This helper does not change rewards, critic targets, penalties, or advantages.
+    Conditions and diagnostic scalars are detached; only entropy carries gradients.
+    Callers combine the returned vector with log-probability times advantage
+    before taking the event mean. They must derive entropy from legally masked
+    action distributions, exactly as for the policy log-probabilities.
+    """
+    if mode not in {'population', 'legacy', 'off', 'annealed'}:
+        raise ValueError('entropy mode must be population, legacy, off, or annealed')
+    if not math.isfinite(base_coef) or base_coef < 0:
+        raise ValueError('entropy coefficient must be finite and nonnegative')
+    if entropies.ndim != 1 or not entropies.is_floating_point():
+        raise ValueError('entropies must be a floating point vector')
+    advantages = global_advantages.detach().to(entropies)
+    population = torch.as_tensor(populations, device=entropies.device, dtype=entropies.dtype).detach()
+    if population.ndim == 0:
+        population = population.expand_as(entropies)
+    if advantages.shape != entropies.shape or population.shape != entropies.shape:
+        raise ValueError('entropy, global advantage, and population must align per event')
+    if not torch.isfinite(entropies).all() or not torch.isfinite(advantages).all():
+        raise ValueError('entropies and global advantages must be finite')
+    if (not torch.isfinite(population).all() or (population <= 0).any()
+            or (population != population.round()).any()):
+        raise ValueError('episode populations must be finite positive integers')
+    scale = advantages.std(unbiased=False).clamp_min(1.) if advantages.numel() else entropies.new_ones(())
+    coefficients = torch.full_like(entropies, base_coef if mode != 'off' else 0.)
+    if mode == 'population':
+        coefficients = coefficients / population / scale
+    bonuses = entropies * coefficients
+    zero = entropies.new_zeros(())
+    stats = {'entropy_advantage_scale': scale.detach(),
+             'entropy_coefficient_mean': coefficients.mean().detach() if coefficients.numel() else zero,
+             'entropy_coefficient_min': coefficients.min().detach() if coefficients.numel() else zero,
+             'entropy_coefficient_max': coefficients.max().detach() if coefficients.numel() else zero,
+             'entropy_bonus_mean': bonuses.mean().detach() if bonuses.numel() else zero}
+    return bonuses, stats
+
+
 __all__ = ["ActionSelection", "NextHopActor", "CentralizedLatentValueCritic", "lambda_return",
            "attach_timeout_penalties", "individual_actor_advantage", "apply_shortest_path_prior",
-           "shortest_path_prior_weight", "set_shortest_path_prior"]
+           "shortest_path_prior_weight", "set_shortest_path_prior", "population_scaled_entropy"]

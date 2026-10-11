@@ -18,7 +18,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         output_dir=args.output_dir,
         device=args.device,
     )
-    result = run_mainline(config)
+    result = run_mainline(config, pretrain_only=args.pretrain_only)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
@@ -26,7 +26,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m urban_dreamer",
-        description="Run or strictly resume the online world-model mainline.",
+        description="Validate the codec, pretrain dynamics, then run or resume the mainline.",
     )
     parser.add_argument(
         "--config",
@@ -42,6 +42,10 @@ def _argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--device",
         help="override [run].device (for example cpu or cuda:0)",
+    )
+    parser.add_argument(
+        '--pretrain-only', action='store_true',
+        help='stop after validated codec and dynamics pretraining; preserve the online-start checkpoint',
     )
     return parser
 

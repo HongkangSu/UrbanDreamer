@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import urban_dreamer.__main__ as cli
-from urban_dreamer.workflow.config import MainlineConfig
+from urban_dreamer.workflow.config import ConfigError, MainlineConfig
 
 
 def _write_config(path: Path) -> Path:
@@ -56,7 +57,8 @@ def test_cli_applies_only_output_and_device_overrides(
 ) -> None:
     captured: list[MainlineConfig] = []
 
-    def _fake_run(config: MainlineConfig) -> dict[str, object]:
+    def _fake_run(config: MainlineConfig, *, pretrain_only=False) -> dict[str, object]:
+        assert not pretrain_only
         captured.append(config)
         return {"status": "completed", "episodes": 1}
 
@@ -83,3 +85,39 @@ def test_cli_applies_only_output_and_device_overrides(
         "episodes": 1,
         "status": "completed",
     }
+
+
+def test_cli_missing_offline_roots_fails_before_network_or_sumo_initialization(tmp_path, monkeypatch):
+    import urban_dreamer.workflow.pipeline as pipeline
+    monkeypatch.setattr(pipeline, 'validate_prepared_inputs',
+                        lambda config: pytest.fail('missing data must be rejected before network loading'))
+    monkeypatch.setattr(pipeline, 'load_traffic_topology',
+                        lambda prepared: pytest.fail('missing data must be rejected before topology loading'))
+    with pytest.raises(ConfigError, match=r'offline pretraining.*archive_roots'):
+        cli.main(['--config', str(_write_config(tmp_path / 'mainline.toml'))])
+    assert not (tmp_path / 'output').exists()
+
+
+def test_cli_pretrain_only_flag_stops_before_online(tmp_path, monkeypatch, capsys):
+    captured = []
+    def run(config, *, pretrain_only=False):
+        captured.append(pretrain_only)
+        return {'status': 'pretrained'}
+    monkeypatch.setattr(cli, 'run_mainline', run)
+    assert cli.main(['--config', str(_write_config(tmp_path / 'mainline.toml')),
+                     '--pretrain-only']) == 0
+    assert captured == [True]
+    assert json.loads(capsys.readouterr().out) == {'status': 'pretrained'}
+
+
+def test_cli_accepts_prepared_cache_as_offline_source_without_archive_roots(tmp_path, monkeypatch):
+    import urban_dreamer.workflow.pipeline as pipeline
+    path = _write_config(tmp_path / 'mainline.toml')
+    path.write_text(path.read_text() + '\n[data]\npretrain_cache_manifest="cache/manifest.json"\n')
+    def capture(config):
+        assert config.data.archive_roots == ()
+        assert config.data.pretrain_cache_manifest == tmp_path / 'cache/manifest.json'
+        raise RuntimeError('network validation reached after source configuration check')
+    monkeypatch.setattr(pipeline, 'validate_prepared_inputs', capture)
+    with pytest.raises(RuntimeError, match='network validation reached'):
+        cli.main(['--config', str(path), '--pretrain-only'])

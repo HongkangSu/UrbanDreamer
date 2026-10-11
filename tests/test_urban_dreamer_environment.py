@@ -3,6 +3,26 @@ import pytest
 from urban_dreamer.traffic.environment import EnvironmentContractError, NextHopDecision, safe_microstep_seconds
 
 
+def test_plain_state_preserves_native_numpy_mapping_and_dataclass_values():
+    from collections import UserDict
+    from pathlib import Path
+    import numpy as np
+    from urban_dreamer.traffic.environment import to_plain_state
+    value = UserDict({7: {'sequence':(np.int64(2), np.float32(.25), np.bool_(True), None),
+                         'array':np.array([[1.,2.]],np.float32), 'path':Path('a/b'),
+                         'decision':NextHopDecision('v',0,1,2.)}})
+    expected = {'7':{'sequence':[2,.25,True,None], 'array':[[1.,2.]], 'path':'a/b',
+                     'decision':dict(vehicle_id='v',current_edge=0,next_edge=1,decision_time=2.)}}
+    plain = to_plain_state(value)
+    assert plain == expected
+    value[7]['array'][0,0]=99.
+    value[7]['sequence']=(88,)
+    assert plain == expected
+    assert to_plain_state({np.int64(4):[np.float64(.5)]}) == {'4':[.5]}
+    with pytest.raises(TypeError,match='cannot serialize'):
+        to_plain_state(object())
+
+
 def test_microstep_divides_a_second_and_observes_short_edges():
     assert safe_microstep_seconds([100., 80.], 40.) == 1.
     assert safe_microstep_seconds([.1, 80.], 40.) == .001

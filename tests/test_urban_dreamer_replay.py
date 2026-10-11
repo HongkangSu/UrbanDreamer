@@ -29,7 +29,7 @@ def test_explicit_transitions_preserve_alignment_and_seed():
     assert replay.append_episode([transition(0), transition(1, terminal=True)], total_vehicle_count=1, total_travel_minutes=1.)
     batch = replay.sample_batch(batch_size=1, rng=np.random.default_rng(0))
     assert batch.flow.shape == (1, 3, 2, 8)
-    assert batch.context.shape == (1, 2, 2)
+    assert batch.context.shape == (1, 2, 4)
     torch.testing.assert_close(batch.flow[0, :, 0, 0], torch.tensor([0., 1., 2.]))
     torch.testing.assert_close(batch.action[0, :, 0], torch.tensor([1., 2.]))
     torch.testing.assert_close(batch.departure[0, :, 1], torch.tensor([0., 1.]))
@@ -241,6 +241,20 @@ def test_exposure_without_active_start_snapshot_is_not_an_imagination_seed():
         replay.sample_active_seeds(1, np.random.default_rng(0))
 
 
+def test_initial_only_seeds_preserve_sampling_and_own_mutable_vehicle_snapshots():
+    replay = ReplayBuffer(sequence_length=3, active_only=True)
+    replay.append_episode([active_transition(i, snapshot=True, terminal=i == 4)
+                           for i in range(5)], total_vehicle_count=1, total_travel_minutes=1.)
+    full = replay.sample_active_seeds(4, np.random.default_rng(39))
+    compact = replay.sample_active_seeds(4, np.random.default_rng(39), initial_only=True)
+    torch.testing.assert_close(full.start_index, compact.start_index)
+    torch.testing.assert_close(full.flow[:, 0], compact.flow[:, 0])
+    assert compact.flow.shape[1] == 2 and compact.boundary_vehicles is None
+    compact.vehicles[0][0]['arrived'] = True
+    again = replay.sample_active_seeds(4, np.random.default_rng(39), initial_only=True)
+    assert not again.vehicles[0][0]['arrived']
+
+
 def test_episode_populations_survive_mixed_sampling_and_restore():
     replay = ReplayBuffer(sequence_length=1, active_only=True)
     replay.append_episode([active_transition(0, snapshot=True, terminal=True)],
@@ -305,3 +319,29 @@ def test_epoch_boundary_rng_restore_reproduces_next_permutation():
     for left, right in zip(expected, actual):
         torch.testing.assert_close(left.start_index, right.start_index)
         torch.testing.assert_close(left.flow, right.flow)
+
+
+def test_reward_accounting_and_signed_global_reward_survive_sampling_and_restore():
+    record = transition(0, terminal=True)
+    from dataclasses import replace
+    record = replace(record, started_count=2, cumulative_vehicle_seconds=120.,
+                     next_started_count=3, next_cumulative_vehicle_seconds=150., global_reward=1/6)
+    replay = ReplayBuffer(1)
+    replay.append_episode([record], total_vehicle_count=99, total_travel_minutes=150/3/60)
+    restored = ReplayBuffer(1)
+    restored.load_state_dict(replay.state_dict())
+    sampled = restored.sample_batch(batch_size=1, rng=np.random.default_rng(0))
+    assert sampled.started_count.tolist() == [2]
+    assert sampled.cumulative_vehicle_seconds.tolist() == [120.]
+    assert sampled.global_reward.item() == pytest.approx(1/6)
+    assert restored.episodes[0][0].next_started_count == 3
+    assert restored.episodes[0][0].next_cumulative_vehicle_seconds == 150.
+
+
+@pytest.mark.parametrize('updates', [dict(started_count=-1), dict(cumulative_vehicle_seconds=float('nan')),
+    dict(started_count=3, next_started_count=2),
+    dict(cumulative_vehicle_seconds=150., next_cumulative_vehicle_seconds=120.)])
+def test_reward_accounting_requires_finite_monotone_history(updates):
+    from dataclasses import replace
+    with pytest.raises(ValueError):
+        replace(transition(0), **updates)

@@ -1,0 +1,173 @@
+{
+  "cities": [
+    {
+      "archive": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_5000ep_20261001_182056/gretz_armainvilliers/gnac/episodes/train/episode_000001.npz",
+      "batch_size": 1,
+      "city": "gretz_armainvilliers",
+      "device": "cpu",
+      "edge_count": 4485,
+      "elapsed_seconds": 52.90360872447491,
+      "event_gradients": {
+        "edge_embedding": {
+          "l1": 0.0023805471137166023,
+          "l2": 3.516307697282173e-05,
+          "max_abs": 5.517553745448822e-06
+        },
+        "event_mlp_input": {
+          "l1": 0.020809972658753395,
+          "l2": 0.0005592747475020587,
+          "max_abs": 8.717070886632428e-05
+        },
+        "event_mlp_output": {
+          "l1": 0.04770353436470032,
+          "l2": 0.001424682093784213,
+          "max_abs": 0.0001353383413515985
+        }
+      },
+      "flow_mse": 0.0646350160241127,
+      "gradient_verification_head_std": 0.01,
+      "import_summary": {
+        "cache_limit": 2,
+        "cached_episodes": 1,
+        "completed_episodes": 0,
+        "discovered_files": 3,
+        "duplicate_files": 0,
+        "events": 104939,
+        "imported_episodes": 3,
+        "manifest_identity": "847d41222006f97894f0810c303a61832dfca01c46102597a9580cc89af22220",
+        "truncated_episodes": 3,
+        "windows": 381
+      },
+      "loss": 0.06463585793972015,
+      "manifest_identity": "847d41222006f97894f0810c303a61832dfca01c46102597a9580cc89af22220",
+      "note": "Full city graph and real archived events; functional finite-value/gradient check, not traffic performance evidence.",
+      "peak_process_rss_kib": 2099904,
+      "prior_mse": 8.397506462642923e-06,
+      "sampled_events": 479,
+      "sampled_population": 613,
+      "source_manifest_identity": "6a19bbd1e697d0e9bdcd95905e389334d3080b816936a3f84eb0fd074bd524db",
+      "status": "passed",
+      "supervision_depth": 1,
+      "target_deadline_seconds": 3810.0,
+      "window_index": 29,
+      "window_start": 870.0
+    },
+    {
+      "archive": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_5000ep_20261001_182056/fontenay_en_parisis/gnac/episodes/train/episode_000001.npz",
+      "batch_size": 1,
+      "city": "fontenay_en_parisis",
+      "device": "cpu",
+      "edge_count": 7585,
+      "elapsed_seconds": 144.07375292107463,
+      "event_gradients": {
+        "edge_embedding": {
+          "l1": 0.0015823146095499396,
+          "l2": 1.4562661817763e-05,
+          "max_abs": 1.4510308119497495e-06
+        },
+        "event_mlp_input": {
+          "l1": 0.011504549533128738,
+          "l2": 0.0003258671495132148,
+          "max_abs": 6.119204044807702e-05
+        },
+        "event_mlp_output": {
+          "l1": 0.03043009340763092,
+          "l2": 0.000936100899707526,
+          "max_abs": 9.381606651004404e-05
+        }
+      },
+      "flow_mse": 0.07603133469820023,
+      "gradient_verification_head_std": 0.01,
+      "import_summary": {
+        "cache_limit": 2,
+        "cached_episodes": 1,
+        "completed_episodes": 0,
+        "discovered_files": 3,
+        "duplicate_files": 0,
+        "events": 313982,
+        "imported_episodes": 3,
+        "manifest_identity": "73a443f4a820b5a429705bac1b27ce1f6306f1cf6ed4f2723408911a99dc6e87",
+        "truncated_episodes": 3,
+        "windows": 381
+      },
+      "loss": 0.07603225111961365,
+      "manifest_identity": "73a443f4a820b5a429705bac1b27ce1f6306f1cf6ed4f2723408911a99dc6e87",
+      "note": "Full city graph and real archived events; functional finite-value/gradient check, not traffic performance evidence.",
+      "peak_process_rss_kib": 3919544,
+      "prior_mse": 9.194372978527099e-06,
+      "sampled_events": 2111,
+      "sampled_population": 2022,
+      "source_manifest_identity": "1db986b4dc4d2f8395ec99d001cead978dc59177cd815717e20361e0b1ebb11a",
+      "status": "passed",
+      "supervision_depth": 1,
+      "target_deadline_seconds": 3810.0,
+      "window_index": 28,
+      "window_start": 840.0
+    },
+    {
+      "archive": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baseline_dataset_5000ep_20261001_182056/ingolstadt_custom/gnac/episodes/train/episode_000001.npz",
+      "batch_size": 1,
+      "city": "ingolstadt_custom",
+      "device": "cpu",
+      "edge_count": 853,
+      "elapsed_seconds": 14.422670520842075,
+      "event_gradients": {
+        "edge_embedding": {
+          "l1": 0.005113608669489622,
+          "l2": 0.00014986252062954009,
+          "max_abs": 5.3110881708562374e-05
+        },
+        "event_mlp_input": {
+          "l1": 0.06345778703689575,
+          "l2": 0.0018165791407227516,
+          "max_abs": 0.00020784977823495865
+        },
+        "event_mlp_output": {
+          "l1": 0.10506334155797958,
+          "l2": 0.003284832928329706,
+          "max_abs": 0.00045180792221799493
+        }
+      },
+      "flow_mse": 0.07231119275093079,
+      "gradient_verification_head_std": 0.01,
+      "import_summary": {
+        "cache_limit": 2,
+        "cached_episodes": 1,
+        "completed_episodes": 0,
+        "discovered_files": 3,
+        "duplicate_files": 0,
+        "events": 103793,
+        "imported_episodes": 3,
+        "manifest_identity": "8b8ac3309cafd9869776d6e710e6515c10751cd28435e6b49692d004176180e2",
+        "truncated_episodes": 3,
+        "windows": 381
+      },
+      "loss": 0.07252916693687439,
+      "manifest_identity": "8b8ac3309cafd9869776d6e710e6515c10751cd28435e6b49692d004176180e2",
+      "note": "Full city graph and real archived events; functional finite-value/gradient check, not traffic performance evidence.",
+      "peak_process_rss_kib": 1091632,
+      "prior_mse": 0.0021797181107103825,
+      "sampled_events": 611,
+      "sampled_population": 1007,
+      "source_manifest_identity": "bd3a9fb0080d9652f3ac193ad47fa471fe79b96f7d9557b692c230ab60bd6059",
+      "status": "passed",
+      "supervision_depth": 1,
+      "target_deadline_seconds": 3810.0,
+      "window_index": 57,
+      "window_start": 1710.0
+    }
+  ],
+  "date": "2026-10-02",
+  "head_initialization": "Velocity and graph-prior output head weights initialized with std=0.01 to exercise the gradient path beyond their normal zero initialization.",
+  "performance_claim": false,
+  "protocol": {
+    "batch_size": 1,
+    "macro_seconds": 30,
+    "observation_seconds": 1,
+    "session": "event",
+    "supervision_depth": 1
+  },
+  "status": "passed",
+  "tool": "tools/verify_event_city_archives.py",
+  "verification": "Real archived city events, full network event-conditioned recursive FM forward/backward; finite loss and nonzero finite event embedding and event MLP gradients."
+}

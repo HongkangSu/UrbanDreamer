@@ -32,9 +32,9 @@ def main():
     subprocess.run(['/usr/bin/tmux', 'list-sessions'], stdout=subprocess.DEVNULL,
                    stderr=subprocess.DEVNULL)  # A server need not exist yet.
     manifest = dict(created_at=datetime.now(timezone.utc).isoformat(),
-        reward_contract='global_physical_individual_timeout_v1',
-        reward='shared -active_vehicle_seconds/(N*60); individual -5000 only for the unfinished vehicle',
-        selection_score='global_reward_sum + vehicle_timeout_penalty_sum; diagnostic ranking only',
+        reward_contract='causal_cumulative_mean_global_v1',
+        reward='shared -delta(C/max(B,1))/60; no individual timeout shaping',
+        selection_score='global_reward_sum; finite-horizon observed-mean criterion',
         demand='independent fixed-rate OD Poisson processes',
         training_policy='categorical sampling for AC; seeded OD path-fraction allocation for DTA-SO',
         evaluation_policy='argmax AC; reproducible seeded allocation DTA-SO',

@@ -1,0 +1,46 @@
+{
+  "deleted_npz": 0,
+  "candidates": [
+    {
+      "root": "outputs/ingolstadt_online_libsumo_20261004",
+      "npz_count": 466,
+      "potential_reclaim_bytes_if_all_npz_removed": 2537058304,
+      "cache_manifest_audit": {
+        "total_bytes": 2537058304,
+        "not_referenced_by_cache_manifests_bytes": 2537058304
+      },
+      "requires_decision": "Discard historical per-step trajectories; retain model checkpoints and summary files."
+    },
+    {
+      "root": "outputs/ingolstadt_online_meso_20261006",
+      "npz_count": 557,
+      "potential_reclaim_bytes_if_all_npz_removed": 2017030144,
+      "cache_manifest_audit": {
+        "total_bytes": 2017030144,
+        "not_referenced_by_cache_manifests_bytes": 2017030144
+      },
+      "requires_decision": "Discard historical per-step trajectories; retain model checkpoints and summary files."
+    },
+    {
+      "root": "outputs/convergence_diagnosis_20261005",
+      "npz_count": 62,
+      "potential_reclaim_bytes_if_all_npz_removed": 318550016,
+      "cache_manifest_audit": {
+        "total_bytes": 318550016,
+        "not_referenced_by_cache_manifests_bytes": 318550016
+      },
+      "requires_decision": "Discard historical per-step trajectories; retain model checkpoints and summary files."
+    },
+    {
+      "root": "outputs/city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632",
+      "npz_count": 8788,
+      "potential_reclaim_bytes_if_all_npz_removed": 4102692864,
+      "cache_manifest_audit": {
+        "total_bytes": 4102692864,
+        "not_referenced_by_cache_manifests_bytes": 4102692864
+      },
+      "requires_decision": "Discard historical per-step trajectories; retain model checkpoints and summary files."
+    }
+  ],
+  "limitation": "No direct reference in six scanned cache manifests or current Python command lines; not a proof of absence of all indirect dependencies. No archive contents were deleted."
+}

@@ -1,0 +1,1564 @@
+{
+  "unique_inode_allocated_bytes_by_extension": {
+    ".npz": 321286742016,
+    ".pt": 155744268288,
+    ".jsonl": 32061612032,
+    ".json": 13152718848,
+    ".tmp": 1421004800,
+    ".xml": 1162711040,
+    ".log": 372772864,
+    ".py": 109031424,
+    ".csv": 61689856,
+    ".gz": 50524160,
+    ".png": 42209280,
+    "": 12242944,
+    ".pdf": 9986048,
+    ".toml": 3194880,
+    ".txt": 1847296,
+    ".llir": 1843200,
+    ".ptx": 1687552,
+    ".cubin": 1617920,
+    ".source": 1523712,
+    ".ttgir": 1126400,
+    ".ttir": 1011712,
+    ".pstats": 675840,
+    ".prof": 651264,
+    ".md": 618496,
+    ".so": 434176,
+    ".cpp": 237568,
+    ".best_config": 163840,
+    ".pid": 155648,
+    ".duarcfg": 122880,
+    ".sumocfg": 122880,
+    ".sh": 69632,
+    ".sample": 53248,
+    ".exit": 49152,
+    ".bat": 24576,
+    ".yaml": 16384,
+    ".ipynb": 12288,
+    ".cff": 4096,
+    ".lock": 0,
+    ".jinja": 0,
+    ".safetensors": 0
+  },
+  "directories": {
+    "city_baselines_noincident_noprior_penalty_5000ep_20261008": {
+      "total": 103101145088,
+      ".json": 164610048,
+      ".lock": 0,
+      ".log": 90185728,
+      ".tmp": 1248915456,
+      ".pt": 10020061184,
+      ".jsonl": 3237203968,
+      ".npz": 88320221184,
+      ".py": 2011136,
+      ".md": 4096,
+      "": 4096,
+      ".toml": 69632,
+      ".xml": 17727488,
+      ".txt": 32768,
+      ".csv": 98304
+    },
+    "city_baselines_v5_1500_noprior_penalty_20261009": {
+      "total": 98441396224,
+      ".json": 164052992,
+      ".lock": 0,
+      ".log": 15183872,
+      ".pt": 31983206400,
+      ".jsonl": 1630298112,
+      ".tmp": 167899136,
+      ".npz": 64461213696,
+      ".py": 1982464,
+      ".md": 4096,
+      "": 4096,
+      ".toml": 69632,
+      ".xml": 17371136,
+      ".txt": 32768,
+      ".csv": 77824
+    },
+    "ingolstadt_full_retrain_20261009": {
+      "total": 87998820352,
+      ".log": 15069184,
+      ".json": 514744320,
+      ".pid": 8192,
+      ".lock": 0,
+      ".toml": 323584,
+      ".md": 53248,
+      ".py": 23822336,
+      ".npz": 83995123712,
+      ".tmp": 466944,
+      "": 10739712,
+      ".pt": 3414102016,
+      ".png": 1884160,
+      ".pdf": 241664,
+      ".csv": 49152,
+      ".jsonl": 13217792,
+      ".best_config": 163840,
+      ".ttgir": 1126400,
+      ".cubin": 1617920,
+      ".source": 1523712,
+      ".llir": 1843200,
+      ".ttir": 1011712,
+      ".ptx": 1687552
+    },
+    "two_city_urbandreamer_pretrain_supplement_20261011": {
+      "total": 35780427776,
+      ".json": 371539968,
+      ".py": 5922816,
+      ".md": 8192,
+      "": 8192,
+      ".toml": 286720,
+      ".log": 176128,
+      ".lock": 0,
+      ".txt": 24576,
+      ".xml": 15495168,
+      ".csv": 2625536,
+      ".pt": 603684864,
+      ".npz": 34778406912,
+      ".png": 1753088,
+      ".pdf": 495616
+    },
+    "city_baselines_paper_reward_20261010": {
+      "total": 31530397696,
+      ".json": 326864896,
+      ".lock": 0,
+      ".log": 52797440,
+      ".py": 4349952,
+      ".md": 8192,
+      "": 8192,
+      ".toml": 139264,
+      ".xml": 35098624,
+      ".txt": 65536,
+      ".csv": 176128,
+      ".jsonl": 3732537344,
+      ".npz": 5013504,
+      ".pt": 27373338624
+    },
+    "city_baselines_entropy_annealed_20261010": {
+      "total": 30943248384,
+      ".json": 326471680,
+      ".lock": 0,
+      ".log": 35672064,
+      ".py": 3985408,
+      ".md": 8192,
+      "": 8192,
+      ".toml": 139264,
+      ".xml": 35098624,
+      ".txt": 65536,
+      ".csv": 176128,
+      ".jsonl": 3125252096,
+      ".npz": 28536832,
+      ".pt": 27387834368
+    },
+    "two_city_urbandreamer_pretrain_20261010": {
+      "total": 27725918208,
+      ".json": 238931968,
+      ".py": 8069120,
+      ".log": 4214784,
+      ".lock": 0,
+      ".toml": 409600,
+      ".txt": 24576,
+      ".xml": 15495168,
+      ".csv": 61440,
+      ".pt": 504451072,
+      ".jsonl": 212992,
+      ".npz": 26954022912,
+      ".md": 12288,
+      "": 12288
+    },
+    "city_baselines_argmax_20261011": {
+      "total": 14184267776,
+      ".json": 326434816,
+      ".lock": 0,
+      ".log": 143360,
+      ".py": 4366336,
+      ".md": 8192,
+      "": 8192,
+      ".toml": 139264,
+      ".xml": 35098624,
+      ".txt": 65536,
+      ".csv": 176128,
+      ".jsonl": 5856014336,
+      ".npz": 19546112,
+      ".pt": 7942266880
+    },
+    "city_baselines_sampling_t0p2_20261011": {
+      "total": 12412129280,
+      ".json": 326508544,
+      ".lock": 0,
+      ".log": 139264,
+      ".py": 4366336,
+      ".md": 8192,
+      "": 8192,
+      ".toml": 139264,
+      ".xml": 35098624,
+      ".txt": 65536,
+      ".csv": 176128,
+      ".jsonl": 5846245376,
+      ".npz": 31830016,
+      ".pt": 6167543808
+    },
+    "city_baselines_sampling_t2_20261011": {
+      "total": 11232632832,
+      ".json": 326463488,
+      ".lock": 0,
+      ".log": 335872,
+      ".py": 4366336,
+      ".md": 8192,
+      "": 8192,
+      ".toml": 139264,
+      ".xml": 35098624,
+      ".txt": 65536,
+      ".csv": 176128,
+      ".jsonl": 5817790464,
+      ".npz": 12722176,
+      ".pt": 5035458560
+    },
+    "city_baseline_dataset_meso_extra_sp_prior_global_5000ep_20261006_174632": {
+      "total": 9890529280,
+      ".json": 3784704,
+      ".jsonl": 1759399936,
+      ".log": 18309120,
+      "": 12288,
+      ".pt": 3999064064,
+      ".lock": 0,
+      ".npz": 4102692864,
+      ".tmp": 475136,
+      ".png": 2793472,
+      ".pdf": 315392,
+      ".csv": 471040,
+      ".py": 3129344,
+      ".md": 8192,
+      ".toml": 73728
+    },
+    "city_baseline_dataset_meso_no_revisit_5000ep_20261006_155101": {
+      "total": 9343713280,
+      ".json": 2514944,
+      ".jsonl": 2183168,
+      ".log": 81920,
+      "": 4096,
+      ".npz": 85118976,
+      ".lock": 0,
+      ".pt": 9249079296,
+      ".tmp": 3248128,
+      ".py": 1445888,
+      ".toml": 36864
+    },
+    "ingolstadt_online_meso_noincident_entropyfix_20261008": {
+      "total": 5128290304,
+      ".json": 913309696,
+      ".jsonl": 32022528,
+      ".pt": 649490432,
+      ".toml": 45056,
+      ".npz": 3504627712,
+      ".py": 1519616,
+      ".xml": 27156480,
+      ".txt": 49152,
+      ".csv": 69632
+    },
+    "short_cycle_patch_20261009": {
+      "total": 4242374656,
+      ".md": 16384,
+      ".json": 3769655296,
+      ".py": 204800,
+      ".txt": 380928,
+      ".xml": 361754624,
+      ".csv": 1310720,
+      ".log": 81920,
+      ".toml": 86016,
+      ".pt": 108883968
+    },
+    "ingolstadt_online_libsumo_20261004": {
+      "total": 3176042496,
+      ".json": 13185024,
+      ".jsonl": 6684672,
+      ".pt": 618233856,
+      ".toml": 4096,
+      ".pdf": 98304,
+      ".png": 737280,
+      ".log": 4096,
+      ".csv": 36864,
+      ".npz": 2537058304
+    },
+    "ingo_latest_argmax_20261010": {
+      "total": 2675785728,
+      ".json": 3248128,
+      ".log": 57344,
+      ".py": 49152,
+      ".csv": 8192,
+      ".md": 8192,
+      ".npz": 97505280,
+      ".pt": 2574909440
+    },
+    "montereau_ac_prior_ablation_500_20261011": {
+      "total": 2579427328,
+      ".json": 76840960,
+      ".py": 987136,
+      ".log": 118784,
+      ".csv": 32768,
+      ".png": 253952,
+      ".pt": 201396224,
+      ".jsonl": 27852800,
+      ".npz": 2264416256,
+      ".md": 4096,
+      "": 4096,
+      ".toml": 8192,
+      ".txt": 12288,
+      ".xml": 7499776
+    },
+    "ingolstadt_pretrain_cache_20261002": {
+      "total": 2546323456,
+      ".json": 28868608,
+      "": 4096,
+      ".log": 16384,
+      ".pid": 4096,
+      ".npz": 2517430272
+    },
+    "montereau_dynamic_prior_ac_500_20261011": {
+      "total": 2527174656,
+      ".json": 225435648,
+      ".py": 2928640,
+      ".log": 77824,
+      ".md": 12288,
+      "": 12288,
+      ".toml": 24576,
+      ".txt": 36864,
+      ".xml": 22499328,
+      ".csv": 86016,
+      ".pt": 347709440,
+      ".jsonl": 23703552,
+      ".npz": 1904648192
+    },
+    "ingolstadt_online_meso_20261006": {
+      "total": 2339774464,
+      ".json": 15745024,
+      ".pt": 293335040,
+      ".jsonl": 10227712,
+      ".log": 32768,
+      ".toml": 40960,
+      ".pdf": 319488,
+      ".png": 1421312,
+      ".csv": 147456,
+      ".py": 1474560,
+      ".npz": 2017030144
+    },
+    "convergence_diagnosis_20261005": {
+      "total": 2168971264,
+      ".log": 1622016,
+      ".py": 237568,
+      ".json": 3731456,
+      ".pt": 1833533440,
+      ".npz": 318550016,
+      ".png": 376832,
+      ".pdf": 65536,
+      ".md": 8192,
+      ".toml": 4096,
+      ".gz": 9965568,
+      ".jsonl": 876544
+    },
+    "ingo_temperature02_latest_20261011": {
+      "total": 2157858816,
+      ".json": 327446528,
+      ".py": 4182016,
+      ".log": 45056,
+      ".csv": 200704,
+      ".npz": 69091328,
+      ".pt": 1721217024,
+      ".md": 8192,
+      "": 8192,
+      ".toml": 139264,
+      ".xml": 35454976,
+      ".txt": 65536
+    },
+    "ingolstadt_online_meso_sp_prior_20261007": {
+      "total": 2095222784,
+      ".json": 868728832,
+      ".jsonl": 2801664,
+      ".pt": 700989440,
+      ".toml": 45056,
+      ".py": 1486848,
+      ".xml": 27156480,
+      ".txt": 49152,
+      ".csv": 69632,
+      ".npz": 493895680
+    },
+    "ingolstadt_online_meso_noincident_noprior_20261007": {
+      "total": 1649438720,
+      ".json": 879345664,
+      ".jsonl": 11268096,
+      ".pt": 570781696,
+      ".toml": 40960,
+      ".py": 1511424,
+      ".xml": 27156480,
+      ".txt": 49152,
+      ".csv": 69632,
+      ".npz": 159215616
+    },
+    "city_online_ac_dta_so_individual_timeout_seed42_20261001": {
+      "total": 1178353664,
+      ".json": 917504,
+      ".log": 53751808,
+      ".png": 724992,
+      ".pt": 560898048,
+      ".jsonl": 561790976,
+      ".sh": 24576,
+      ".py": 184320,
+      ".toml": 12288,
+      ".pid": 24576,
+      ".exit": 24576
+    },
+    "noincident_decline_diagnosis_20261008": {
+      "total": 946081792,
+      ".log": 106496,
+      ".md": 20480,
+      ".json": 5402624,
+      ".csv": 2813952,
+      ".toml": 4096,
+      ".pt": 904052736,
+      ".pdf": 20480,
+      ".png": 110592,
+      ".py": 8192,
+      ".jsonl": 81920,
+      ".npz": 33460224
+    },
+    "dta_so_current_networks_50iter_20261008": {
+      "total": 916664320,
+      ".json": 155942912,
+      ".log": 49152,
+      ".pt": 148975616,
+      ".npz": 593719296,
+      ".py": 1941504,
+      ".md": 4096,
+      "": 4096,
+      ".toml": 69632,
+      ".txt": 24576,
+      ".xml": 15851520,
+      ".csv": 81920
+    },
+    "ingolstadt_online_pilot_20261003": {
+      "total": 859951104,
+      ".json": 2736128,
+      ".jsonl": 827392,
+      ".toml": 4096,
+      ".npz": 380616704,
+      ".pt": 475766784
+    },
+    "ingo_bounded_critic_candidate_20261011": {
+      "total": 760958976,
+      ".json": 24576,
+      ".pt": 760926208,
+      ".toml": 8192
+    },
+    "city_speed_diagnosis_20261008": {
+      "total": 653467648,
+      ".png": 114688,
+      ".json": 325115904,
+      ".py": 3723264,
+      ".pdf": 24576,
+      ".npz": 285564928,
+      ".md": 8192,
+      "": 8192,
+      ".toml": 139264,
+      ".xml": 37961728,
+      ".txt": 114688,
+      ".csv": 212992,
+      ".prof": 479232
+    },
+    "demand_od_screen_20261009": {
+      "total": 597852160,
+      ".py": 73728,
+      ".json": 489197568,
+      ".md": 12288,
+      ".pt": 74907648,
+      ".log": 131072,
+      ".jsonl": 49152,
+      ".png": 294912,
+      ".csv": 131072,
+      ".pdf": 49152,
+      ".npz": 10457088,
+      ".toml": 12288,
+      ".txt": 36864,
+      ".xml": 22499328
+    },
+    "baseline_algorithm_audit_20261007": {
+      "total": 593502208,
+      ".json": 90112,
+      ".py": 24576,
+      ".pt": 593199104,
+      ".md": 45056,
+      ".log": 45056,
+      ".jsonl": 40960,
+      ".npz": 57344
+    },
+    "imagination_40s_20261004": {
+      "total": 565129216,
+      ".json": 139264,
+      ".py": 2490368,
+      ".log": 4096,
+      ".pt": 562368512,
+      ".toml": 4096,
+      ".pstats": 90112,
+      ".txt": 32768
+    },
+    "city_online_ac_dta_so_poisson_seed42_20261001": {
+      "total": 563421184,
+      ".json": 897024,
+      ".log": 5365760,
+      ".png": 409600,
+      ".pt": 496414720,
+      ".jsonl": 60067840,
+      ".sh": 24576,
+      ".py": 180224,
+      ".toml": 12288,
+      ".pid": 24576,
+      ".exit": 24576
+    },
+    "ingo_cohort_reward_audit_20261011": {
+      "total": 393490432,
+      ".json": 1773568,
+      ".toml": 4096,
+      ".pt": 380911616,
+      ".csv": 32768,
+      ".npz": 10768384
+    },
+    "ingolstadt_custom": {
+      "total": 380334080,
+      ".png": 106496,
+      ".json": 8192,
+      ".xml": 901120,
+      ".csv": 413696,
+      ".pt": 378904576
+    },
+    "toy_urbandreamer_warmup250_seed42_20260929": {
+      "total": 370946048,
+      ".json": 4096,
+      ".pt": 370941952
+    },
+    "candidate_bidi_length_fix_20261008": {
+      "total": 369938432,
+      ".json": 311435264,
+      ".py": 1929216,
+      ".md": 4096,
+      "": 4096,
+      ".toml": 69632,
+      ".txt": 49152,
+      ".xml": 31703040,
+      ".csv": 163840,
+      ".npz": 24580096
+    },
+    "candidate_random_lengths_no_mutual_uturn_20261008": {
+      "total": 361037824,
+      ".json": 311930880,
+      ".csv": 180224,
+      ".txt": 49152,
+      ".xml": 48869376,
+      ".log": 8192
+    },
+    "baseline_algorithm_repair_20261007": {
+      "total": 355921920,
+      ".json": 155648,
+      ".py": 16384,
+      ".md": 8192,
+      ".log": 167936,
+      ".npz": 192512,
+      ".pt": 355233792,
+      ".jsonl": 147456
+    },
+    "penalty_baselines_smoke_20261007": {
+      "total": 355631104,
+      ".log": 57344,
+      ".py": 8192,
+      ".toml": 4096,
+      ".json": 131072,
+      ".pt": 355270656,
+      ".jsonl": 65536,
+      ".npz": 57344,
+      ".xml": 28672,
+      ".txt": 4096,
+      ".csv": 4096
+    },
+    "online_profile_20261004": {
+      "total": 352559104,
+      ".log": 102400,
+      ".json": 217088,
+      ".toml": 4096,
+      ".py": 4214784,
+      ".pt": 347549696,
+      ".pstats": 339968,
+      ".txt": 131072
+    },
+    "dreamer_inference_optimization_20261007": {
+      "total": 345120768,
+      ".json": 5705728,
+      ".py": 81920,
+      ".pt": 339324928,
+      ".md": 8192
+    },
+    "baseline_restart_20261009": {
+      "total": 342913024,
+      ".py": 16384,
+      ".txt": 49152,
+      ".json": 311377920,
+      ".xml": 31346688,
+      ".csv": 122880
+    },
+    "fm_prior_verification_20261001": {
+      "total": 334114816,
+      ".json": 53248,
+      ".toml": 8192,
+      ".pt": 334053376
+    },
+    "online_profile_round2_20261004": {
+      "total": 332750848,
+      ".json": 118784,
+      ".log": 73728,
+      ".toml": 4096,
+      ".py": 602112,
+      ".npz": 37380096,
+      ".pt": 294236160,
+      ".pstats": 245760,
+      ".txt": 90112
+    },
+    "fm_prior_no_global_context_20261001": {
+      "total": 331927552,
+      ".json": 45056,
+      ".toml": 8192,
+      ".pt": 331874304
+    },
+    "demand_timing_stress_20261011": {
+      "total": 314425344,
+      ".json": 10145792,
+      ".log": 180224,
+      ".py": 90112,
+      ".csv": 4096,
+      ".md": 4096,
+      ".npz": 286199808,
+      ".pid": 81920,
+      ".pt": 17719296
+    },
+    "collector_optimization_20261007": {
+      "total": 300498944,
+      ".json": 94208,
+      ".log": 53248,
+      ".py": 4096,
+      ".pt": 300105728,
+      ".jsonl": 73728,
+      ".npz": 163840,
+      ".toml": 4096
+    },
+    "meso_decline_diagnosis_20261007": {
+      "total": 278228992,
+      ".log": 81920,
+      ".py": 61440,
+      ".json": 4210688,
+      ".npz": 28422144,
+      ".csv": 10481664,
+      ".jsonl": 9699328,
+      ".toml": 4096,
+      ".pt": 225222656,
+      ".md": 45056
+    },
+    "meso_migration_validation_20261006": {
+      "total": 269774848,
+      ".log": 65536,
+      ".json": 2461696,
+      ".toml": 16384,
+      ".npz": 1249280,
+      ".pt": 265981952
+    },
+    "no_revisit_validation_20261004_195622": {
+      "total": 257171456,
+      ".log": 229376,
+      ".json": 184320,
+      ".jsonl": 1040384,
+      ".npz": 90218496,
+      ".pt": 164192256,
+      ".py": 1269760,
+      ".toml": 36864
+    },
+    "three_city_ga_routing_20261010": {
+      "total": 246661120,
+      ".json": 163258368,
+      ".log": 53248,
+      ".csv": 81920,
+      ".md": 8192,
+      ".py": 913408,
+      ".npz": 64917504,
+      "": 4096,
+      ".toml": 20480,
+      ".xml": 17371136,
+      ".txt": 32768
+    },
+    "ac_counterfactual_20261010": {
+      "total": 246087680,
+      ".json": 221388800,
+      ".png": 196608,
+      ".csv": 114688,
+      ".md": 12288,
+      ".pdf": 28672,
+      ".gz": 24346624
+    },
+    "dta_fontenay_en_parisis_seed42_20260930": {
+      "total": 218865664,
+      ".pt": 141230080,
+      ".json": 4096,
+      ".jsonl": 77631488
+    },
+    "ingolstadt_noise_training_pair_20261003": {
+      "total": 197607424,
+      ".log": 8192,
+      ".json": 1007616,
+      ".pt": 196591616
+    },
+    "entropy_baseline_overlay_20261010": {
+      "total": 182116352,
+      ".json": 162529280,
+      ".py": 2027520,
+      ".md": 4096,
+      "": 4096,
+      ".toml": 69632,
+      ".xml": 17371136,
+      ".txt": 32768,
+      ".csv": 77824
+    },
+    "shortest_30second_observation_20261011": {
+      "total": 178483200,
+      ".json": 2588672,
+      ".log": 151552,
+      ".py": 53248,
+      ".csv": 4096,
+      ".md": 4096,
+      ".npz": 175681536
+    },
+    "dta_so_current_networks_5iter_20261008": {
+      "total": 178257920,
+      ".json": 106496,
+      ".pdf": 28672,
+      ".png": 159744,
+      ".py": 4096,
+      ".npz": 177958912
+    },
+    "candidate_short_edges_10m_20261007": {
+      "total": 173363200,
+      ".json": 156135424,
+      ".txt": 24576,
+      ".xml": 17104896,
+      ".csv": 98304
+    },
+    "toy_cross_bottleneck": {
+      "total": 172838912,
+      ".json": 8192,
+      ".xml": 139264,
+      ".csv": 12288,
+      ".pt": 172679168
+    },
+    "montereau_mainline1500_20261009": {
+      "total": 171655168,
+      ".json": 155697152,
+      ".txt": 24576,
+      ".xml": 15851520,
+      ".csv": 81920
+    },
+    "mainline_global_poisson_smoke_20261001": {
+      "total": 169074688,
+      ".jsonl": 4096,
+      ".json": 12288,
+      ".log": 12288,
+      ".py": 4096,
+      ".toml": 4096,
+      ".pt": 169037824
+    },
+    "event_mainline_verify_20261002_traci_restored": {
+      "total": 167120896,
+      ".json": 20480,
+      ".npz": 24576,
+      ".pt": 167075840
+    },
+    "event_mainline_verify_20261002_libsumo": {
+      "total": 167116800,
+      ".json": 20480,
+      ".npz": 24576,
+      ".pt": 167071744
+    },
+    "offline_pretrain_verify_20261002_external_config": {
+      "total": 167104512,
+      ".json": 20480,
+      ".npz": 28672,
+      ".pt": 167055360
+    },
+    "event_mainline_verify_20261002_completed": {
+      "total": 167100416,
+      ".json": 20480,
+      ".npz": 24576,
+      ".pt": 167055360
+    },
+    "offline_pretrain_verify_20261002_traci": {
+      "total": 167100416,
+      ".json": 16384,
+      ".npz": 28672,
+      ".pt": 167055360
+    },
+    "offline_pretrain_verify_20261002_libsumo": {
+      "total": 167096320,
+      ".json": 16384,
+      ".npz": 28672,
+      ".pt": 167051264
+    },
+    "event_mainline_verify_20261002_final": {
+      "total": 167096320,
+      ".json": 20480,
+      ".npz": 24576,
+      ".pt": 167051264
+    },
+    "ingo_official_dso_20261010": {
+      "total": 156577792,
+      ".json": 598016,
+      ".xml": 155451392,
+      ".md": 4096,
+      ".py": 24576,
+      ".log": 249856,
+      ".csv": 4096,
+      ".duarcfg": 122880,
+      ".sumocfg": 122880
+    },
+    "montereau_collection_speed_20261011": {
+      "total": 146698240,
+      ".npz": 36700160,
+      ".log": 32768,
+      ".md": 4096,
+      ".prof": 172032,
+      ".json": 454656,
+      ".py": 24576,
+      ".pt": 109297664,
+      ".txt": 12288
+    },
+    "montereau_actor_only_eval_20261011": {
+      "total": 136032256,
+      ".npz": 25563136,
+      ".py": 16384,
+      ".pt": 109969408,
+      ".json": 454656,
+      ".log": 24576,
+      ".md": 4096
+    },
+    "ingolstadt_pretrain_pilot_20261002": {
+      "total": 133464064,
+      ".json": 303104,
+      ".py": 28672,
+      ".log": 4096,
+      ".toml": 4096,
+      ".png": 237568,
+      ".jsonl": 131072,
+      ".pt": 132755456
+    },
+    "additional_baselines_alignment_20261006": {
+      "total": 119570432,
+      ".json": 8192,
+      ".pt": 119529472,
+      ".npz": 32768
+    },
+    "inflight_reduction_20261008": {
+      "total": 115269632,
+      ".json": 221184,
+      ".npz": 109166592,
+      ".py": 5648384,
+      ".md": 12288,
+      "": 12288,
+      ".toml": 208896
+    },
+    "shortedge10m_completion_dta5_20261007": {
+      "total": 114855936,
+      ".py": 24576,
+      ".log": 49152,
+      ".csv": 8192,
+      ".json": 196608,
+      ".pt": 114577408
+    },
+    "mainline_ac_comparison_20261007": {
+      "total": 109117440,
+      ".csv": 159744,
+      ".json": 1351680,
+      ".pdf": 139264,
+      ".py": 8192,
+      ".png": 438272,
+      ".jsonl": 107020288
+    },
+    "ingolstadt_bf16_pretrain_20261002": {
+      "total": 100384768,
+      ".json": 45056,
+      ".toml": 4096,
+      ".png": 552960,
+      ".pdf": 73728,
+      ".csv": 61440,
+      ".pt": 99647488
+    },
+    "ingolstadt_complete_cohort_pretrain_20261002": {
+      "total": 99676160,
+      ".json": 20480,
+      ".toml": 4096,
+      ".pt": 99651584
+    },
+    "ingolstadt_per_transition_pretrain_20261002": {
+      "total": 99672064,
+      ".json": 12288,
+      ".toml": 4096,
+      ".pt": 99655680
+    },
+    "ingolstadt_codec_diagnosis_20261002": {
+      "total": 99127296,
+      ".json": 135168,
+      ".log": 16384,
+      ".pt": 98975744
+    },
+    "unfinished_diagnosis_20261009": {
+      "total": 91402240,
+      ".cpp": 40960,
+      ".py": 45056,
+      ".md": 12288,
+      ".pdf": 28672,
+      ".png": 212992,
+      ".json": 67592192,
+      ".log": 49152,
+      ".pt": 23420928
+    },
+    "toy_baseline_dreamer_global_5000_seed42_20260930": {
+      "total": 88616960,
+      ".pt": 83472384,
+      ".json": 4096,
+      ".jsonl": 5140480
+    },
+    "toy_baseline_dreamer_5000_seed42_20260929": {
+      "total": 84062208,
+      ".pt": 83369984,
+      ".json": 4096,
+      ".jsonl": 688128
+    },
+    "baseline_throughput_first_two_20261002": {
+      "total": 82055168,
+      ".json": 77824,
+      ".log": 49152,
+      ".jsonl": 122880,
+      ".py": 8192,
+      ".pt": 81608704,
+      ".npz": 188416
+    },
+    "dta_gretz_armainvilliers_seed42_20260930": {
+      "total": 75751424,
+      ".pt": 31879168,
+      ".json": 4096,
+      ".jsonl": 43868160
+    },
+    "ga_improvement_20261011": {
+      "total": 69332992,
+      ".py": 40960,
+      ".log": 73728,
+      ".json": 811008,
+      ".csv": 4096,
+      ".md": 4096,
+      ".npz": 68399104
+    },
+    "ingo_reference_reselection_20261007": {
+      "total": 47292416,
+      ".json": 487424,
+      ".log": 16384,
+      ".npz": 147456,
+      ".py": 12288,
+      ".pt": 46555136,
+      ".toml": 8192,
+      ".csv": 65536
+    },
+    "toy_baseline_mbpo_global_5000_seed42_20260930": {
+      "total": 42991616,
+      ".pt": 34033664,
+      ".json": 4096,
+      ".jsonl": 8953856
+    },
+    "stall_diagnosis_20261007": {
+      "total": 40390656,
+      ".log": 28672,
+      ".csv": 4096,
+      ".json": 25886720,
+      ".py": 8192,
+      ".npz": 14462976
+    },
+    "ingolstadt_online_meso_noincident_entropyfix_20261008_supervisor": {
+      "total": 37842944,
+      ".log": 37830656,
+      ".pid": 4096,
+      ".py": 4096,
+      ".json": 4096
+    },
+    "toy_baseline_mbpo_5000_seed42_20260929": {
+      "total": 36495360,
+      ".pt": 35291136,
+      ".json": 4096,
+      ".jsonl": 1200128
+    },
+    "ingolstadt_noincident_codec_parallel_20261007": {
+      "total": 36302848,
+      ".json": 86016,
+      ".jsonl": 458752,
+      ".npz": 35758080
+    },
+    "two_city_realtime_shortest_20261011": {
+      "total": 35921920,
+      ".log": 28672,
+      ".csv": 4096,
+      ".md": 4096,
+      ".json": 446464,
+      ".py": 8192,
+      ".npz": 35430400
+    },
+    "city_demand_release_3600s_20261008": {
+      "total": 31678464,
+      ".json": 12288,
+      ".toml": 16384,
+      ".csv": 90112,
+      ".npz": 31559680
+    },
+    "maule_nangis_dta_sp_20261007": {
+      "total": 30384128,
+      ".py": 16384,
+      ".log": 53248,
+      ".json": 471040,
+      ".pt": 29835264,
+      ".toml": 8192
+    },
+    "three_city_baseline_curves_20261011": {
+      "total": 26611712,
+      ".png": 2408448,
+      ".pdf": 921600,
+      ".csv": 23113728,
+      ".json": 163840,
+      ".py": 4096
+    },
+    "mappo_probability_diagnosis_20261010": {
+      "total": 25788416,
+      ".py": 4096,
+      ".log": 4096,
+      ".pt": 21073920,
+      ".json": 12288,
+      ".npz": 4694016
+    },
+    "ingo_temperature_decomposition_20261010": {
+      "total": 20774912,
+      ".gz": 15507456,
+      ".pdf": 57344,
+      ".json": 307200,
+      ".py": 28672,
+      ".csv": 8192,
+      ".pt": 3960832,
+      ".png": 901120,
+      ".md": 4096
+    },
+    "ingo_causal_routing_20261010": {
+      "total": 17780736,
+      ".json": 577536,
+      ".py": 344064,
+      ".csv": 4096,
+      ".md": 45056,
+      ".log": 36864,
+      ".npz": 15499264,
+      ".bat": 24576,
+      ".txt": 4096,
+      "": 741376,
+      ".cff": 4096,
+      ".sh": 4096,
+      ".pdf": 413696,
+      ".ipynb": 12288,
+      ".yaml": 16384,
+      ".sample": 53248
+    },
+    "dta_ingolstadt_custom_seed42_20260930": {
+      "total": 15921152,
+      ".pt": 3031040,
+      ".json": 4096,
+      ".jsonl": 12886016
+    },
+    "toy_baseline_gnac_global_5000_seed42_20260930": {
+      "total": 14811136,
+      ".pt": 5971968,
+      ".json": 4096,
+      ".jsonl": 8835072
+    },
+    "incident_ablation_dta_sp_20261007": {
+      "total": 13725696,
+      ".json": 344064,
+      ".pdf": 73728,
+      ".py": 16384,
+      ".png": 512000,
+      ".pt": 12771328,
+      ".toml": 8192
+    },
+    "ingo_entropy_gradient_audit_20261010": {
+      "total": 13524992,
+      ".py": 24576,
+      ".json": 1048576,
+      ".png": 262144,
+      ".pdf": 40960,
+      ".csv": 4096,
+      ".pt": 12140544,
+      ".md": 4096
+    },
+    "toy_ac_global_only_seed42_20260929": {
+      "total": 12873728,
+      ".md": 20480,
+      ".pt": 3268608,
+      ".json": 131072,
+      ".png": 598016,
+      ".jsonl": 8855552
+    },
+    "baseline_curves_noprior_20261009_113331": {
+      "total": 12136448,
+      ".png": 3186688,
+      ".pdf": 2097152,
+      ".json": 114688,
+      ".py": 16384,
+      ".csv": 6721536
+    },
+    "ingolstadt_online_meso_noincident_noprior_20261007_supervisor": {
+      "total": 11472896,
+      ".log": 11460608,
+      ".pid": 4096,
+      ".py": 4096,
+      ".json": 4096
+    },
+    "ingolstadt_online_libsumo_20261004_supervisor": {
+      "total": 10985472,
+      ".py": 4096,
+      ".log": 10977280,
+      ".json": 4096
+    },
+    "ingolstadt_online_meso_20261006_supervisor": {
+      "total": 10407936,
+      ".log": 10395648,
+      ".py": 4096,
+      ".json": 8192
+    },
+    "city_baseline_dataset_meso": {
+      "total": 10166272,
+      ".json": 12288,
+      ".jsonl": 131072,
+      ".npz": 10022912
+    },
+    "toy_ac_local_only_5000_seed42_20260929": {
+      "total": 9809920,
+      ".md": 12288,
+      ".pt": 2838528,
+      ".png": 561152,
+      ".json": 61440,
+      ".jsonl": 6336512
+    },
+    "toy_ac_global_fleet_seed42_20260929": {
+      "total": 8515584,
+      ".md": 12288,
+      ".pt": 7467008,
+      ".png": 741376,
+      ".json": 57344,
+      ".jsonl": 237568
+    },
+    "collector_parity_20261007": {
+      "total": 7512064,
+      ".npz": 7503872,
+      ".json": 8192
+    },
+    "ingolstadt_codec_ready_20261002": {
+      "total": 7467008,
+      ".json": 630784,
+      ".pt": 1441792,
+      ".jsonl": 122880,
+      ".npz": 5271552
+    },
+    "toy_baseline_gnac_5000_seed42_20260929": {
+      "total": 7143424,
+      ".pt": 5369856,
+      ".json": 4096,
+      ".jsonl": 1769472
+    },
+    "toy_ac_global_smoke_20260929": {
+      "total": 6852608,
+      ".md": 8192,
+      ".pt": 6524928,
+      ".png": 270336,
+      ".json": 36864,
+      ".jsonl": 12288
+    },
+    "ac_counterfactual_pilot_v2_20261010": {
+      "total": 6750208,
+      ".json": 6045696,
+      ".gz": 704512
+    },
+    "toy_ac_global_deterministic_5000_seed42_20260929": {
+      "total": 6647808,
+      ".md": 12288,
+      ".pt": 3268608,
+      ".png": 622592,
+      ".json": 40960,
+      ".jsonl": 2703360
+    },
+    "ingolstadt_pretrain_census_20261002_1148": {
+      "total": 6475776,
+      ".json": 6475776
+    },
+    "baseline_reward_snapshot_20261008_0725": {
+      "total": 6385664,
+      ".log": 73728,
+      ".png": 2351104,
+      ".pdf": 696320,
+      ".json": 98304,
+      ".py": 12288,
+      ".csv": 3153920
+    },
+    "toy_ac_global_seed42_20260929": {
+      "total": 5865472,
+      ".md": 12288,
+      ".pt": 4669440,
+      ".png": 720896,
+      ".json": 81920,
+      ".jsonl": 380928
+    },
+    "baseline_training_snapshot_20261007_0120": {
+      "total": 5476352,
+      ".png": 3489792,
+      ".pdf": 331776,
+      ".csv": 1593344,
+      ".json": 61440
+    },
+    "ingolstadt_noincident_codec_seed50000_20261007": {
+      "total": 5259264,
+      ".json": 12288,
+      ".jsonl": 65536,
+      ".npz": 5181440
+    },
+    "ingo_temperature_sweep_20261010": {
+      "total": 4837376,
+      ".json": 360448,
+      ".pdf": 28672,
+      ".pt": 3960832,
+      ".csv": 28672,
+      ".png": 434176,
+      ".md": 4096,
+      ".py": 20480
+    },
+    "ingo_baseline_curves_20261010": {
+      "total": 4751360,
+      ".pdf": 495616,
+      ".csv": 1978368,
+      ".png": 2265088,
+      ".py": 8192,
+      ".json": 4096
+    },
+    "toy_ac_global_deterministic_smoke_20260929": {
+      "total": 4579328,
+      ".pt": 4558848,
+      ".json": 4096,
+      ".jsonl": 16384
+    },
+    "toy_ac_global_only_smoke_20260929": {
+      "total": 4575232,
+      ".pt": 4558848,
+      ".json": 4096,
+      ".jsonl": 12288
+    },
+    "decision_graph_compression_20261002": {
+      "total": 4526080,
+      ".json": 4419584,
+      ".png": 86016,
+      ".py": 16384,
+      ".log": 4096
+    },
+    "toy_ac_real_seed42_20260929": {
+      "total": 4366336,
+      ".md": 16384,
+      ".json": 659456,
+      ".pt": 2838528,
+      ".png": 516096,
+      ".jsonl": 335872
+    },
+    "episode_reward_curves_20261009": {
+      "total": 4182016,
+      ".pdf": 1564672,
+      ".png": 2600960,
+      ".py": 8192,
+      ".json": 8192
+    },
+    "toy_ac_real_smoke_20260929": {
+      "total": 4173824,
+      ".pt": 3956736,
+      ".md": 4096,
+      ".png": 188416,
+      ".json": 12288,
+      ".jsonl": 12288
+    },
+    "shortest_fontenay_en_parisis_seed42_20260930": {
+      "total": 4161536,
+      ".pt": 1720320,
+      ".json": 4096,
+      ".jsonl": 2437120
+    },
+    "ingo_ac_prior_curves_20261007": {
+      "total": 4067328,
+      ".md": 4096,
+      ".pdf": 155648,
+      ".json": 3407872,
+      ".py": 8192,
+      ".png": 491520
+    },
+    "baseline_training_stopped_20261007_1255": {
+      "total": 3801088,
+      ".pdf": 397312,
+      ".png": 2072576,
+      ".csv": 1249280,
+      ".json": 81920
+    },
+    "toy_ac_global_only_checked_smoke_20260929": {
+      "total": 3637248,
+      ".md": 8192,
+      ".pt": 3268608,
+      ".png": 311296,
+      ".json": 36864,
+      ".jsonl": 12288
+    },
+    "ingolstadt_online_meso_sp_prior_20261007_supervisor": {
+      "total": 2863104,
+      ".log": 2850816,
+      ".pid": 4096,
+      ".py": 4096,
+      ".json": 4096
+    },
+    "shortest_gretz_armainvilliers_seed42_20260930": {
+      "total": 2785280,
+      ".pt": 1720320,
+      ".json": 4096,
+      ".jsonl": 1060864
+    },
+    "ingolstadt_noincident_rewards_20261008_0724": {
+      "total": 2588672,
+      ".pdf": 192512,
+      ".png": 778240,
+      ".csv": 139264,
+      ".json": 1478656
+    },
+    "ingo_baseline_curves_ac_gnac_dreamer_20261010": {
+      "total": 2117632,
+      ".pdf": 245760,
+      ".csv": 978944,
+      ".png": 880640,
+      ".py": 8192,
+      ".json": 4096
+    },
+    "shortest_ingolstadt_custom_seed42_20260930": {
+      "total": 2109440,
+      ".pt": 1720320,
+      ".json": 4096,
+      ".jsonl": 385024
+    },
+    "blockage_cause_20261007": {
+      "total": 1888256,
+      ".log": 12288,
+      ".json": 1859584,
+      ".py": 16384
+    },
+    "ingolstadt_online_pilot_20261003_supervisor": {
+      "total": 1609728,
+      ".log": 1589248,
+      ".json": 12288,
+      ".py": 4096,
+      ".sh": 4096
+    },
+    "noincident_speed_decomposition_20261008": {
+      "total": 1605632,
+      ".md": 8192,
+      ".pdf": 40960,
+      ".py": 16384,
+      ".png": 135168,
+      ".json": 28672,
+      ".npz": 1376256
+    },
+    "online_ac_curves_20261008_0805": {
+      "total": 1466368,
+      ".json": 36864,
+      ".csv": 458752,
+      ".pdf": 126976,
+      ".py": 8192,
+      ".png": 835584
+    },
+    "attention_compile_20261002": {
+      "total": 1286144,
+      ".json": 12288,
+      ".cpp": 196608,
+      ".lock": 0,
+      ".py": 106496,
+      "": 536576,
+      ".so": 434176
+    },
+    "ingolstadt_bf16_pretrain_20261002_supervisor": {
+      "total": 1183744,
+      ".log": 1171456,
+      ".json": 4096,
+      ".py": 4096,
+      ".sh": 4096
+    },
+    "ac_curves_20261009_latest": {
+      "total": 1122304,
+      ".csv": 385024,
+      ".json": 8192,
+      ".png": 577536,
+      ".pdf": 147456,
+      ".py": 4096
+    },
+    "ingolstadt_noise_diversity_20261003": {
+      "total": 790528,
+      ".json": 446464,
+      ".png": 344064
+    },
+    "event_session_boundary_reads_fontenay_20261001": {
+      "total": 593920,
+      ".log": 12288,
+      ".json": 581632
+    },
+    "revisit_failure_comparison_20261006": {
+      "total": 479232,
+      ".md": 16384,
+      ".json": 462848
+    },
+    "baseline_status_20261009_1106": {
+      "total": 413696,
+      ".png": 286720,
+      ".py": 12288,
+      ".pdf": 28672,
+      ".json": 86016
+    },
+    "action_space_actor_diagnostic_20261001": {
+      "total": 303104,
+      ".py": 8192,
+      ".json": 294912
+    },
+    "toy_baseline_dta_5000_seed42_20260929": {
+      "total": 192512,
+      ".pt": 81920,
+      ".json": 4096,
+      ".jsonl": 106496
+    },
+    "network_selection_20261007": {
+      "total": 180224,
+      ".csv": 16384,
+      ".json": 163840
+    },
+    "per_transition_throughput_20261002": {
+      "total": 176128,
+      ".json": 126976,
+      ".txt": 49152
+    },
+    "meso_feasibility_20261006": {
+      "total": 135168,
+      ".log": 114688,
+      ".md": 4096,
+      ".json": 16384
+    },
+    "ingolstadt_pretrain_pilot_20261002.log": {
+      "total": 131072,
+      ".log": 131072
+    },
+    "ingolstadt_run.log": {
+      "total": 102400,
+      ".log": 102400
+    },
+    "ingolstadt_complete_cohort_pretrain_20261002_supervisor": {
+      "total": 102400,
+      ".log": 98304,
+      ".sh": 4096
+    },
+    "disk_cleanup_20261009": {
+      "total": 90112,
+      ".json": 16384,
+      ".txt": 0,
+      ".jinja": 0,
+      ".py": 0,
+      "": 73728,
+      ".safetensors": 0
+    },
+    "online_motion_speed_20261004": {
+      "total": 90112,
+      ".json": 16384,
+      ".py": 73728
+    },
+    "toy_run.log": {
+      "total": 53248,
+      ".log": 53248
+    },
+    "ingolstadt_per_transition_pretrain_20261002_supervisor": {
+      "total": 53248,
+      ".log": 49152,
+      ".sh": 4096
+    },
+    "ingolstadt_noise_diversity_20261003.log": {
+      "total": 49152,
+      ".log": 49152
+    },
+    "coulommiers_2000_demand_20261007": {
+      "total": 49152,
+      ".json": 4096,
+      ".csv": 45056
+    },
+    "baseline_timing_snapshot_20261007_1037.json": {
+      "total": 45056,
+      ".json": 45056
+    },
+    "event_city_validation_20261002": {
+      "total": 24576,
+      ".json": 24576
+    },
+    "event_mainline_verify_20261002_traci": {
+      "total": 24576,
+      ".json": 8192,
+      ".npz": 16384
+    },
+    "actor_sampling_speed_20261004": {
+      "total": 20480,
+      ".json": 20480,
+      "": 0
+    },
+    "fm_prior_verification_20261001.log": {
+      "total": 8192,
+      ".log": 8192
+    },
+    "ingolstadt_noise_training_pair_20261003.log": {
+      "total": 8192,
+      ".log": 8192
+    },
+    "ingolstadt_bf16_pretrain_20261002.status.json": {
+      "total": 8192,
+      ".json": 8192
+    },
+    "ingolstadt_online_meso_20261006.hash_validation_attempt": {
+      "total": 8192,
+      ".json": 8192
+    },
+    "ingolstadt_complete_cohort_pretrain_20261002.status.json": {
+      "total": 4096,
+      ".json": 4096
+    },
+    "ingolstadt_per_transition_pretrain_20261002.status.json": {
+      "total": 4096,
+      ".json": 4096
+    },
+    "evaluation_argmax_unification_verification_20261011.json": {
+      "total": 4096,
+      ".json": 4096
+    },
+    "routing_difficulty_audit_20261011": {
+      "total": 4096,
+      ".json": 4096
+    },
+    "event_mainline_verify_20261002": {
+      "total": 4096,
+      ".json": 4096
+    },
+    "ac_counterfactual_pilot_20261010": {
+      "total": 4096,
+      ".json": 4096
+    }
+  },
+  "note": "Hard-linked files counted once across outputs; attribution depends on traversal order."
+}
