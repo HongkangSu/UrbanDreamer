@@ -1,0 +1,177 @@
+{
+  "active": true,
+  "baseline_commit": "2a084d7",
+  "completed_evidence": [
+    "spectral 32 validation demand groups /384 windows",
+    "72 heuristic plus36 frozen ep22 learned-policy generalization conditions",
+    "20/100-step matched numerical diagnostics",
+    "fixed-budget graph_fm/no_prior_fm/regression and isotropic-source training checkpoints (inspect individual statuses)",
+    "real meso oracle counterexample and opt-in red/FIFO repair 46 road errors to4/5, no route failures"
+  ],
+  "completion_claim": false,
+  "critical_findings": [
+    "r16 weak spectral energy",
+    "direct regression and no-coarse-prior FM lead initial fixed-budget occupied prediction scores",
+    "full-coordinate noise raises coverage but worsens graph-FM h8 mass drift; not promoted",
+    "red-light executor bug reproduced and opt-in toy repair verified; three cities currently unsupported due permissive g/FIFO/merge limitations"
+  ],
+  "latest_commit": "b448020",
+  "phase": "development_runs_and_executor_repair",
+  "previous_goal_turn_classification": "progress",
+  "queues": {
+    "noise_support_screen_v1": {
+      "current_job": "isotropic_noise_no_prior_fm_evaluation",
+      "jobs": {
+        "isotropic_noise_graph_fm": {
+          "phase": "completed",
+          "pid": 928007,
+          "returncode": 0
+        },
+        "isotropic_noise_graph_fm_evaluation": {
+          "phase": "completed",
+          "pid": 935237,
+          "returncode": 0
+        },
+        "isotropic_noise_no_prior_fm": {
+          "phase": "completed",
+          "pid": 931533,
+          "returncode": 0
+        },
+        "isotropic_noise_no_prior_fm_evaluation": {
+          "phase": "completed",
+          "pid": 941728,
+          "returncode": 0
+        }
+      },
+      "phase": "completed",
+      "pid": 927873
+    },
+    "numerics_v1": {
+      "current_job": "snapshot_steps100",
+      "jobs": {
+        "snapshot_steps100": {
+          "phase": "completed",
+          "pid": 910569,
+          "returncode": 0
+        },
+        "snapshot_steps20": {
+          "phase": "completed",
+          "pid": 906680,
+          "returncode": 0
+        }
+      },
+      "phase": "completed",
+      "pid": 906589
+    },
+    "prediction_screen_v1": {
+      "current_job": "random_prior_fm",
+      "jobs": {
+        "graph_fm": {
+          "phase": "completed",
+          "pid": 920204,
+          "returncode": 0
+        },
+        "graph_regression": {
+          "phase": "completed",
+          "pid": 942208,
+          "returncode": 0
+        },
+        "no_prior_fm": {
+          "phase": "completed",
+          "pid": 928728,
+          "returncode": 0
+        },
+        "numerical_diagnostic_barrier": {
+          "phase": "completed",
+          "pid": 920134,
+          "returncode": 0
+        },
+        "random_prior_fm": {
+          "phase": "running",
+          "pid": 947057,
+          "returncode": null
+        },
+        "regression": {
+          "phase": "completed",
+          "pid": 937012,
+          "returncode": 0
+        }
+      },
+      "phase": "running",
+      "pid": 913157
+    },
+    "screen_v1": {
+      "current_job": "gaussian",
+      "jobs": {
+        "gaussian": {
+          "phase": "running",
+          "pid": 947120,
+          "returncode": null
+        },
+        "graph_fm": {
+          "phase": "completed",
+          "pid": 904542,
+          "returncode": 0
+        },
+        "graph_regression": {
+          "phase": "completed",
+          "pid": 932506,
+          "returncode": 0
+        },
+        "no_prior_fm": {
+          "phase": "completed",
+          "pid": 915459,
+          "returncode": 0
+        },
+        "random_prior_fm": {
+          "phase": "completed",
+          "pid": 942268,
+          "returncode": 0
+        },
+        "regression": {
+          "phase": "completed",
+          "pid": 924168,
+          "returncode": 0
+        }
+      },
+      "phase": "running",
+      "pid": 904468
+    },
+    "supervision_screen_v1": {
+      "current_job": "first_screen_barrier",
+      "jobs": {
+        "first_screen_barrier": {
+          "phase": "waiting_producer",
+          "pid": null,
+          "returncode": null
+        }
+      },
+      "phase": "running",
+      "pid": 922923
+    }
+  },
+  "remaining": [
+    "complete all model comparisons and convergence checks",
+    "multiple training initialization seeds and untouched final tests",
+    "complete queued multistep experiments",
+    "disagreement risk/gate policy mechanism compatible with bounded critics",
+    "extend executor repair to real-city permissive signals/FIFO/merges and validate free rollouts",
+    "RL component ablations and policy generalization after convergence",
+    "three-city main result and interaction-budget accounting"
+  ],
+  "reports": [
+    "reports/paired_screen_partial_01/summary.json",
+    "executor_audit/toy_queue_constrained_v2/summary.json",
+    "numerics_v1/comparison.json",
+    "generalization/urban_checkpoint_development_v2/paired_summary.json"
+  ],
+  "root": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/component_experiments_20261011",
+  "test_evidence": [
+    "139 combined component tests before isotropic additions",
+    "79 variant/trainer/evaluator tests after isotropic additions",
+    "40 dynamics tests after sampling metadata correction",
+    "17 strict report tests",
+    "93 imagination/constraint tests including real SUMO"
+  ],
+  "updated_utc": "2026-10-11T19:20:52.689669+00:00"
+}
