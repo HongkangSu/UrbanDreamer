@@ -277,3 +277,60 @@ def test_training_refuses_silent_overwrite_and_protocol_change_on_resume(monkeyp
     args.data_seed += 1
     with pytest.raises(ValueError, match='protocol differs'):
         runner.train(args)
+
+
+@pytest.mark.parametrize('variant', ['graph_fm', 'regression', 'gaussian'])
+def test_declared_budget_extension_preserves_learning_state_and_parent(monkeypatch, tmp_path, variant):
+    fake_inputs(monkeypatch)
+    continuous = train_args(tmp_path/'continuous', variant)
+    runner.train(continuous)
+    expected = torch.load(continuous.output_dir/'latest.pt', weights_only=True)
+
+    parent = train_args(tmp_path/'parent', variant)
+    parent.updates = 2
+    runner.train(parent)
+    parent_file = parent.output_dir/'latest.pt'
+    parent_hash = runner.sha256(parent_file)
+    parent_metrics = (parent.output_dir/'metrics.jsonl').read_bytes()
+    extension = train_args(tmp_path/'extension', variant)
+    extension.continue_from = parent_file
+    extension.continuation_reason = 'Measure development convergence at a larger predeclared budget'
+    runner.train(extension)
+    actual = torch.load(extension.output_dir/'latest.pt', weights_only=True)
+    for key in ('model','optimizer','data_rng','torch_rng','cuda_rng','update','exposures'):
+        assert_nested_equal(expected[key], actual[key])
+    assert runner.sha256(parent_file) == parent_hash
+    assert (parent.output_dir/'metrics.jsonl').read_bytes() == parent_metrics
+    assert actual['protocol']['continuation']['parent_checkpoint_sha256'] == parent_hash
+    assert actual['protocol']['continuation']['parent_update'] == 2
+    assert [json.loads(row)['update'] for row in (extension.output_dir/'metrics.jsonl').read_text().splitlines()] == [3,4]
+    extension.resume = True
+    extension.continue_from = None
+    runner.train(extension)
+    assert torch.load(extension.output_dir/'latest.pt', weights_only=True)['update'] == 4
+
+
+@pytest.mark.parametrize('change', ['no_reason','data_seed','variant','no_optimizer','unfinished_parent'])
+def test_budget_extension_rejects_hidden_treatment_changes(monkeypatch,tmp_path,change):
+    fake_inputs(monkeypatch)
+    parent = train_args(tmp_path/'parent')
+    parent.updates = 2
+    runner.train(parent)
+    extension = train_args(tmp_path/'extension')
+    extension.continue_from = parent.output_dir/'latest.pt'
+    extension.continuation_reason = 'Declared budget extension'
+    if change == 'no_reason':
+        extension.continuation_reason = ''
+    elif change == 'data_seed':
+        extension.data_seed += 1
+    elif change == 'variant':
+        extension.variant = 'regression'
+    else:
+        checkpoint = torch.load(extension.continue_from,weights_only=True)
+        if change == 'no_optimizer':
+            checkpoint.pop('optimizer')
+        else:
+            checkpoint['protocol']['planned_updates'] = 3
+        torch.save(checkpoint,extension.continue_from)
+    with pytest.raises(ValueError):
+        runner.train(extension)

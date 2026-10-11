@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import argparse
 from contextlib import nullcontext
+import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -27,6 +29,40 @@ from urban_dreamer.models.world_model import recursive_fm_loss
 
 
 SUPERVISION = ('single_step', 'independent_cohort', 'recursive_fm', 'sample_ms', 'mean_ms')
+
+# A budget extension is a new run with explicit provenance, never a relabeling of
+# an existing experiment. Execution/source hashes may change and are recorded;
+# the learning problem, optimizer and sampling contract must stay identical.
+CONTINUATION_FIELDS = ('parent', 'training_seed', 'data_seed', 'mode', 'horizon',
+    'batch_size', 'learning_rate', 'precision', 'frozen_codec', 'optimizer',
+    'gradient_clip', 'prior_weight', 'recursive_solver_steps', 'ms_samples',
+    'ms_weight', 'sampler', 'training_manifest_identity')
+
+
+def continuation_provenance(old, protocol, checkpoint, reason, *, checkpoint_sha256=None):
+    if not reason or not reason.strip():
+        raise ValueError('a continuation requires an explicit reason')
+    required = ('model', 'optimizer', 'data_rng', 'torch_rng', 'cuda_rng',
+                'update', 'exposures', 'training_seconds', 'protocol')
+    if old.get('schema_version') != 1 or any(key not in old for key in required):
+        raise ValueError('continuation requires a full optimizer/RNG checkpoint, not a model milestone')
+    previous = old['protocol']
+    if old['update'] != previous['planned_updates']:
+        raise ValueError('budget continuation requires the completed parent budget')
+    if protocol['planned_updates'] <= old['update']:
+        raise ValueError('continued budget must exceed the completed parent update')
+    if old.get('variant') != protocol['variant']['variant'] or old.get('seed') != protocol['training_seed']:
+        raise ValueError('continuation variant or initialization seed differs')
+    for name in CONTINUATION_FIELDS:
+        if previous.get(name) != protocol.get(name):
+            raise ValueError(f'continuation changes learning protocol field {name}')
+    return dict(parent_checkpoint=str(Path(checkpoint).resolve()),
+        parent_checkpoint_sha256=checkpoint_sha256 or sha256(checkpoint), parent_update=old['update'],
+        parent_exposures=old['exposures'], reason=reason.strip(),
+        parent_protocol=previous,
+        code_hash_changed=any(previous.get(name) != protocol.get(name)
+                             for name in ('script_sha256', 'dynamics_sha256')),
+        semantics='explicit new budget segment preserving optimizer and RNG; source revision is recorded')
 
 
 def supervised_loss(model, batch, capacities, *, mode, device, steps=4, ms_samples=4,
@@ -125,6 +161,9 @@ def train(args):
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=True)
     checkpoint_path = output / 'latest.pt'
+    continuation = getattr(args, 'continue_from', None)
+    if continuation is not None and args.resume:
+        raise ValueError('continue-from and resume are mutually exclusive')
     if (output / 'protocol.json').exists() and not args.resume:
         raise ValueError('existing run requires explicit resume; never overwrite a previous result')
     config, prepared, topology, model, parent = load_frozen(args.experiment_dir,
@@ -152,9 +191,23 @@ def train(args):
     start_update = 0
     exposures = 0
     elapsed_before = 0.
-    if args.resume:
-        old = torch.load(checkpoint_path, map_location='cpu', weights_only=True)
-        if old['protocol'] != protocol:
+    if args.resume or continuation is not None:
+        parent_path = checkpoint_path if args.resume else Path(continuation).resolve()
+        # Hash the exact bytes loaded, including if the pathname is atomically
+        # replaced by another process between a stat and an open.
+        parent_bytes = parent_path.read_bytes()
+        parent_digest = hashlib.sha256(parent_bytes).hexdigest()
+        old = torch.load(io.BytesIO(parent_bytes), map_location='cpu', weights_only=True)
+        del parent_bytes
+        if args.resume:
+            # Preserve an existing continuation's original parent record while
+            # still requiring the exact current execution/source protocol.
+            if 'continuation' in old['protocol']:
+                protocol['continuation'] = old['protocol']['continuation']
+        else:
+            protocol['continuation'] = continuation_provenance(old, protocol, parent_path,
+                getattr(args, 'continuation_reason', None), checkpoint_sha256=parent_digest)
+        if args.resume and old['protocol'] != protocol:
             raise ValueError('resume protocol differs; preserve old run and create a declared revision')
         model.load_state_dict(old['model'], strict=True)
         optimizer.load_state_dict(old['optimizer'])
@@ -167,7 +220,10 @@ def train(args):
         if device.type == 'cuda':
             torch.cuda.set_rng_state(old['cuda_rng'], device)
         start_update, exposures, elapsed_before = old['update'], old['exposures'], old['training_seconds']
-        reconcile_training_journal(output/'metrics.jsonl', start_update)
+        if args.resume:
+            reconcile_training_journal(output/'metrics.jsonl', start_update)
+        else:
+            atomic_json(output/'protocol.json', protocol)
     else:
         atomic_json(output/'protocol.json', protocol)
     start = time.perf_counter()
@@ -243,6 +299,8 @@ def main():
     p.add_argument('--checkpoint-every', type=int, default=128)
     p.add_argument('--milestone-every', type=int, default=512)
     p.add_argument('--resume', action='store_true')
+    p.add_argument('--continue-from', type=Path)
+    p.add_argument('--continuation-reason')
     args = p.parse_args()
     if min(args.updates,args.batch_size,args.horizon,args.steps,args.ms_samples,args.checkpoint_every,args.milestone_every,args.threads)<1:
         p.error('counts and budgets must be positive')
