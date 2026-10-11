@@ -1,4 +1,5 @@
 from copy import deepcopy
+import json
 
 import numpy as np
 import pytest
@@ -7,6 +8,7 @@ import torch
 from test_urban_dreamer_event_session import synthetic_network
 from tools.analyze_component_imagination import (
     DynamicShortestController, active_cohort, consistency_record, diagnose_rollout, external_counts,
+    resummarize, summarize_consistency, validate_condition_identity,
 )
 from urban_dreamer.traffic.topology import NextHopCandidates
 
@@ -101,3 +103,73 @@ def test_empty_or_duplicate_cohort_is_rejected():
     with pytest.raises(ValueError, match='active seed'):
         diagnose_rollout(ConstantModel(), torch.zeros(4, 8), [vehicle(departed=False)],
             network=synthetic_network(), start_time=0., population=1, horizons=[1], steps=20)
+
+
+def summary_rows():
+    return [dict(demand_group=f'g{i}', episode=f'archive{i}::episode=0', start=i,
+        condition_seed=10+i, sample=0, horizon=h, timestamp=i*50+h*30,
+        training_deadline_seconds=60., beyond_training_deadline=i*50+h*30 > 60,
+        post_terminal_stress=False, total_mass_absolute_error=float(i+1))
+        for h in (0, 1, 2) for i in (0, 1)]
+
+
+def test_fixed_horizon_pair_population_does_not_depend_on_model_terminal_time():
+    first, second = summary_rows(), summary_rows()
+    for row in first:
+        row['post_terminal_stress'] = row['horizon'] >= 1
+    for row in second:
+        row['post_terminal_stress'] = row['horizon'] >= 2
+    a, b = summarize_consistency(first, seed=1), summarize_consistency(second, seed=1)
+    assert a['complete_condition_sample_keys'] == b['complete_condition_sample_keys']
+    for left, right in zip(a['fixed_horizon'], b['fixed_horizon']):
+        assert left['matching_condition_sample_keys'] == right['matching_condition_sample_keys']
+        assert left['matching_keys_sha256'] == right['matching_keys_sha256']
+        assert left['states'] == right['states']
+        assert left['metrics'] == right['metrics']
+    assert a['terminal_diagnostics'] != b['terminal_diagnostics']
+    with pytest.raises(ValueError, match='same complete'):
+        summarize_consistency(first[:-1], seed=1)
+
+
+def test_deadline_exceedance_is_separate_from_primary_fixed_horizon():
+    result = summarize_consistency(summary_rows(), seed=1)
+    later = [row for row in result['fixed_horizon'] if row['horizon'] == 2]
+    assert {row['deadline_scope'] for row in later} == {'within_deadline', 'after_deadline'}
+    assert all(row['states'] == 1 for row in later)
+    primary = next(row for row in later if row['deadline_scope'] == 'within_deadline')
+    stress = next(row for row in later if row['deadline_scope'] == 'after_deadline')
+    assert primary['role'] == 'primary_paired_fixed_horizon'
+    assert stress['role'] == 'after_deadline_stress'
+    assert primary['metrics']['total_mass_absolute_error']['estimate'] == 1.
+    assert stress['metrics']['total_mass_absolute_error']['estimate'] == 2.
+    assert not set(primary['matching_condition_sample_keys']) & set(stress['matching_condition_sample_keys'])
+
+
+def test_summary_revision_preserves_original_artifacts_and_records_hashes(tmp_path):
+    source, revised = tmp_path/'original', tmp_path/'revision'
+    source.mkdir()
+    files = {'protocol.json': json.dumps({'campaign': {'selection_seed': 1}}),
+        'states.jsonl': '\n'.join(json.dumps(row) for row in summary_rows()),
+        'summary.json': '{"schema_version": 1}'}
+    for name, contents in files.items():
+        (source/name).write_text(contents)
+    result = resummarize(source, revised)
+    assert result['schema_version'] == 2
+    for name, contents in files.items():
+        assert (source/name).read_text() == contents
+    revision = json.loads((revised/'revision.json').read_text())
+    assert revision['kind'] == 'summary_only_revision_no_model_rerun'
+    assert len(revision['code_sha256']) == len(revision['source_states_sha256']) == 64
+    with pytest.raises(ValueError, match='new output'):
+        resummarize(source, revised)
+
+
+def test_external_conditions_validate_archive_episode_demand_and_start():
+    entries = [dict(path='cache/a', episode=3, demand_group='group1', windows=10)]
+    valid = dict(episode_index=0, start=9, source_path='cache/a',
+                 episode='cache/a::episode=3', demand_group='group1')
+    validate_condition_identity(valid, entries)
+    for key, value in [('source_path', 'cache/b'), ('episode', 'cache/a::episode=4'),
+                       ('demand_group', 'other'), ('start', 10), ('episode_index', 1)]:
+        with pytest.raises(ValueError):
+            validate_condition_identity(dict(valid, **{key: value}), entries)
