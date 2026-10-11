@@ -241,9 +241,10 @@ def _dynamics(model):
 def variant_metadata(model):
     dynamics = _dynamics(model)
     prior = dynamics.graph_prior
+    variant = getattr(dynamics, "variant", "graph_fm")
     original_noise_rank = getattr(prior, "original_noise_rank", prior.rank)
     projection_rank = getattr(prior, "projection_rank", prior.rank)
-    return {"variant": getattr(dynamics, "variant", "graph_fm"),
+    metadata = {"variant": variant,
             "projection_seed": getattr(dynamics, "seed", None),
             "parameters": sum(p.numel() for p in dynamics.parameters()),
             "trainable_parameters": sum(p.numel() for p in dynamics.parameters() if p.requires_grad),
@@ -256,6 +257,16 @@ def variant_metadata(model):
             "expected_energy": prior.noise_scale ** 2 * original_noise_rank * FLOW_LATENT_DIM,
             "expected_energy_unit": "sum of squared source perturbations over roads and all latent channels per state",
             "gaussian_noise_space": "full_latent" if getattr(dynamics, "variant", None) == "gaussian" else None}
+    if not variant.endswith("fm"):
+        # The unused prior noise helper is not the predictor's sampling law.
+        gaussian = variant == "gaussian"
+        metadata.update(noise_rank=dynamics.n_edges if gaussian else 0,
+            original_noise_rank=None, source_std=None if gaussian else 0.,
+            source_std_coordinates="learned_diagonal_latent" if gaussian else "deterministic",
+            expected_energy=None if gaussian else 0.,
+            expected_energy_unit="input-dependent sum of predicted latent variances" if gaussian
+                                 else "deterministic predictor has no sampled perturbation")
+    return metadata
 
 
 def predict_next(model, z, action, **kwargs):

@@ -263,3 +263,17 @@ def test_isotropic_transition_backpropagates_and_rejects_old_coefficient_shape(c
     assert z.grad is not None and torch.isfinite(z.grad).all() and z.grad.abs().sum() > 0
     gradient = model.dynamics.flow_head.weight.grad
     assert gradient is not None and torch.isfinite(gradient).all() and gradient.abs().sum() > 0
+
+
+@pytest.mark.parametrize('variant', ['regression', 'graph_regression', 'gaussian'])
+def test_metadata_describes_actual_sampling_not_unused_prior_helper(case, variant):
+    model = apply_variant(case[0], variant)
+    metadata = variant_metadata(model)
+    if variant == 'gaussian':
+        assert metadata['expected_energy'] is None
+        assert metadata['source_std'] is None
+        assert metadata['source_std_coordinates'] == 'learned_diagonal_latent'
+    else:
+        assert metadata['noise_rank'] == 0
+        assert metadata['source_std'] == 0.
+        assert metadata['expected_energy'] == 0.
