@@ -158,25 +158,29 @@ def main(argv=None):
                     REPO / 'tools/routing_cost_observer.py', REPO / 'tools/causal_routing_policies.py',
                     REPO / 'urban_dreamer/learning/baselines/common.py',
                     REPO / 'urban_dreamer/traffic/event_session.py']
+    checkpoint_policy = None
+    if 'checkpoint' in args.methods:
+        module, symbol = args.checkpoint_adapter.split(':')
+        adapter_module = importlib.import_module(module)
+        checkpoint_policy = getattr(adapter_module, symbol)(checkpoint=args.checkpoint, runner=runner)
+        source_files.append(Path(adapter_module.__file__))
     protocol = dict(schema_version=1, split=args.split, city=runner.network.name if hasattr(runner.network, 'name') else args.config.stem,
         config=str(args.config.resolve()), config_sha256=hashlib.sha256(args.config.read_bytes()).hexdigest(),
         source_hashes={str(p.relative_to(REPO)): hashlib.sha256(p.read_bytes()).hexdigest() for p in source_files},
         input_hashes=runner.prepared.input_hashes, simulation=runner.simulation_settings,
         sumo_version=list(libsumo.getVersion()), base_seed=args.base_seed, deadline_seconds=runner.deadline,
         physical_step_seconds=1, road_cost_observation_seconds=30, optimizer_updates=0,
+        sumo_seed_rule='episode_seed; shared by every evaluated method',
         future_demand_access=False, action_space='legal branch-only next-hop mask',
         heuristic_difference='identical edge-only shortest-path planner; freeflow static vs observed 30s costs',
         actor_information_difference='heuristics use global road costs and graph planning; actor feature access must be audited separately',
         cutoff_protocol='fixed deadline; completed-trip ATT is completion-selected; never-departed excluded from C/B',
         seed_contract='development 610000..619999; final test 710000..719999; exclude both from training',
         checkpoint=(dict(path=str(args.checkpoint.resolve()), sha256=hashlib.sha256(args.checkpoint.read_bytes()).hexdigest(),
-                         adapter=args.checkpoint_adapter) if args.checkpoint else None))
+                         adapter=args.checkpoint_adapter,
+                         audit=getattr(checkpoint_policy, 'audit', None)) if args.checkpoint else None))
     output = args.output.resolve() / args.split
     freeze_json(output / 'protocol.json', protocol)
-    checkpoint_policy = None
-    if 'checkpoint' in args.methods:
-        module, symbol = args.checkpoint_adapter.split(':')
-        checkpoint_policy = getattr(importlib.import_module(module), symbol)(checkpoint=args.checkpoint, runner=runner)
     for scale in args.scales:
         for profile in args.profiles:
             shifted = scaled_demand(base_demand, scale, profile)
@@ -200,6 +204,8 @@ def main(argv=None):
                     random.seed(seed)
                     np.random.seed(seed)
                     torch.manual_seed(seed)
+                    if method == 'checkpoint':
+                        checkpoint_policy.begin_episode(seed=seed)
                     router = RealTimeShortestRouter(runner.network)
                     progress = [-1]
 
@@ -239,10 +245,12 @@ def main(argv=None):
                         raise AssertionError('SUMO demand differs from frozen manifest')
                     result = dict(method=method, scale=scale, profile=profile, seed=seed,
                         metrics=normalize_metrics(metrics), wall_seconds=time.monotonic() - started,
-                        policy_stats=router.stats if method != 'checkpoint' else None,
+                        policy_stats=router.stats if method != 'checkpoint' else checkpoint_policy.end_episode(),
                         cost_observation_times=handle['session'].routing_cost_observer.sample_times)
                     write_json(result_path, result)
-                    print(json.dumps(dict(status='complete', result=str(result_path), metrics=result['metrics'])), flush=True)
+                    print(json.dumps(dict(status='complete', result=str(result_path),
+                        metrics={key: result['metrics'][key] for key in ('observed_mean_seconds',
+                        'completion_rate', 'never_departed', 'departed_unfinished', 'mean_travel_seconds')})), flush=True)
 
 
 if __name__ == '__main__':
