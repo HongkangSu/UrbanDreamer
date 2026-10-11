@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from test_event_imagination_protocol import network, seed
-from tools.diagnose_component_executor import ExactStepRoute, RouteMismatch, run_audit, shadow_step
+from tools.diagnose_component_executor import ExactStepRoute, RouteMismatch, replay_constraints, run_audit, shadow_step
 from urban_dreamer.traffic.environment import NextHopDecision
 from urban_dreamer.traffic.topology import NextHopCandidates
 import urban_dreamer.learning.imagination as physical_engine
@@ -53,5 +53,23 @@ def test_real_meso_oracle_road_speed_does_not_replay_red_queue(tmp_path):
     assert protocol['physics']['meso_lane_queue'] is False
     assert len(protocol['network_sha256']) == 64
     assert len(protocol['sumo_version']) == 2
+    repaired = tmp_path/'paired_constraint'
+    comparison = replay_constraints(output, repaired)
+    paired_rows = [json.loads(line) for line in (repaired/'rows.jsonl').read_text().splitlines()]
+    original_rows = {(row['arm'], row['timestamp'], row['vehicle_id']): row
+        for row in map(json.loads, (output/'rows.jsonl').read_text().splitlines())}
+    # Default production path exactly reproduces the original unmodified audit.
+    for row in paired_rows:
+        if row['implementation'] != 'baseline':
+            continue
+        original = original_rows[(row['speed_arm'], row['timestamp'], row['vehicle_id'])]
+        for key in ('predicted_road', 'true_road', 'predicted_remaining', 'true_remaining', 'road_match', 'arrival_match'):
+            assert row[key] == original[key]
+    for arm in ('boundary_last_step', 'realized_step_mean'):
+        variants = {row['implementation']: row for row in comparison['evaluations'] if row['speed_arm'] == arm}
+        assert variants['constrained']['red_hold_violations'] == 0
+        assert variants['constrained']['road_mismatches'] < variants['baseline']['road_mismatches']
+        assert variants['constrained']['route_matched_steps'] == variants['constrained']['steps']
+        assert variants['baseline']['paired_position_steps'] == variants['constrained']['paired_position_steps']
     with pytest.raises(ValueError, match='preserve'):
         run_audit(output)

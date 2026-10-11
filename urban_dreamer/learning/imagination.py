@@ -84,6 +84,7 @@ def advance_imagined_window(
     session_protocol: str = 'legacy',
     event_index_start: int = 0,
     traffic_model: str = 'micro',
+    passage_constraint: Any = None,
 ) -> ImaginedWindow:
     """Advance physical events through a window; policy events at its end stay pending.
 
@@ -96,9 +97,13 @@ def advance_imagined_window(
     Meso motion uses external-road distances and skips internal junction links.
     Decoded road speeds still move vehicles independently: this approximation
     does not reproduce SUMO mesoscopic queue or junction-control dynamics.
+    ``passage_constraint`` optionally adds a meso stop-line/FIFO gate. It is off
+    by default and does not provide segment capacity, headways or merge control.
     """
     if traffic_model not in ('micro', 'meso'):
         raise ValueError('traffic_model must be micro or meso')
+    if passage_constraint is not None and (traffic_model != 'meso' or session_protocol != 'event'):
+        raise ValueError('passage constraints require meso event imagination')
     if session_protocol not in ('legacy', 'event'):
         raise ValueError('session_protocol must be legacy or event')
     if traffic_model == 'meso':
@@ -119,7 +124,8 @@ def advance_imagined_window(
             total_vehicle_count=total_vehicle_count, decide=decide,
             interval_seconds=interval_seconds, observation_step_seconds=observation_step_seconds,
             vehicle_max_speed_mps=vehicle_max_speed_mps, stop_when_empty=stop_when_empty,
-            event_index_start=event_index_start, traffic_model=traffic_model)
+            event_index_start=event_index_start, traffic_model=traffic_model,
+            passage_constraint=passage_constraint)
     network = candidates.network
     speeds = np.asarray(edge_speeds_mps, dtype=np.float64)
     if speeds.shape != (network.edge_count,) or not np.isfinite(speeds).all() or (speeds < 0).any():
@@ -294,6 +300,7 @@ def _advance_event_window(
     interval_seconds: float, observation_step_seconds: float,
     vehicle_max_speed_mps: float | None, stop_when_empty: bool,
     event_index_start: int, traffic_model: str,
+    passage_constraint: Any = None,
 ) -> ImaginedWindow:
     """Follow complete routes continuously and expose only one-second observations.
 
@@ -326,6 +333,8 @@ def _advance_event_window(
     _prepare_no_revisit_history(states, candidates)
     if len({str(s['vehicle_id']) for s in states}) != len(states):
         raise ValueError('vehicle IDs must be unique')
+    if passage_constraint is not None:
+        passage_constraint.prepare(states)
     tolerance = 1e-9
 
     def active(state: dict[str, Any]) -> bool:
@@ -412,6 +421,7 @@ def _advance_event_window(
         successor = state.get('committed_next_edge')
         if successor is None:
             raise ValueError('vehicle exhausted its edge without a committed next hop')
+        source_edge = int(state['current_edge'])
         _record_physical_entry(state, int(successor), candidates)
         state['current_edge'] = int(successor)
         state['remaining_distance'] = float(network.lengths_m[int(successor)])
@@ -420,11 +430,16 @@ def _advance_event_window(
         state['in_junction'] = False
         state['junction_remaining_distance'] = 0.
         state['junction_connection'] = None
+        if passage_constraint is not None:
+            passage_constraint.entered(state, source_edge, crossing_time)
         state['committed_next_edge'] = route_successor(state)
 
     def move(state: dict[str, Any], duration: float) -> bool:
         """Return physical arrival without publishing it until observation."""
+        nonlocal crossing_time
+        initial_duration = duration
         while True:
+            crossing_time = time + initial_duration - duration
             in_junction = bool(state.get('in_junction', False))
             key = 'junction_remaining_distance' if in_junction else 'remaining_distance'
             distance = float(state[key])
@@ -436,12 +451,16 @@ def _advance_event_window(
                         raise ValueError('junction seed has no committed next hop')
                     enter_successor(state)
                 elif int(state['current_edge']) == int(state['destination_edge']):
+                    if passage_constraint is not None and not passage_constraint.permits_exit(state, None, time):
+                        return False
                     return True
                 else:
                     successor = state.get('committed_next_edge')
                     if successor is None:
                         raise ValueError('vehicle exhausted its edge without a committed next hop')
                     if traffic_model == 'meso':
+                        if passage_constraint is not None and not passage_constraint.permits_exit(state, successor, time):
+                            return False
                         enter_successor(state)
                         continue
                     length, speed = candidates.junction(int(state['current_edge']), int(successor))
@@ -481,6 +500,7 @@ def _advance_event_window(
     for index in np.flatnonzero(moving).tolist():
         refresh_motion(index, states[index])
 
+    crossing_time = float(start_time)
     pending = [state for state in states if active(state) and state.get('pending_decision', False)]
     while time < end - tolerance:
         if stop_when_empty and states and finished.all():
@@ -511,6 +531,8 @@ def _advance_event_window(
                     time, int(item.current_edge), int(item.next_edge), int(state['destination_edge'])))
 
         pending = []
+        if passage_constraint is not None:
+            passage_constraint.before_step()
         observed_time = time + 1.
         active_before = int(moving.sum())
         inserted: list[float] = []
@@ -520,7 +542,10 @@ def _advance_event_window(
         distances[fast] -= motion_speeds[fast]
         for index, distance in zip(np.flatnonzero(fast).tolist(), distances[fast].tolist()):
             states[index][distance_keys[index]] = distance
-        for index in np.flatnonzero(~finished & ~fast).tolist():
+        movement_indices = np.flatnonzero(~finished & ~fast).tolist()
+        if passage_constraint is not None:
+            movement_indices = passage_constraint.movement_order(movement_indices, states)
+        for index in movement_indices:
             state = states[index]
             previous_edge = int(state['current_edge'])
             previous_junction = bool(state.get('in_junction', False))

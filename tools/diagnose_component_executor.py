@@ -19,6 +19,7 @@ import torch
 
 from tools.component_experiment_data import atomic_json, sha256
 from urban_dreamer.learning.imagination import advance_imagined_window
+from urban_dreamer.learning.meso_constraints import MesoReleaseConstraint, StaticSignalSchedule, UnsupportedConstraint
 import urban_dreamer.learning.imagination as physical_engine
 from urban_dreamer.traffic.environment import NextHopDecision
 from urban_dreamer.traffic.event_session import SumoEventSession
@@ -62,7 +63,7 @@ class ExactStepRoute:
 
 
 def shadow_step(initial_states, *, candidates, speeds, flow, timestamp, population,
-                decisions, routes, max_speed):
+                decisions, routes, max_speed, passage_constraint=None):
     states = deepcopy(initial_states)
     controller = ExactStepRoute(decisions, routes, timestamp)
     original = physical_engine._record_physical_entry
@@ -77,7 +78,7 @@ def shadow_step(initial_states, *, candidates, speeds, flow, timestamp, populati
             edge_speeds_mps=np.asarray(speeds), frozen_flow=flow, start_time=timestamp,
             total_vehicle_count=population, decide=controller, interval_seconds=1.,
             observation_step_seconds=1., session_protocol='event', traffic_model='meso',
-            vehicle_max_speed_mps=max_speed, stop_when_empty=False)
+            vehicle_max_speed_mps=max_speed, stop_when_empty=False, passage_constraint=passage_constraint)
         if controller.used != set(controller.decisions):
             raise RouteMismatch('not all real controls were applied in the shadow step')
     finally:
@@ -254,10 +255,120 @@ def run_audit(output, *, seconds=70, release_at=40):
     return report
 
 
+def replay_constraints(source, output):
+    """Pair baseline/opt-in on the identical archived 69 real one-second states."""
+    source, output = Path(source), Path(output)
+    if output.exists():
+        raise ValueError('new output directory required')
+    torch.set_num_threads(2)
+    source_protocol = json.loads((source/'protocol.json').read_text())
+    if sha256(source/'combined_queue.net.xml') != source_protocol['network_sha256']:
+        raise ValueError('audit network changed')
+    actual = {row['timestamp']: row for row in map(json.loads, (source/'real_seconds.jsonl').read_text().splitlines())}
+    base = ROOT/'networks/toy_cross_bottleneck'
+    prepared = SimpleNamespace(network_xml=source/'combined_queue.net.xml', network_agents_csv=base/'agents.csv',
+        edge_registry=base/'edge_registry.json', od_file=base/'od_toy_cross_bottleneck.txt')
+    topology = load_traffic_topology(prepared)
+    network = topology.network
+    if list(network.edge_ids) != source_protocol['edge_ids']:
+        raise ValueError('road registry differs')
+    signal_base = StaticSignalSchedule.from_network(prepared.network_xml, network.edge_ids,
+                                                    no_external_overrides=True)
+    release_at = source_protocol['release_at']
+
+    class DeclaredReleaseSchedule:
+        def permits(self, current, target, timestamp):
+            # This intervention time was fixed before the original real run.
+            return timestamp >= release_at or signal_base.permits(current, target, timestamp)
+
+    rows, windows = [], []
+    for t in sorted(actual):
+        if t+1 not in actual:
+            continue
+        before = [state for state in actual[t]['states'] if state['departed'] and not state['arrived']]
+        after = {state['vehicle_id']: state for state in actual[t+1]['states']}
+        if not before:
+            continue
+        controls = [NextHopDecision(**row) for row in actual[t+1]['controls']]
+        routes = actual[t+1]['commanded_route_suffixes']
+        for speed_arm, speed_row in [('boundary_last_step', actual[t]), ('realized_step_mean', actual[t+1])]:
+            speeds = np.maximum(0., speed_row['edge_mean_speed_mps'])
+            for implementation in ('baseline', 'constrained'):
+                constraint = MesoReleaseConstraint(DeclaredReleaseSchedule()) if implementation == 'constrained' else None
+                try:
+                    states, result, entries = shadow_step(before,
+                        candidates=NextHopCandidates(network, traffic_model='meso'), speeds=speeds,
+                        flow=np.zeros((network.edge_count, 8)), timestamp=t, population=2,
+                        decisions=controls, routes=routes,
+                        max_speed=source_protocol['simulation_parameters']['vehicle_max_speed_mps'],
+                        passage_constraint=constraint)
+                except (RouteMismatch, UnsupportedConstraint) as error:
+                    windows.append(dict(timestamp=t, speed_arm=speed_arm, implementation=implementation,
+                        route_match=False, error=str(error)))
+                    continue
+                windows.append(dict(timestamp=t, speed_arm=speed_arm, implementation=implementation,
+                    route_match=True, entries=entries, active_seconds_error=result.active_vehicle_seconds-len(before),
+                    blocked_signal=0 if constraint is None else constraint.blocked_signal,
+                    blocked_fifo=0 if constraint is None else constraint.blocked_fifo))
+                for initial, predicted in zip(before, states):
+                    truth = after[initial['vehicle_id']]
+                    same = predicted['current_edge'] == truth['current_edge']
+                    compare_position = same and not predicted['arrived'] and not truth['arrived']
+                    rows.append(dict(timestamp=t, speed_arm=speed_arm, implementation=implementation,
+                        vehicle_id=initial['vehicle_id'], road_match=same,
+                        true_road=network.edge_ids[truth['current_edge']], predicted_road=network.edge_ids[predicted['current_edge']],
+                        arrival_match=predicted['arrived'] == truth['arrived'],
+                        true_remaining=truth['remaining_distance'], predicted_remaining=predicted['remaining_distance'],
+                        position_error_m=predicted['remaining_distance']-truth['remaining_distance'] if compare_position else None,
+                        red_hold_violation=(t < release_at and network.edge_ids[truth['current_edge']] == 'A_hold'
+                            and network.edge_ids[predicted['current_edge']] != 'A_hold')))
+    groups = defaultdict(list)
+    for row in rows:
+        groups[(row['speed_arm'], row['implementation'])].append(row)
+    summary = []
+    paired_positions = defaultdict(dict)
+    for row in rows:
+        paired_positions[(row['speed_arm'], row['timestamp'], row['vehicle_id'])][row['implementation']] = row['position_error_m']
+    for (arm, implementation), selected in groups.items():
+        trials = [row for row in windows if row['speed_arm'] == arm and row['implementation'] == implementation]
+        errors = [abs(row['position_error_m']) for row in selected if row['position_error_m'] is not None]
+        common = [abs(pair[implementation]) for key, pair in paired_positions.items()
+                  if key[0] == arm and pair.get('baseline') is not None and pair.get('constrained') is not None]
+        summary.append(dict(speed_arm=arm, implementation=implementation, steps=len(trials),
+            route_matched_steps=sum(row['route_match'] for row in trials), vehicle_steps=len(selected),
+            road_mismatches=sum(not row['road_match'] for row in selected),
+            red_hold_violations=sum(row['red_hold_violation'] for row in selected),
+            arrival_mismatches=sum(not row['arrival_match'] for row in selected),
+            position_valid_steps=len(errors), position_mae_m=float(np.mean(errors)) if errors else None,
+            position_max_abs_m=max(errors) if errors else None,
+            paired_position_steps=len(common), paired_position_mae_m=float(np.mean(common)) if common else None,
+            active_seconds_max_abs=max((abs(row['active_seconds_error']) for row in trials if row['route_match']), default=None)))
+    output.mkdir(parents=True)
+    for name, records in [('rows.jsonl', rows), ('windows.jsonl', windows)]:
+        (output/name).write_text(''.join(json.dumps(row, allow_nan=False)+'\n' for row in records))
+    protocol = dict(schema_version=1, source=str(source.resolve()), source_protocol_sha256=sha256(source/'protocol.json'),
+        source_real_seconds_sha256=sha256(source/'real_seconds.jsonl'), source_physics=source_protocol['physics'],
+        source_sumo_version=source_protocol['sumo_version'], network_sha256=source_protocol['network_sha256'],
+        code_hashes={path: sha256(ROOT/path) for path in ('tools/diagnose_component_executor.py',
+            'urban_dreamer/learning/imagination.py', 'urban_dreamer/learning/meso_constraints.py')},
+        mechanism='opt-in source stop-line signal permission plus edge FIFO; no headway/downstream/merge arbitration',
+        signals='static toy net plus predeclared all-green intervention at source release_at; no future vehicle truth',
+        pairing='same real starting states, accepted routes, actual controls and road means; every second resets to truth',
+        position_pairing='paired_position_* uses the common subset where BOTH implementations and truth share a road; road mismatches separately cover all trials',
+        limitations='single-step controlled toy; cost/arrival matches do not establish city-scale or multistep accuracy')
+    atomic_json(output/'protocol.json', protocol)
+    report = dict(status='complete', evaluations=summary)
+    atomic_json(output/'summary.json', report)
+    return report
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--seconds', type=int, default=70)
     parser.add_argument('--release-at', type=int, default=40)
+    parser.add_argument('--replay-source', type=Path)
     args = parser.parse_args()
-    print(json.dumps(run_audit(args.output_dir, seconds=args.seconds, release_at=args.release_at), indent=2))
+    result = (replay_constraints(args.replay_source, args.output_dir) if args.replay_source else
+              run_audit(args.output_dir, seconds=args.seconds, release_at=args.release_at))
+    print(json.dumps(result, indent=2))
