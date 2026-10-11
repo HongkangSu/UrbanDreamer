@@ -7,9 +7,11 @@ from torch import nn
 
 from urban_dreamer.learning.action_events import ActionEvent, pack_action_events
 from urban_dreamer.models.experimental_dynamics import (
-    VARIANTS, apply_variant, experimental_loss, predict_next, variant_metadata,
+    VARIANTS, ExperimentalPrior, apply_variant, experimental_loss, predict_next, variant_metadata,
 )
-from urban_dreamer.models.world_model import UrbanDreamerWorldModel, independent_transition_fm_loss
+from urban_dreamer.models.world_model import (
+    UrbanDreamerWorldModel, LowFrequencyGraphPrior, independent_transition_fm_loss,
+)
 
 
 @pytest.fixture
@@ -142,3 +144,66 @@ def test_reapplying_variant_is_rejected(case):
     apply_variant(model, "regression")
     with pytest.raises(ValueError, match="fresh"):
         apply_variant(model, "gaussian")
+
+
+@pytest.mark.parametrize("projection_rank", [64, 128])
+def test_large_projection_preserves_rank16_noise_and_all_trainable_parameters(projection_rank):
+    torch.set_num_threads(1)
+    torch.manual_seed(123)
+    # A cycle has a nontrivial spectrum and enough roads for either candidate.
+    graph = torch.zeros(130, 130)
+    graph[torch.arange(130), (torch.arange(130) + 1) % 130] = 1
+    prior = LowFrequencyGraphPrior(graph, rank=16)
+    parameters = {name: value for name, value in prior.named_parameters()}
+    z = torch.randn(2, 1, 130, 64)
+    noise = torch.randn(2, 1, 16, 64)
+    original_noise = prior.sample_noise(z, noise)
+    original_basis = prior.basis.clone()
+    rng = torch.random.get_rng_state()
+    changed = ExperimentalPrior(prior, random_projection=False, seed=0, projection_rank=projection_rank)
+    assert torch.equal(torch.random.get_rng_state(), rng)
+    assert changed.rank == changed.noise_rank == 16
+    assert changed.projection_rank == projection_rank
+    assert changed.basis.shape == (130, projection_rank)
+    assert torch.equal(changed.noise_basis, original_basis)
+    assert torch.equal(changed.sample_noise(z, noise), original_noise)
+    for name, parameter in changed.prediction.named_parameters():
+        assert parameter is parameters[name]
+    assert sum(p.numel() for p in changed.parameters()) == sum(p.numel() for p in parameters.values())
+    with pytest.raises(ValueError, match="coefficient shape"):
+        changed.sample_noise(z, torch.randn(2, 1, projection_rank, 64))
+    torch.testing.assert_close(changed.basis.T @ changed.basis, torch.eye(projection_rank), atol=1e-5, rtol=1e-5)
+    # Projection is differentiable and does not silently use the source-noise rank.
+    signal = changed.basis[:, -1].reshape(1, 1, 130, 1).expand(1, 1, 130, 64).clone().requires_grad_()
+    projection = changed.project(signal)
+    torch.testing.assert_close(projection, signal, atol=1e-5, rtol=1e-5)
+    projection.square().sum().backward()
+    assert torch.isfinite(signal.grad).all() and signal.grad.abs().sum() > 0
+    restored = copy.deepcopy(changed)
+    restored.noise_basis.zero_()
+    restored.prediction.basis.zero_()
+    stream = io.BytesIO()
+    torch.save(changed.state_dict(), stream)
+    stream.seek(0)
+    restored.load_state_dict(torch.load(stream, weights_only=True))
+    assert restored.rank == 16 and restored.projection_rank == projection_rank
+    assert torch.equal(restored.sample_noise(z, noise), original_noise)
+    assert torch.equal(restored.project(signal), changed.project(signal))
+
+
+@pytest.mark.parametrize("variant", ["graph_prior_r64_fm", "graph_prior_r128_fm"])
+def test_rank_candidate_metadata_and_parameter_budget(case, variant):
+    model, inputs, targets, action, events = case
+    original = variant_metadata(model)
+    apply_variant(model, variant)
+    metadata = variant_metadata(model)
+    # Small-graph tests cap the requested rank at roads - 1, as production does.
+    assert metadata['projection_rank'] == 2
+    assert metadata['noise_rank'] == 1
+    assert metadata['parameters'] == original['parameters']
+    loss, _, _ = experimental_loss(model, z_inputs=inputs, z_targets=targets,
+                                   action=action, action_events=events,
+                                   noise=torch.randn(2, 2, 1, 64))
+    loss.backward()
+    gradient = model.dynamics.graph_prior.prediction.output.weight.grad
+    assert gradient is not None and torch.isfinite(gradient).all() and gradient.abs().sum() > 0

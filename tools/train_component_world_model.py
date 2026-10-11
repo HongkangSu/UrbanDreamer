@@ -78,6 +78,34 @@ def atomic_checkpoint(path, payload):
     temp.replace(path)
 
 
+def reconcile_training_journal(path, committed_update):
+    """Keep failed-attempt evidence separately from the committed learning curve."""
+    if not path.exists():
+        return
+    lines = [line for line in path.read_text().splitlines() if line.strip()]
+    rows = []
+    for index, line in enumerate(lines):
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            if index != len(lines) - 1:
+                raise ValueError('training journal has corruption before its last line') from None
+            path.with_name(f'metrics_partial_{time.time_ns()}.txt').write_text(line)
+            temporary = path.with_suffix('.tmp')
+            temporary.write_text(''.join(json.dumps(row)+'\n' for row in rows))
+            temporary.replace(path)
+    committed = [row for row in rows if row['update'] <= committed_update]
+    updates = [row['update'] for row in committed]
+    if updates != sorted(set(updates)):
+        raise ValueError('committed journal updates are duplicated or out of order')
+    if len(committed) != len(rows):
+        archive = path.with_name(f'metrics_uncommitted_{time.time_ns()}.jsonl')
+        archive.write_text(''.join(json.dumps(row) + '\n' for row in rows if row['update'] > committed_update))
+        temporary = path.with_suffix('.tmp')
+        temporary.write_text(''.join(json.dumps(row)+'\n' for row in committed))
+        temporary.replace(path)
+
+
 def train(args):
     torch.set_num_threads(args.threads)
     torch.set_float32_matmul_precision('highest')
@@ -139,6 +167,7 @@ def train(args):
         if device.type == 'cuda':
             torch.cuda.set_rng_state(old['cuda_rng'], device)
         start_update, exposures, elapsed_before = old['update'], old['exposures'], old['training_seconds']
+        reconcile_training_journal(output/'metrics.jsonl', start_update)
     else:
         atomic_json(output/'protocol.json', protocol)
     start = time.perf_counter()
@@ -168,6 +197,9 @@ def train(args):
             with (output/'metrics.jsonl').open('a') as stream:
                 stream.write(json.dumps(row, allow_nan=False)+'\n')
             if update == 1 or update % 25 == 0 or update == args.updates:
+                if device.type == 'cuda':
+                    row['gpu_peak_allocated_mib'] = torch.cuda.max_memory_allocated(device) / 1024 ** 2
+                    row['gpu_peak_reserved_mib'] = torch.cuda.max_memory_reserved(device) / 1024 ** 2
                 status.update(row)
                 atomic_json(output/'status.json', status)
                 print(json.dumps(row), flush=True)
@@ -176,6 +208,10 @@ def train(args):
                     update=update, exposures=exposures, training_seconds=row['training_seconds'], protocol=protocol,
                     model=model.state_dict(), optimizer=optimizer.state_dict(), data_rng=train_rng.bit_generator.state,
                     torch_rng=torch.get_rng_state(), cuda_rng=torch.cuda.get_rng_state(device) if device.type=='cuda' else None))
+                if update % args.milestone_every == 0:
+                    atomic_checkpoint(output/f'model_update_{update:06d}.pt', dict(
+                        schema_version=1, variant=args.variant, seed=args.seed, update=update,
+                        exposures=exposures, protocol=protocol, model=model.state_dict()))
         status['phase'] = 'completed'
         status['checkpoint_sha256'] = sha256(checkpoint_path)
         atomic_json(output/'status.json', status)
@@ -205,12 +241,15 @@ def main():
     p.add_argument('--threads', type=int, default=2)
     p.add_argument('--gpu-memory-fraction', type=float, default=.08)
     p.add_argument('--checkpoint-every', type=int, default=128)
+    p.add_argument('--milestone-every', type=int, default=512)
     p.add_argument('--resume', action='store_true')
     args = p.parse_args()
-    if min(args.updates,args.batch_size,args.horizon,args.steps,args.ms_samples,args.checkpoint_every,args.threads)<1:
+    if min(args.updates,args.batch_size,args.horizon,args.steps,args.ms_samples,args.checkpoint_every,args.milestone_every,args.threads)<1:
         p.error('counts and budgets must be positive')
     if not 0 < args.gpu_memory_fraction <= 1 or args.learning_rate <= 0 or args.ms_weight < 0:
         p.error('invalid memory fraction, learning rate or MS weight')
+    if args.milestone_every % args.checkpoint_every:
+        p.error('milestone-every must be a multiple of checkpoint-every')
     train(args)
 
 

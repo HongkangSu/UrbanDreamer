@@ -20,15 +20,35 @@ from urban_dreamer.models.world_model import (
 )
 
 VARIANTS = ("graph_fm", "no_prior_fm", "random_prior_fm", "regression",
-            "graph_regression", "gaussian")
+            "graph_regression", "gaussian", "graph_prior_r64_fm", "graph_prior_r128_fm")
+
+
+def _low_frequency_basis(adjacency, rank):
+    """Same spectral operator as production, without creating trainable weights."""
+    graph = adjacency.detach().float().cpu()
+    symmetric = (graph + graph.T) / 2
+    degree = symmetric.sum(-1)
+    inverse = degree.clamp_min(1e-12).rsqrt()
+    laplacian = torch.diag((degree > 0).float()) - inverse[:, None] * symmetric * inverse[None, :]
+    selected_rank = min(rank, max(1, len(graph) - 1))
+    _, basis = torch.linalg.eigh(laplacian)
+    return basis[:, :selected_rank]
 
 
 class ExperimentalPrior(nn.Module):
-    """Keep source noise fixed while removing or randomizing coarse prediction."""
+    """Separate a fixed source-noise subspace from the coarse-prediction subspace.
 
-    def __init__(self, prior: LowFrequencyGraphPrior, *, random_projection: bool, seed: int):
+    ``rank`` remains the noise coefficient dimension expected by production FM
+    losses. ``projection_rank`` records the deterministic projection dimension.
+    """
+
+    def __init__(self, prior: LowFrequencyGraphPrior, *, random_projection: bool, seed: int,
+                 projection_rank: int | None = None):
         super().__init__()
-        self.rank, self.noise_scale = prior.rank, prior.noise_scale
+        if projection_rank is not None and (random_projection or isinstance(projection_rank, bool)
+                                            or not isinstance(projection_rank, int) or projection_rank < 1):
+            raise ValueError("spectral projection rank must be a positive integer without random projection")
+        self.noise_rank, self.noise_scale = prior.rank, prior.noise_scale
         self.register_buffer("noise_basis", prior.basis.detach().clone())
         self.register_buffer("projection_seed", torch.tensor(seed, dtype=torch.long,
                                                            device=prior.basis.device))
@@ -38,8 +58,20 @@ class ExperimentalPrior(nn.Module):
                                     mode="reduced").Q.to(prior.basis)
             prior.basis.copy_(basis)
             self.prediction = prior
+        elif projection_rank is not None:
+            prior.basis = _low_frequency_basis(prior.adjacency, projection_rank).to(prior.basis)
+            prior.rank = prior.basis.shape[1]
+            self.prediction = prior
         else:
             self.prediction = None
+
+    @property
+    def rank(self):
+        return self.noise_rank
+
+    @property
+    def projection_rank(self):
+        return 0 if self.prediction is None else self.prediction.basis.shape[1]
 
     @property
     def basis(self):
@@ -73,6 +105,9 @@ class ExperimentalDynamics(Dynamics):
         if variant in {"no_prior_fm", "regression", "gaussian", "random_prior_fm"}:
             backbone.graph_prior = ExperimentalPrior(
                 backbone.graph_prior, random_projection=variant == "random_prior_fm", seed=seed)
+        elif variant in {"graph_prior_r64_fm", "graph_prior_r128_fm"}:
+            backbone.graph_prior = ExperimentalPrior(backbone.graph_prior, random_projection=False,
+                seed=seed, projection_rank=64 if variant == "graph_prior_r64_fm" else 128)
         if variant == "gaussian":
             old = backbone.flow_head
             head = nn.Linear(old.in_features, 2 * FLOW_LATENT_DIM,
@@ -183,10 +218,13 @@ def _dynamics(model):
 
 def variant_metadata(model):
     dynamics = _dynamics(model)
+    prior = dynamics.graph_prior
     return {"variant": getattr(dynamics, "variant", "graph_fm"),
             "projection_seed": getattr(dynamics, "seed", None),
             "parameters": sum(p.numel() for p in dynamics.parameters()),
             "trainable_parameters": sum(p.numel() for p in dynamics.parameters() if p.requires_grad),
+            "noise_rank": getattr(prior, "noise_rank", prior.rank),
+            "projection_rank": getattr(prior, "projection_rank", prior.rank),
             "gaussian_noise_space": "full_latent" if getattr(dynamics, "variant", None) == "gaussian" else None}
 
 
