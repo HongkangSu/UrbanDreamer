@@ -32,6 +32,35 @@ def free_gpu_mib(index):
     return int(result.stdout.strip())
 
 
+def prerequisite_state(job):
+    """A final checkpoint is consumed only after its producer commits completion."""
+    target = job.get('wait_for_status')
+    if target is None:
+        return 'ready', None
+    path = Path(target)
+    if path.exists():
+        state = json.loads(path.read_text())
+        if state.get('phase') == 'completed':
+            return 'ready', None
+        if state.get('phase') == 'failed':
+            return 'failed', state.get('error', 'producer failed')
+    producer_path = Path(job['producer_queue_status'])
+    if producer_path.exists():
+        producer = json.loads(producer_path.read_text())
+        task = producer.get('jobs', {}).get(job['producer_job'], {})
+        if task.get('phase') in ('failed', 'blocked'):
+            return 'failed', f"producer job {task.get('phase')}"
+        if producer.get('phase') in ('completed', 'finished_with_failures'):
+            return 'failed', 'producer queue finished without a committed output'
+        pid = producer.get('pid')
+        if pid is not None:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return 'failed', 'producer queue PID no longer exists; inspect before resuming'
+    return 'waiting', None
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--plan', type=Path, required=True)
@@ -57,6 +86,18 @@ def main():
             continue
         state['current_job'] = job['name']
         row = state['jobs'][job['name']] = dict(phase='waiting_resources', command=job['command'])
+        while True:
+            prerequisite, reason = prerequisite_state(job)
+            if prerequisite != 'waiting':
+                break
+            row.update(phase='waiting_producer', heartbeat_utc=utc())
+            atomic_json(state_path, state)
+            time.sleep(10)
+        if prerequisite == 'failed':
+            row.update(phase='blocked', error=reason)
+            atomic_json(state_path, state)
+            continue
+        row['phase'] = 'waiting_resources'
         while free_gpu_mib(job.get('gpu', 1)) < job.get('minimum_free_mib', 2816):
             row['heartbeat_utc'] = utc()
             atomic_json(state_path, state)
