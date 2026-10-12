@@ -75,9 +75,27 @@ def validate_component_source(experiment_dir, checkpoint, expected_sha256, *, va
     return payload, parent
 
 
+def resolved_seeds(args):
+    """Legacy --seed supplies both defaults; explicit overrides opt into v2."""
+    component = getattr(args, 'component_seed', None)
+    policy = getattr(args, 'policy_seed', None)
+    return (args.seed if component is None else component,
+            args.seed if policy is None else policy)
+
+
+def seed_protocol(args):
+    if getattr(args, 'component_seed', None) is None and getattr(args, 'policy_seed', None) is None:
+        return None
+    component, policy = resolved_seeds(args)
+    return dict(schema_version=1, component_seed=component, policy_seed=policy,
+        online_demand_seed=policy,
+        policy_seed_scope='fresh policy/critics/readout, learner RNG, online demand; evaluation seed unchanged')
+
+
 def runtime_config(source, args):
+    _, policy_seed = resolved_seeds(args)
     config = replace(source,
-        run=replace(source.run, output_dir=args.output_dir.resolve(), device=args.device, seed=args.seed),
+        run=replace(source.run, output_dir=args.output_dir.resolve(), device=args.device, seed=policy_seed),
         resources=replace(source.resources, world_model_pretrain_precision='fp32',
             world_model_pretrain_compile_blocks=False, world_model_imagination_precision='fp32',
             world_model_imagination_compile=False, imagination_rollouts_per_pass=args.rollouts,
@@ -188,7 +206,12 @@ def main(argv=None):
     p.add_argument('--checkpoint-sha256', required=True)
     p.add_argument('--output-dir', type=Path, required=True)
     p.add_argument('--variant', choices=VARIANTS, required=True)
-    p.add_argument('--seed', type=int, default=42)
+    p.add_argument('--seed', type=int, default=42,
+        help='legacy shared seed; default for each seed not explicitly overridden')
+    p.add_argument('--component-seed', type=int,
+        help='frozen checkpoint training seed; opts into the version 2 seed protocol')
+    p.add_argument('--policy-seed', type=int,
+        help='fresh policy/readout, learner RNG and online demand seed; evaluation seed stays fixed')
     p.add_argument('--device', default='cpu')
     p.add_argument('--threads', type=int, default=2)
     p.add_argument('--gpu-memory-fraction', type=float, default=.06)
@@ -199,6 +222,9 @@ def main(argv=None):
     p.add_argument('--evaluation-episodes', type=int, default=1)
     p.add_argument('--resume', action='store_true')
     args = p.parse_args(argv)
+    component_seed, policy_seed = resolved_seeds(args)
+    if not all(0 <= value < 2**32 for value in (component_seed, policy_seed)):
+        p.error('resolved component and policy seeds must be within [0, 2**32)')
     if min(args.episodes, args.passes, args.rollouts, args.steps, args.evaluation_episodes, args.threads) < 1:
         p.error('budgets must be positive')
     if not 0 < args.gpu_memory_fraction <= .06:
@@ -216,7 +242,7 @@ def main(argv=None):
             raise RuntimeError('GPU admission requires at least 2 GiB free and allocation headroom')
         torch.cuda.set_per_process_memory_fraction(args.gpu_memory_fraction, device)
     payload, parent = validate_component_source(args.experiment_dir, args.checkpoint,
-        args.checkpoint_sha256, variant=args.variant, seed=args.seed)
+        args.checkpoint_sha256, variant=args.variant, seed=component_seed)
     source = load_config(args.experiment_dir / 'snapshot/run_config.toml')
     config = runtime_config(source, args)
     prepared = pilot.validate_prepared_inputs(config)
@@ -228,7 +254,7 @@ def main(argv=None):
     admission = dict(kind='experimental_offline_component_development_screen',
         checkpoint=str(args.checkpoint.resolve()), checkpoint_sha256=args.checkpoint_sha256,
         offline_update=payload['update'], offline_planned_updates=payload['protocol']['planned_updates'],
-        variant=args.variant, seed=args.seed, parent=parent,
+        variant=args.variant, seed=component_seed, parent=parent,
         training_manifest_identity=train.manifest['identity'],
         validation_manifest_identity=validation.manifest['identity'],
         production_pretraining_complete_claim=False)
@@ -242,6 +268,12 @@ def main(argv=None):
         precision='fp32', imagination_workers=0, imagination_compile=False,
         device=args.device, threads=args.threads, gpu_memory_fraction=args.gpu_memory_fraction,
         runner_sha256=sha256(__file__), dynamics_sha256=sha256(ROOT/'urban_dreamer/models/experimental_dynamics.py'))
+    seeds = seed_protocol(args)
+    if seeds is not None:
+        # Seed identity is also checkpointed in metrics via component_admission.
+        # Legacy invocations retain their exact v1 field layout and fingerprint.
+        admission['seeds'] = seeds
+        protocol.update(schema_version=2, seeds=seeds)
     trainer = ComponentPilotTrainer(config=config, prepared_inputs=prepared, topology=topology,
         _offline_data=train, _codec_validation_data=validation, pilot_log=args.output_dir/'pilot_metrics.jsonl')
     input_hash = pilot.combined_input_hash(prepared)
