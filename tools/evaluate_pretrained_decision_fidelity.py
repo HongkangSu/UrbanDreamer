@@ -47,6 +47,13 @@ SESSION_FIELDS = ('_time_ms', '_vehicles', '_active', '_pending', 'travel_times'
     'reward_accounting', 'metrics', '_incident_lanes', '_incident_edges', '_incident_active',
     '_flow_cache', '_actual_routes', '_commanded_routes', '_route_cursors', '_invalid')
 CONTROLLER_FIELDS = ('costs', 'timestamp', '_distances', 'stats')
+FORK_SELECTION_VERSION = 'uniform_private_v1'
+
+
+class NoEligibleFork(ValueError):
+    def __init__(self, metadata):
+        super().__init__('no pending fork at predeclared boundary; retain failure instead of hindsight reselection')
+        self.selection_metadata = metadata
 
 
 def plain(value):
@@ -396,6 +403,7 @@ def finite_action_assessment(real_costs, predicted_costs):
     errors = {key: predicted_costs[key]-real_costs[key] for key in real_costs}
     return dict(real_best=real_best, selected=selected, regret_minutes=real_costs[selected]-real_costs[real_best],
         real_rank_groups=rank_groups(real_costs), predicted_rank_groups=rank_groups(predicted_costs),
+        real_best_set=rank_groups(real_costs)[0], predicted_best_set=rank_groups(predicted_costs)[0],
         signed_bias_minutes=errors, absolute_error_minutes={key: abs(value) for key, value in errors.items()},
         mean_signed_bias_minutes=float(np.mean(list(errors.values()))),
         mean_absolute_error_minutes=float(np.mean([abs(value) for value in errors.values()])),
@@ -412,6 +420,71 @@ def rank_groups(costs):
     return groups
 
 
+def select_fork(pending, legal_candidates, *, condition_seed, timestamp, max_actions,
+                strategy='max_degree_then_id'):
+    """Prospective selection from all eligible vehicles; no global RNG or outcomes."""
+    if strategy not in ('max_degree_then_id', 'uniform_private') or max_actions < 1:
+        raise ValueError('invalid fork selection strategy or action budget')
+    if not math.isfinite(timestamp) or timestamp < 0:
+        raise ValueError('fork selection requires a nonnegative finite millisecond timestamp')
+    time_ms = round(float(timestamp)*1000)
+    if abs(timestamp*1000-time_ms) > 1e-7 or isinstance(condition_seed, bool) or int(condition_seed) != condition_seed or condition_seed < 0:
+        raise ValueError('fork selection requires an integer seed and millisecond timestamp')
+    if len({str(row['vehicle_id']) for row in pending}) != len(pending):
+        raise ValueError('pending fork vehicles must have unique IDs')
+    eligible = []
+    for row in sorted(pending, key=lambda item: str(item['vehicle_id'])):
+        legal = sorted(int(edge) for edge in legal_candidates(row['current_edge'], row['destination_edge']))
+        if len(legal) != len(set(legal)):
+            raise ValueError('legal action sets must not contain duplicate edges')
+        if len(legal) >= 2:
+            eligible.append((row, legal))
+    metadata = dict(strategy=strategy, version=FORK_SELECTION_VERSION if strategy=='uniform_private' else 'max_degree_then_id_v1',
+        condition_seed=int(condition_seed), time_ms=time_ms, max_actions=max_actions, pending_count=len(pending),
+        eligible=[dict(vehicle_id=str(row['vehicle_id']), current_edge=int(row['current_edge']),
+            destination_edge=int(row['destination_edge']), degree=len(legal), legal_actions=legal) for row, legal in eligible],
+        eligible_count=len(eligible), subset_rule='all legal actions if within budget; otherwise sorted lowest edge-index subset',
+        global_rng_consumed=False, outcome_or_model_prediction_access=False)
+    if not eligible:
+        raise NoEligibleFork(metadata)
+    if strategy == 'uniform_private':
+        identity = json.dumps([FORK_SELECTION_VERSION, int(condition_seed), time_ms], separators=(',', ':')).encode()
+        hashed = hashlib.sha256(identity).digest()
+        private_seed = int.from_bytes(hashed[:8], 'big')
+        ordinal = int(np.random.Generator(np.random.PCG64(private_seed)).integers(len(eligible)))
+        metadata.update(private_seed_hex=f'{private_seed:016x}', identity_sha256=hashed.hex(),
+            selected_vehicle_probability=1/len(eligible))
+    else:
+        ordinal = min(range(len(eligible)), key=lambda i: (-min(len(eligible[i][1]), max_actions), eligible[i][0]['vehicle_id']))
+    row, legal = eligible[ordinal]
+    actions = legal[:max_actions]
+    metadata.update(selected_ordinal=ordinal, selected_vehicle_id=str(row['vehicle_id']),
+        selected_degree=len(legal), evaluated_actions=actions, excluded_legal_actions=legal[max_actions:])
+    return row, actions, metadata
+
+
+def causal_baselines(controller, target, actions):
+    """Evaluate static/current-observation baselines without changing the live router."""
+    current, destination = int(target['current_edge']), int(target['destination_edge'])
+    if not actions or not set(actions) <= set(controller.candidates.candidates(current, destination)):
+        raise ValueError('baselines require a nonempty subset of currently legal actions')
+    free = RealTimeShortestRouter(controller.network)
+    observed = RealTimeShortestRouter(controller.network)
+    observed.update_costs(controller.router.costs, controller.router.timestamp)
+    result = dict(smallest_id=dict(selected=min(actions), best_action_set=[min(actions)], information='edge index only'))
+    for name, router in [('free_flow', free), ('dynamic_observed_cost', observed)]:
+        choice = router.next_edge(current, destination, actions)
+        distance = router._distance(destination)
+        costs = {action:float(distance[action]) for action in actions}
+        result[name] = dict(selected=int(choice), action_costs_seconds={str(action):value for action, value in costs.items()},
+            best_action_set=rank_groups(costs)[0], action_cost_rank_groups=rank_groups(costs),
+            operational_tie_break='lowest edge index among tied route-cost actions',
+            information='static free-flow costs' if name=='free_flow' else 'current observed road costs only')
+    return dict(choices=result, constrained_to_evaluated_actions=True,
+        observed_cost_timestamp=controller.router.timestamp, observed_cost_sha256=fingerprint(controller.router.costs),
+        future_demand_access=False, real_future_cost_or_model_prediction_access=False)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--campaign', type=Path, required=True)
@@ -424,6 +497,7 @@ def main(argv=None):
     parser.add_argument('--prefix-seconds', type=int, default=300)
     parser.add_argument('--horizon', type=int, default=120)
     parser.add_argument('--max-actions', type=int, default=3)
+    parser.add_argument('--fork-selection', choices=('max_degree_then_id', 'uniform_private'), default='max_degree_then_id')
     parser.add_argument('--samples', type=int, default=8)
     parser.add_argument('--steps', type=int, default=100)
     parser.add_argument('--startup-snapshot', type=Path,
@@ -453,6 +527,11 @@ def main(argv=None):
         controller='same causal observed-speed shortest rule, refreshed every 30 seconds',
         ensemble_average_state='not implemented; stochastic trajectory mean cost is a different operation',
         teleport_disabled=True, restoration_reference='https://eclipse.dev/sumo/docs/Simulation/SaveAndLoad.html')
+    if args.fork_selection != 'max_degree_then_id':
+        protocol.update(schema_version=2, fork_selection=dict(strategy=args.fork_selection,
+            version=FORK_SELECTION_VERSION, private_seed_rule='SHA256([version,condition_seed,time_ms]) first64bits -> private PCG64',
+            sampling_unit='uniform over all pending vehicles with at least two legal next hops',
+            action_subset='all legal actions up to max-actions, otherwise sorted lowest edge indices', max_actions=args.max_actions))
     if args.startup_snapshot:
         if args.stage != 'restore-proof' or len(args.seeds) != 1:
             raise ValueError('startup proof takes exactly one captured condition, without action comparisons')
@@ -514,17 +593,20 @@ def main(argv=None):
                     controller.prepare(session._flow(), session._time_ms/1000.)
                     session.advance_window(controller)
                 pending = [session._vehicles[name] for name in sorted(session._pending)]
-                viable = [(row, session._legal_candidates(row['current_edge'], row['destination_edge'])) for row in pending]
-                viable = [(row, legal) for row, legal in viable if len(legal) >= 2]
-                if not viable:
-                    raise ValueError('no pending fork at predeclared boundary; retain failure instead of hindsight reselection')
-                row, legal = min(viable, key=lambda pair: (-min(len(pair[1]), args.max_actions), pair[0]['vehicle_id']))
-                target = dict(vehicle_id=row['vehicle_id'], current_edge=row['current_edge'], destination_edge=row['destination_edge'])
-                actions = sorted(legal)[:args.max_actions]
                 controller.prepare(session._flow(), session._time_ms/1000.)
+                before_diagnostics = fingerprint(causal_state(session, controller))
+                row, actions, selection = select_fork(pending, session._legal_candidates, condition_seed=seed,
+                    timestamp=session._time_ms/1000., max_actions=args.max_actions, strategy=args.fork_selection)
+                target = dict(vehicle_id=row['vehicle_id'], current_edge=row['current_edge'], destination_edge=row['destination_edge'])
+                baselines = causal_baselines(controller, target, actions)
+                if fingerprint(causal_state(session, controller)) != before_diagnostics:
+                    raise RuntimeError('fork selection or baseline diagnostics changed controller/session/RNG state')
+                selection.update(diagnostics_preserve_causal_state=True, diagnostics_causal_state_sha256=before_diagnostics)
+                atomic_json(output/'selection.json', selection)
                 snapshot = capture_state(session, controller, output/'initial.xml.gz', demand=demand)
                 torch.save(snapshot.__dict__, output/'initial_python.pt')
                 atomic_json(output/'condition.json', dict(target=target, actions=actions, demand=demand,
+                    fork_selection=selection, causal_baselines=baselines,
                     initial_cohort_size=len(snapshot.session['_active']),
                     registered_background_future=sum(not row['departed'] for row in snapshot.session['_vehicles'].values()),
                     sumo_sha256=snapshot.sumo_sha256, causal_sha256=snapshot.causal_sha256))
@@ -575,10 +657,18 @@ def main(argv=None):
                         atomic_json(output/'failed_arms.json', failures)
                 assessment = None if failures or args.stage == 'real-ranking' else {mode: finite_action_assessment(real,
                     {action: predictions[action][mode] for action in actions}) for mode in ('sampled_prior_fm', 'zero_noise_prior_fm')}
+                baseline_scores = None if failures else {name:dict(selected=info['selected'],
+                    regret_minutes=real[info['selected']]-min(real.values()),
+                    selected_is_best=info['selected'] in rank_groups(real)[0],
+                    real_best_set=rank_groups(real)[0], information_best_action_set=info['best_action_set'])
+                    for name, info in baselines['choices'].items()}
                 atomic_json(output/'assessment.json', dict(assessment=assessment, real_costs=real,
+                    causal_baseline_assessment=baseline_scores,
                     real_rank_groups=rank_groups(real), prediction_summary=prediction_summary, failed_arms=failures,
                     scope='finite actions at this observed condition; not general policy performance'))
         except Exception as exc:
+            if isinstance(exc, NoEligibleFork):
+                atomic_json(output/'selection.json', exc.selection_metadata)
             atomic_json(output/'failure.json', dict(type=type(exc).__name__, error=str(exc), comparisons_blocked=True))
             print(json.dumps(dict(seed=seed, status='failed', error=str(exc))), flush=True)
             raise

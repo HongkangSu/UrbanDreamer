@@ -182,3 +182,93 @@ def test_native_sumo_failure_is_retained_and_cannot_be_claimed_success(tmp_path,
     assert 'loadState' in (output/'process_stderr.log').read_text()
     with pytest.raises(ValueError, match='overwrite'):
         trial.supervised_main(['--output', str(output)])
+
+
+def fork_fixture():
+    rows = [dict(vehicle_id=name, current_edge=index, destination_edge=9)
+            for index, name in enumerate(('a', 'b', 'c', 'd'))]
+    legal = {0:(11, 10), 1:(20,), 2:(34, 30, 33, 31, 32), 3:(41, 40, 42)}
+    return rows, lambda current, destination: legal[current]
+
+
+def test_uniform_fork_selection_reproducible_order_independent_and_global_rng_private():
+    rows, legal = fork_fixture()
+    rng = trial.fingerprint(trial.external_rng_state())
+    original = deepcopy(rows)
+    first = trial.select_fork(rows, legal, condition_seed=620001, timestamp=300., max_actions=4,
+        strategy='uniform_private')
+    second = trial.select_fork(list(reversed(rows)), legal, condition_seed=620001, timestamp=300., max_actions=4,
+        strategy='uniform_private')
+    assert first == second and rows == original
+    assert trial.fingerprint(trial.external_rng_state()) == rng
+    _, actions, meta = first
+    assert [row['vehicle_id'] for row in meta['eligible']] == ['a', 'c', 'd']
+    assert [row['degree'] for row in meta['eligible']] == [2, 5, 3]
+    assert meta['selected_vehicle_id'] == meta['eligible'][meta['selected_ordinal']]['vehicle_id']
+    assert meta['selected_vehicle_probability'] == pytest.approx(1/3)
+    assert actions == sorted(meta['eligible'][meta['selected_ordinal']]['legal_actions'])[:4]
+    changed_time = trial.select_fork(rows, legal, condition_seed=620001, timestamp=900., max_actions=4,
+        strategy='uniform_private')[2]
+    assert changed_time['identity_sha256'] != meta['identity_sha256']
+    smaller = trial.select_fork(rows, legal, condition_seed=620001, timestamp=300., max_actions=2,
+        strategy='uniform_private')
+    assert smaller[0] == first[0] and smaller[1] == actions[:2]
+
+
+def test_uniform_draw_covers_all_eligible_degrees_without_degree_weighting():
+    rows, legal = fork_fixture()
+    counts = dict.fromkeys(('a', 'c', 'd'), 0)
+    for seed_value in range(300):
+        chosen, _, _ = trial.select_fork(rows, legal, condition_seed=seed_value,
+            timestamp=300., max_actions=4, strategy='uniform_private')
+        counts[chosen['vehicle_id']] += 1
+    # A fixed deterministic smoke of the uniform categorical implementation;
+    # checks inclusion of low-degree forks, not a population-level RNG claim.
+    assert all(65 <= count <= 135 for count in counts.values())
+
+
+@pytest.mark.parametrize('budget', [1, 2, 3, 4])
+def test_legacy_fork_default_exactly_matches_original_degree_then_id_rule(budget):
+    rows, legal = fork_fixture()
+    viable = [(row, legal(row['current_edge'], row['destination_edge'])) for row in rows]
+    viable = [(row, edges) for row, edges in viable if len(edges)>=2]
+    expected_row, expected_legal = min(viable, key=lambda pair: (-min(len(pair[1]), budget), pair[0]['vehicle_id']))
+    chosen, actions, metadata = trial.select_fork(rows, legal, condition_seed=42, timestamp=300., max_actions=budget)
+    assert chosen == expected_row and actions == sorted(expected_legal)[:budget]
+    assert metadata['strategy'] == 'max_degree_then_id' and 'private_seed_hex' not in metadata
+
+
+def test_no_eligible_forks_retain_inventory_without_reselection():
+    rows, _ = fork_fixture()
+    with pytest.raises(trial.NoEligibleFork, match='predeclared boundary') as error:
+        trial.select_fork(rows, lambda *args:(1,), condition_seed=42, timestamp=300., max_actions=4,
+            strategy='uniform_private')
+    assert error.value.selection_metadata['eligible'] == []
+    assert error.value.selection_metadata['pending_count'] == 4
+
+
+def test_baseline_diagnostics_use_only_static_or_current_costs_without_live_mutation():
+    net = network((10., 10., 10., 10.), graph=((1, 2), (3,), (3,), ()))
+    candidates = NextHopCandidates(net, traffic_model='meso')
+    controller = trial.CausalShortestController(net, candidates, 40.)
+    controller.router.update_costs(np.array([1., 10., 1., 1.]), 300.)
+    controller.router._distance(3)  # The live cache must remain intact, too.
+    before = trial.fingerprint(dict(state=controller.state_dict(), rng=trial.external_rng_state()))
+    target = dict(vehicle_id='a', current_edge=0, destination_edge=3)
+    result = trial.causal_baselines(controller, target, [1, 2])
+    assert result['choices']['smallest_id']['selected'] == 1
+    assert result['choices']['free_flow']['selected'] == 1
+    assert result['choices']['free_flow']['best_action_set'] == [1, 2]
+    assert result['choices']['dynamic_observed_cost']['selected'] == 2
+    assert result['observed_cost_timestamp'] == 300.
+    assert trial.fingerprint(dict(state=controller.state_dict(), rng=trial.external_rng_state())) == before
+    assert trial.causal_baselines(controller, target, [1])['choices']['dynamic_observed_cost']['selected'] == 1
+
+
+def test_multi_action_best_sets_and_regret_preserve_true_and_prediction_ties():
+    result = trial.finite_action_assessment({1:4., 2:1., 3:1., 4:3.}, {1:2., 2:5., 3:4., 4:2.})
+    assert result['real_best_set'] == [2, 3]
+    assert result['predicted_best_set'] == [1, 4]
+    assert result['selected'] == 1 and result['regret_minutes'] == 3.
+    with pytest.raises(ValueError, match='complete finite action set'):
+        trial.finite_action_assessment({1:4., 2:1., 3:1., 4:3.}, {1:2., 2:5., 3:4.})
