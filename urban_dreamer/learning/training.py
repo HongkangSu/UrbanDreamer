@@ -1107,6 +1107,13 @@ class MainlineTrainer:
         # Keep a sampled successor; averaging would change the transition law.
         return samples[0], variance.reshape(())
 
+    def _create_imagination_executor(self, *, rollout_index, critic_only):
+        """Optional rollout-local state for serial physical execution."""
+        return None
+
+    def _advance_imagination_window(self, executor, states, **kwargs):
+        return advance_imagined_window(states, **kwargs)
+
     def _imagine_from_seed(self, batch, batch_index, *, rollout_index, batched_events=False, copy_seed=True, critic_only=False):
         # Imagined explicit lifecycles follow observed active seed vehicles.
         # Each learned transition removes only births within its own window.
@@ -1126,6 +1133,7 @@ class MainlineTrainer:
             raise ValueError('active imagination seed requires a positive started population')
         if not states or timestamp >= deadline:
             raise ValueError('imagination seed needs active vehicles before the episode deadline')
+        executor = self._create_imagination_executor(rollout_index=rollout_index, critic_only=critic_only)
         with torch.no_grad():
             latent = self.world_model.encode(batch.flow[batch_index, 0].unsqueeze(0).to(self.device))
         groups = []
@@ -1200,7 +1208,7 @@ class MainlineTrainer:
                 getattr(self.config.simulation, 'traffic_model', 'micro')) * self.network.speed_limits_mps
             speeds = np.minimum(speeds, self.config.simulation.vehicle_max_speed_mps)
             duration = min(WORLD_MODEL_INTERVAL_SECONDS, deadline - timestamp)
-            result = advance_imagined_window(states, candidates=self.candidates,
+            result = self._advance_imagination_window(executor, states, candidates=self.candidates,
                 edge_speeds_mps=speeds, frozen_flow=decoded, start_time=timestamp,
                 interval_seconds=duration, total_vehicle_count=total_vehicle_count, decide=decide,
                 observation_step_seconds=1., session_protocol='event', event_index_start=event_count,

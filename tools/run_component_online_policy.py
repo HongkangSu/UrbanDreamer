@@ -10,6 +10,7 @@ import copy
 from dataclasses import replace
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -111,9 +112,102 @@ def runtime_config(source, args):
         key: getattr(config, key) for key in ('inputs', 'run', 'simulation', 'resources', 'method', 'data', 'codec')}))
 
 
+def city_executor_admission(config, prepared, topology, args):
+    """Validate static controls against the campaign-bound network, fail closed."""
+    from urban_dreamer.traffic.movement_controls import CityControlTable
+    simulation = config.simulation
+    if (simulation.traffic_model != 'meso' or not simulation.meso_junction_control
+            or simulation.meso_lane_queue or simulation.meso_multi_queue
+            or simulation.session_protocol != 'event' or simulation.observation_step_seconds != 1.):
+        raise ValueError('city executor requires single-queue meso with junction control and 1 s event observations')
+    # No additional files, TLS changes, alternate configuration, or unreviewed
+    # SUMO switches may invalidate the table inferred from the bound net.xml.
+    if tuple(simulation.sumo_extra_args) not in ((), ('--collision.action', 'warn')):
+        raise ValueError('city executor rejects unverified SUMO arguments/control overrides')
+    network_hash = sha256(prepared.network_xml)
+    if network_hash != prepared.input_hashes['network_xml']:
+        raise ValueError('city network digest differs from prepared input provenance')
+    controls = CityControlTable.from_network(prepared.network_xml, topology.network.edge_ids,
+        no_external_overrides=True, verified_road_only_no_trains=False)
+    if any(m.support != 'exact_control' for m in controls.movements.values()):
+        raise ValueError('city executor requires exact static control support; unsupported/rail approximations rejected')
+    required = {(i, int(j)) for i, successors in enumerate(topology.network.adjacency_list) for j in successors}
+    if required != set(controls.movements):
+        raise ValueError('city controls do not exactly cover the registered routing movements')
+    table = controls.preflight()
+    parameters = dict(uncertain_order=args.city_queue_order == 'seeded_uncertain',
+        discharge_headway_seconds=args.city_discharge_headway,
+        receiving_headway_seconds=args.city_receiving_headway,
+        conflict_clearance_seconds=args.city_conflict_clearance)
+    if any(not math.isfinite(value) or value <= 0 for key, value in parameters.items() if key != 'uncertain_order'):
+        raise ValueError('city executor headways/clearance must be finite and positive')
+    protocol = dict(schema_version=1, name='city', network_xml=str(prepared.network_xml.resolve()),
+        network_sha256=network_hash, input_hashes=prepared.input_hashes,
+        control_table_sha256=hashlib.sha256((json.dumps(table, indent=2, sort_keys=True,
+            allow_nan=False) + '\n').encode()).hexdigest(),
+        control_support=table['support_counts'], movement_count=table['movement_count'],
+        parameters=parameters, queue_order=args.city_queue_order,
+        seed_rule='SHA256 of checkpointed CPU Torch RNG state, rollout index, auxiliary flag; no RNG draws consumed',
+        lifecycle='fresh arbiter per rollout, persistent through contiguous windows, discarded at rollout end',
+        approximation='one FIFO per external road; spatial initial order; declared seeded ties; constant headways and conflict clearance; not full SUMO physics',
+        sumo_extra_args=list(simulation.sumo_extra_args),
+        source_sha256={name: sha256(ROOT/name) for name in (
+            'urban_dreamer/learning/training.py', 'urban_dreamer/learning/city_imagination.py',
+            'urban_dreamer/learning/imagination.py', 'urban_dreamer/traffic/movement_controls.py')})
+    return controls, table, protocol
+
+
 class ComponentPilotTrainer(pilot.PilotTrainer):
+    def configure_city_executor(self, controls, admission):
+        self._city_controls = controls
+        self._city_executor_admission = copy.deepcopy(admission)
+
+    def _validate_city_execution(self):
+        resources = self.config.resources
+        if (int(os.environ.get('URB_IMAGINATION_WORKERS', '0')) != 0
+                or resources.world_model_imagination_compile
+                or resources.world_model_imagination_precision != 'fp32'):
+            raise ValueError('city executor supports serial FP32 imagination without compilation only')
+
+    def _train_imagination_pass(self):
+        if hasattr(self, '_city_controls'):
+            self._validate_city_execution()
+        return super()._train_imagination_pass()
+
+    def _create_imagination_executor(self, *, rollout_index, critic_only):
+        if not hasattr(self, '_city_controls'):
+            return super()._create_imagination_executor(rollout_index=rollout_index, critic_only=critic_only)
+        from urban_dreamer.learning.city_imagination import ChronologicalJunctionArbiter
+        self._validate_city_execution()
+        # Hash, never advance, the checkpointed/forked stream so opting into a
+        # city arbiter does not itself shift actor or world-model random draws.
+        identity = torch.get_rng_state().numpy().tobytes() + json.dumps(
+            [int(rollout_index), bool(critic_only)]).encode()
+        seed = int.from_bytes(hashlib.sha256(identity).digest()[:8], 'big')
+        arbiter = ChronologicalJunctionArbiter(self._city_controls, seed=seed,
+            **self._city_executor_admission['parameters'])
+        self.metrics['city_executor_rollouts'] = self.metrics.get('city_executor_rollouts', 0) + 1
+        self.metrics['city_executor_aux_rollouts'] = self.metrics.get('city_executor_aux_rollouts', 0) + int(critic_only)
+        return arbiter
+
+    def _advance_imagination_window(self, executor, states, **kwargs):
+        if not hasattr(self, '_city_controls'):
+            return super()._advance_imagination_window(executor, states, **kwargs)
+        from urban_dreamer.learning.city_imagination import advance_city_imagined_window
+        previous = len(executor.audit)
+        result = advance_city_imagined_window(states, junction_arbiter=executor, **kwargs)
+        self.metrics['city_executor_windows'] = self.metrics.get('city_executor_windows', 0) + 1
+        for event in executor.audit[previous:]:
+            key = 'city_executor_' + event['event']
+            self.metrics[key] = self.metrics.get(key, 0) + 1
+            if event['event'] == 'queue_initialization' and event['kind'] == 'seeded_uncertain_order':
+                self.metrics['city_executor_uncertain_queues'] = self.metrics.get('city_executor_uncertain_queues', 0) + 1
+        return result
+
     def initialize_component(self, payload, admission):
         """Preserve paired policy/readout initialization and RNG across adapters."""
+        if admission.get('imagination_executor') != getattr(self, '_city_executor_admission', None):
+            raise ValueError('configured city executor differs from component admission')
         before_rng = torch.get_rng_state()
         cuda_rng = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else []
         readout = copy.deepcopy(self.world_model.active_vehicle_fraction_readout.state_dict())
@@ -220,6 +314,12 @@ def main(argv=None):
     p.add_argument('--rollouts', type=int, default=2)
     p.add_argument('--steps', type=int, default=4)
     p.add_argument('--evaluation-episodes', type=int, default=1)
+    p.add_argument('--imagination-executor', choices=('legacy', 'city'), default='legacy')
+    p.add_argument('--city-queue-order', choices=('strict', 'seeded_uncertain'), default='strict',
+        help='strict rejects tied seed positions; seeded_uncertain explicitly admits random tie ordering')
+    p.add_argument('--city-discharge-headway', type=float, default=1.)
+    p.add_argument('--city-receiving-headway', type=float, default=1.)
+    p.add_argument('--city-conflict-clearance', type=float, default=1.)
     p.add_argument('--resume', action='store_true')
     args = p.parse_args(argv)
     component_seed, policy_seed = resolved_seeds(args)
@@ -229,6 +329,9 @@ def main(argv=None):
         p.error('budgets must be positive')
     if not 0 < args.gpu_memory_fraction <= .06:
         p.error('component smoke GPU fraction must be within (0,.06]')
+    if args.imagination_executor == 'legacy' and (args.city_queue_order != 'strict' or
+            (args.city_discharge_headway, args.city_receiving_headway, args.city_conflict_clearance) != (1., 1., 1.)):
+        p.error('city queue/headway options require --imagination-executor city')
     if args.output_dir.exists() and any(args.output_dir.iterdir()) and not args.resume:
         p.error('existing output requires explicit --resume')
     os.environ['URB_IMAGINATION_WORKERS'] = '0'
@@ -238,8 +341,9 @@ def main(argv=None):
     if device.type == 'cuda':
         torch.cuda.set_device(device)
         free, total = torch.cuda.mem_get_info(device)
-        if free < max(2 * 1024**3, args.gpu_memory_fraction * total + 512 * 1024**2):
-            raise RuntimeError('GPU admission requires at least 2 GiB free and allocation headroom')
+        minimum_free = (4 if args.imagination_executor == 'city' else 2) * 1024**3
+        if free < max(minimum_free, args.gpu_memory_fraction * total + 512 * 1024**2):
+            raise RuntimeError(f'GPU admission requires at least {minimum_free // 1024**3} GiB free and allocation headroom')
         torch.cuda.set_per_process_memory_fraction(args.gpu_memory_fraction, device)
     payload, parent = validate_component_source(args.experiment_dir, args.checkpoint,
         args.checkpoint_sha256, variant=args.variant, seed=component_seed)
@@ -247,6 +351,7 @@ def main(argv=None):
     config = runtime_config(source, args)
     prepared = pilot.validate_prepared_inputs(config)
     topology = pilot.load_traffic_topology(prepared)
+    city = city_executor_admission(config, prepared, topology, args) if args.imagination_executor == 'city' else None
     train = dataset(args.experiment_dir, config, prepared, topology, split='train', horizon=1)
     validation = dataset(args.experiment_dir, config, prepared, topology, split='validation', horizon=1)
     if train.manifest['identity'] != payload['protocol']['training_manifest_identity']:
@@ -274,10 +379,15 @@ def main(argv=None):
         # Legacy invocations retain their exact v1 field layout and fingerprint.
         admission['seeds'] = seeds
         protocol.update(schema_version=2, seeds=seeds)
+    if city is not None:
+        admission['imagination_executor'] = city[2]
+        protocol.update(schema_version=3, imagination_executor=city[2])
     trainer = ComponentPilotTrainer(config=config, prepared_inputs=prepared, topology=topology,
         _offline_data=train, _codec_validation_data=validation, pilot_log=args.output_dir/'pilot_metrics.jsonl')
     input_hash = pilot.combined_input_hash(prepared)
     try:
+        if city is not None:
+            trainer.configure_city_executor(city[0], city[2])
         trainer.initialize_component(payload, admission)
         del payload
         # This real gate consumes the entire disjoint selected development split.
@@ -302,7 +412,12 @@ def main(argv=None):
             reward_contract=trainer.state_dict()['reward_contract'],
             paired_demand_hashes=[row['demand_hash'] for row in result['before']],
             world_model_updates=trainer.metrics['world_model_updates'])
+        if city is not None:
+            audit.update(imagination_executor=city[2], executor_counts={
+                key: value for key, value in trainer.metrics.items() if key.startswith('city_executor_')})
         atomic_json(args.output_dir/'component_audit.json', audit)
+        if city is not None:
+            atomic_json(args.output_dir/'city_control_table.json', city[1])
         if sha256(args.checkpoint) != args.checkpoint_sha256:
             raise RuntimeError('offline source changed during isolated policy learning')
         print(json.dumps(dict(status='completed', audit=audit), indent=2), flush=True)
