@@ -240,6 +240,8 @@ def _dynamics(model):
 
 def variant_metadata(model):
     dynamics = _dynamics(model)
+    if getattr(dynamics, 'variant', None) == 'residual_fm_regression_center_v1':
+        return dynamics.metadata()
     prior = dynamics.graph_prior
     variant = getattr(dynamics, "variant", "graph_fm")
     original_noise_rank = getattr(prior, "original_noise_rank", prior.rank)

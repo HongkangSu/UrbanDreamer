@@ -58,6 +58,11 @@ def read_evaluation(directory):
     if summary.get('status') != 'complete' or protocol.get('role') != 'development_not_final_test':
         raise ValueError('only complete development evaluations may be summarized')
     conditions = json.loads(files['conditions.json'].read_text())
+    residual = protocol['model']['variant'] == 'residual_fm_regression_center_v1'
+    expected_predictors = PREDICTORS | {'center_only'} if residual else PREDICTORS
+    if residual and (set(protocol.get('predictor_set', [])) != expected_predictors
+                     or protocol.get('staged_accounting', {}).get('kind') != 'frozen_regression_plus_residual_stage_v1'):
+        raise ValueError('residual evaluation requires explicit center reference and staged accounting')
     condition_keys = [key(row, CONDITION_KEYS) for row in conditions]
     if len(set(condition_keys)) != len(condition_keys) or len(conditions) != summary['conditions']:
         raise ValueError('duplicate conditions or condition count mismatch')
@@ -68,7 +73,7 @@ def read_evaluation(directory):
         observed_conditions.add(key(row, CONDITION_KEYS))
         state = by_state[key(row, STATE_KEYS)]
         predictor = row['predictor']
-        if predictor not in PREDICTORS or predictor in state:
+        if predictor not in expected_predictors or predictor in state:
             raise ValueError('unknown or duplicated state predictor')
         if row['variant'] != protocol['model']['variant']:
             raise ValueError('row variant differs from protocol model')
@@ -78,8 +83,15 @@ def read_evaluation(directory):
         state[predictor] = row
     if observed_conditions != set(condition_keys):
         raise ValueError('states do not cover exactly the declared conditions')
-    if any(set(values) != PREDICTORS for values in by_state.values()):
-        raise ValueError('each state must include predictor, persistence and endpoint codec')
+    if any(set(values) != expected_predictors for values in by_state.values()):
+        raise ValueError('each state must include its declared predictor/reference set')
+    if residual:
+        target_keys = ('roads', 'occupied_roads', 'true_total_count', 'energy_score_dimensions',
+                       'count_valid_roads_all', 'count_valid_roads_occupied',
+                       'speed_valid_roads_all', 'speed_valid_roads_occupied')
+        for state in by_state.values():
+            if any(state['center_only'].get(name) != state['predictor'].get(name) for name in target_keys):
+                raise ValueError('center-only target population/masks differ from residual predictor')
     training = protocol.get('training_protocol')
     if training is not None and training.get('frozen_codec') is not True:
         raise ValueError('comparison requires a declared frozen codec')
@@ -147,6 +159,10 @@ def compatibility_signature(evaluation):
         if any(parent.get(name) != result['campaign'][name] for name in CAMPAIGN_KEYS):
             raise ValueError('training source differs from evaluator frozen-codec campaign')
     result['training_origin'] = 'frozen_pretrain_snapshot' if training is None else 'fresh_dynamics_screen'
+    if training is not None and training.get('kind') == 'frozen_regression_residual_cfm_v1':
+        result['training_origin'] = 'frozen_regression_plus_residual_stage_v1'
+        result['staged_accounting'] = protocol.get('staged_accounting')
+        result['sampling_protocol'] = protocol.get('sampling_protocol')
     result['training_update'] = protocol.get('training_update')
     result['training_budget'] = None if training is None else {name: training.get(name) for name in TRAINING_KEYS}
     result['conditions'] = sorted(key(row, CONDITION_KEYS) for row in evaluation['conditions'])
@@ -165,7 +181,8 @@ def validate_pairing(evaluations):
             raise ValueError('duplicate variant/training-seed: report separate checkpoints in separate reports')
         identities.add(identity)
         candidate = compatibility_signature(evaluation)
-        differences = [name for name in signature if candidate[name] != signature[name]]
+        differences = [name for name in signature.keys() | candidate.keys()
+                       if candidate.get(name) != signature.get(name)]
         if differences:
             raise ValueError(f"incompatible evaluation {evaluation['label']}: {', '.join(differences)}")
         if evaluation['states'].keys() != reference['states'].keys():
@@ -239,7 +256,8 @@ def create_report(evaluations, *, repetitions=1000, seed=20261011):
     by_seed = {item['training_seed']: item for item in evaluations if item['variant'] == 'graph_fm'}
     for evaluation in evaluations:
         common = dict(run=evaluation['label'], variant=evaluation['variant'], training_seed=evaluation['training_seed'])
-        for predictor in sorted(PREDICTORS):
+        predictors = PREDICTORS | {'center_only'} if evaluation['variant'] == 'residual_fm_regression_center_v1' else PREDICTORS
+        for predictor in sorted(predictors):
             for (protocol, horizon, stratum), selected in partitions(evaluation, predictor).items():
                 info = dict(common, predictor=predictor, protocol=protocol, horizon=horizon, stratum=stratum)
                 for metric in METRICS:
@@ -255,6 +273,8 @@ def create_report(evaluations, *, repetitions=1000, seed=20261011):
                                     coverage=coverage['estimate'], coverage_ci_low=coverage['ci_low'], coverage_ci_high=coverage['ci_high'],
                                     width=width['estimate'], demand_groups=coverage['demand_groups']))
                     references = [('persistence', partitions(evaluation, 'persistence')[(protocol, horizon, stratum)])]
+                    if 'center_only' in predictors:
+                        references.append(('center_only', partitions(evaluation, 'center_only')[(protocol, horizon, stratum)]))
                     graph = by_seed.get(evaluation['training_seed'])
                     if graph is not None and graph is not evaluation:
                         references.append(('graph_fm', partitions(graph, 'predictor')[(protocol, horizon, stratum)]))
@@ -273,7 +293,9 @@ def create_report(evaluations, *, repetitions=1000, seed=20261011):
     seeds = {item['variant']: sorted({str(e['training_seed']) for e in evaluations if e['variant'] == item['variant']}) for item in evaluations}
     return dict(status='complete', role='development_screen', comparison_complete=False,
         report_scope='single_checkpoint_diagnostic' if len(evaluations) == 1 else 'paired_development_checkpoint_comparison',
-        explanation='Component campaign completion is not claimed. Training seeds remain separate; all intervals are conditional on the individual checkpoint.',
+        explanation=('Component campaign completion is not claimed. Training seeds remain separate; all intervals are conditional on the individual checkpoint.'
+            + (' Residual-versus-center is incremental with additional training; total center/stage budgets are separate and no equal-total-budget advantage is established.'
+               if signature['training_origin'] == 'frozen_regression_plus_residual_stage_v1' else '')),
         interval='95% percentile bootstrap of demand groups; equal demands, episodes, then states; no training-seed uncertainty interval.',
         difference_sign='candidate minus reference; negative is better for all reported error/score metrics.',
         independent_training_seeds=seeds, repetitions=repetitions, seed=seed, compatibility=signature,

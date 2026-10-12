@@ -139,14 +139,23 @@ def sample_trajectories(model, initial, action, events, *, horizons, samples, sa
     if samples < 2 or sample_chunk < 1:
         raise ValueError("need at least two samples and a positive sample chunk")
     torch.manual_seed(seed)
+    residual = getattr(getattr(model, 'dynamics', None), 'variant', None) == 'residual_fm_regression_center_v1'
     physical_draws = {h: [] for h in horizons}
     moments = {h: [None, None, 0] for h in horizons}
     for begin in range(0, samples, sample_chunk):
         count = min(sample_chunk, samples - begin)
         current = initial.repeat(count, 1, 1)
         for step in range(max(horizons)):
+            noise_kwargs = {}
+            if residual:
+                # Draw identity belongs to (trajectory, depth), not chunk layout.
+                noise = [torch.randn(initial.shape, device=initial.device, dtype=torch.float32,
+                    generator=torch.Generator(device=initial.device).manual_seed(
+                        stable_seed(seed, 'residual_noise_v1', ordinal, step)))
+                    for ordinal in range(begin, begin + count)]
+                noise_kwargs['noise'] = torch.cat(noise, dim=0)
             current = model.transition(current, action[:, step].repeat(count, 1),
-                action_events=_repeat_events(events.for_step(step), count), steps=steps, solver="euler")
+                action_events=_repeat_events(events.for_step(step), count), steps=steps, solver="euler", **noise_kwargs)
             h = step + 1
             if h not in physical_draws:
                 continue
@@ -196,6 +205,14 @@ def evaluate_condition(model, batch, capacities, limits, *, horizons, samples, s
                 horizons=[1], samples=samples, sample_chunk=sample_chunk, steps=steps,
                 capacities=capacities, limits=limits, seed=stable_seed(seed, protocol, "risk"))
             disagreement[1] = independent_disagreement[1]
+        center_draws = {}
+        if getattr(getattr(model, 'dynamics', None), 'variant', None) == 'residual_fm_regression_center_v1':
+            current = initial
+            for step in range(max(forecast_horizons)):
+                current = model.dynamics.mean_dynamics.transition(current, action[:, step],
+                    action_events=events.for_step(step))
+                if step + 1 in forecast_horizons:
+                    center_draws[step + 1] = physical(model.decode(current), capacities, limits).cpu().unsqueeze(0)
         for h in forecast_horizons:
             endpoint = targets[:, h if recursive else 0]
             following = flow[:, h + 1] if h + 1 < frames else None
@@ -203,6 +220,8 @@ def evaluate_condition(model, batch, capacities, limits, *, horizons, samples, s
             baselines = {"predictor": draws[h],
                 "persistence": physical(start, capacities, limits).cpu().unsqueeze(0),
                 "endpoint_codec": physical(model.decode(model.encode(endpoint)), capacities, limits).cpu().unsqueeze(0)}
+            if h in center_draws:
+                baselines['center_only'] = center_draws[h]
             for predictor, values in baselines.items():
                 details = dict(metadata, protocol=protocol, predictor=predictor, horizon=h,
                     forecast_seconds=30 * h, congestion=float(congestion[0]),
@@ -256,6 +275,22 @@ def summarize(records, *, seed):
     return summaries
 
 
+def restore_component_checkpoint(model, checkpoint, protocol):
+    """Residual checkpoints embed a separately validated frozen center and scale."""
+    if checkpoint.get('variant') == 'residual_fm_regression_center_v1':
+        from tools.residual_experiment_data import restore_residual_model
+        return restore_residual_model(model, checkpoint, protocol)
+    if checkpoint.get('schema_version') != 1:
+        raise ValueError("unsupported component checkpoint schema")
+    checkpoint_protocol = checkpoint["protocol"].get("parent", checkpoint["protocol"])
+    if any(checkpoint_protocol[key] != protocol[key] for key in
+           ("development_manifest_identity", "checkpoint_sha256", "config_sha256")):
+        raise ValueError("checkpoint belongs to a different data protocol")
+    apply_variant(model, checkpoint["variant"], checkpoint["seed"])
+    model.load_state_dict(checkpoint["model"], strict=True)
+    return model
+
+
 def run(args):
     if any((args.output_dir / name).exists() for name in ("protocol.json", "states.jsonl", "summary.json")):
         raise ValueError("evaluation output already exists; preserve it and choose a new output directory")
@@ -273,17 +308,15 @@ def run(args):
             raise RuntimeError("GPU admission requires at least 2 GiB currently free")
         torch.cuda.set_per_process_memory_fraction(cap, device)
     checkpoint = None if args.checkpoint is None else torch.load(args.checkpoint, map_location="cpu", weights_only=True)
+    if checkpoint is not None and checkpoint.get('variant') == 'residual_fm_regression_center_v1':
+        from tools.residual_experiment_data import validate_campaign
+        _, manifest_sha = validate_campaign(args.experiment_dir)
+        if checkpoint['protocol']['center']['manifest_sha256'] != manifest_sha:
+            raise ValueError('residual checkpoint development manifest SHA256 differs')
     config, prepared, topology, model, protocol = load_frozen(args.experiment_dir, device="cpu",
         fresh_dynamics_seed=None if checkpoint is None else checkpoint["seed"])
     if checkpoint is not None:
-        if checkpoint.get("schema_version") != 1:
-            raise ValueError("unsupported component checkpoint schema")
-        checkpoint_protocol = checkpoint["protocol"].get("parent", checkpoint["protocol"])
-        if any(checkpoint_protocol[key] != protocol[key] for key in
-               ("development_manifest_identity", "checkpoint_sha256", "config_sha256")):
-            raise ValueError("checkpoint belongs to a different data protocol")
-        apply_variant(model, checkpoint["variant"], checkpoint["seed"])
-        model.load_state_dict(checkpoint["model"], strict=True)
+        restore_component_checkpoint(model, checkpoint, protocol)
     model.to(device).eval()
     validation = dataset(args.experiment_dir, config, prepared, topology, split="validation", horizon=max(horizons) + 1)
     training = dataset(args.experiment_dir, config, prepared, topology, split="train", horizon=1)
@@ -312,6 +345,19 @@ def run(args):
         missing_horizons="CLI rejects incomplete batches; direct evaluate_condition supports missing-label diagnostics",
         disagreement="h1 separate noise ensemble; h>1 same-ensemble diagnostic only",
         limits="recorded conditions with background traffic; not a SUMO counterfactual or closed-loop policy validation")
+    if checkpoint is not None and checkpoint.get('variant') == 'residual_fm_regression_center_v1':
+        center = checkpoint['protocol']['center']
+        evaluation_protocol.update(
+            predictor_set=['predictor', 'persistence', 'endpoint_codec', 'center_only'],
+            sampling_protocol='residual_per_trajectory_depth_noise_v1',
+            staged_accounting=dict(kind='frozen_regression_plus_residual_stage_v1',
+                center_updates=center['mean_updates'], stage_updates=checkpoint['update'],
+                total_updates=center['mean_updates'] + checkpoint['update'],
+                center_exposures=center['mean_exposures'], stage_exposures=checkpoint['exposures'],
+                total_exposures=center['mean_exposures'] + checkpoint['exposures'],
+                calibration_forward_exposures=checkpoint['calibration']['count'],
+                center_reference='own deterministic recursive trajectory; incremental comparison, extra training declared',
+                equal_total_budget_comparison='requires separate declared staged comparator'))
     atomic_json(args.output_dir / "protocol.json", evaluation_protocol)
     records = []
     with (args.output_dir / "states.jsonl").open("w") as stream:

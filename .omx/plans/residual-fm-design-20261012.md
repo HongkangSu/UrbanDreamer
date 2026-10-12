@@ -281,3 +281,7 @@ decoder-amplified latent noise, small-sample mean bias, and persistent missing
 history/TLS/cohort-commitment inputs. Revisions change explicit protocol/version;
 none justify silent validation-scale fitting, endpoint-MSE addition or center
 fine-tuning inside v1.
+
+## User scope override, 2026-10-12
+
+Formal upcoming comparisons use the completed pretrained Prior+FM checkpoint. The current regression-2048-centered residual candidate is retained as development code and must not be launched as a formal comparison. A future residual experiment requires a fully trained center and convergence evidence. The previous planned 2048 residual stage is superseded for formal experiments.
