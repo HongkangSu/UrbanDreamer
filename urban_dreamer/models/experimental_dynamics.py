@@ -21,7 +21,7 @@ from urban_dreamer.models.world_model import (
 
 VARIANTS = ("graph_fm", "no_prior_fm", "random_prior_fm", "regression",
             "graph_regression", "gaussian", "graph_prior_r64_fm", "graph_prior_r128_fm",
-            "isotropic_noise_graph_fm", "isotropic_noise_no_prior_fm")
+            "isotropic_noise_graph_fm", "isotropic_noise_no_prior_fm", "isolated_prior_graph_fm")
 
 
 def _low_frequency_basis(adjacency, rank):
@@ -266,6 +266,15 @@ def variant_metadata(model):
             expected_energy=None if gaussian else 0.,
             expected_energy_unit="input-dependent sum of predicted latent variances" if gaussian
                                  else "deterministic predictor has no sampled perturbation")
+    if variant == "isolated_prior_graph_fm":
+        metadata["gradient_policy"] = dict(
+            scope="independent_transition_fm_loss_only",
+            fm_prior_increment="detached_in_source_and_coarse_reference",
+            prior_supervision="original_increment_trainable",
+            condition_encoder="shared_trainable; representation is not frozen",
+            reference_projection="trainable",
+            current_state="direct derivative preserved in prior_start; independent observed inputs remain detached",
+            inference="unchanged")
     return metadata
 
 
@@ -284,7 +293,8 @@ def experimental_loss(model, *, z_inputs, z_targets, action, action_events=None,
             action=action, action_events=action_events,
             prior_weight=0. if variant in {"no_prior_fm", "isotropic_noise_no_prior_fm"} else prior_weight,
             predict_endpoints=predict_endpoints, steps=steps, solver=solver,
-            picard_iterations=picard_iterations, noise=noise, flow_time=flow_time)
+            picard_iterations=picard_iterations, noise=noise, flow_time=flow_time,
+            detach_prior_increment=variant == "isolated_prior_graph_fm")
     if (z_inputs.ndim != 4 or z_targets.shape != z_inputs.shape
             or z_inputs.shape[0] < 1 or z_inputs.shape[1] < 1):
         raise ValueError("z_inputs and z_targets must have matching nonempty (B,H,E,64) shapes")

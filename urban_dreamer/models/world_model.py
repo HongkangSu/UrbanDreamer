@@ -807,9 +807,18 @@ class Dynamics(nn.Module):
 
     def prior_start(
         self, z: torch.Tensor, condition: ConditionEncoding, noise: torch.Tensor | None = None,
+        *, detach_prior_increment: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor, ConditionEncoding]:
+        """Optionally isolate the learned increment on FM source/reference paths.
+
+        The original increment remains live for prior supervision. This does
+        not freeze the shared condition encoder, reference projection, or the
+        direct current-state derivative through ``z``.
+        """
+        if not isinstance(detach_prior_increment, bool):
+            raise ValueError('detach_prior_increment must be a boolean')
         increment = self.graph_prior(z, condition)
-        coarse = z + increment
+        coarse = z + (increment.detach() if detach_prior_increment else increment)
         cached = ConditionEncoding(condition.edge_tokens, self.reference_proj(coarse))
         return coarse + self.graph_prior.sample_noise(z, noise), increment, cached
 
@@ -1148,6 +1157,7 @@ def independent_transition_fm_loss(
     steps: int = 2, solver: str = "euler", picard_iterations: int | None = None,
     prior_weight: float = 0.1, noise: torch.Tensor | None = None,
     flow_time: torch.Tensor | None = None, predict_endpoints: bool = True,
+    detach_prior_increment: bool = False,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
     """Independent observed-state transitions with separate endpoint targets.
 
@@ -1189,7 +1199,8 @@ def independent_transition_fm_loss(
     target = z_targets.detach().reshape_as(current)
     flattened_action = action.reshape(batch * horizon, 1, edges)
     condition = dynamics.encode_condition(flattened_action, action_events=action_events)
-    start, increment, condition = dynamics.prior_start(current, condition, noise)
+    start, increment, condition = dynamics.prior_start(current, condition, noise,
+        detach_prior_increment=detach_prior_increment)
     tau = flow_time.reshape(batch * horizon, 1, 1, 1)
     interpolated = (1 - tau) * start + tau * target
     velocity = dynamics(flattened_action, packed_latents=interpolated,

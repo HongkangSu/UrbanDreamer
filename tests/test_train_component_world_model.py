@@ -334,3 +334,11 @@ def test_budget_extension_rejects_hidden_treatment_changes(monkeypatch,tmp_path,
         torch.save(checkpoint,extension.continue_from)
     with pytest.raises(ValueError):
         runner.train(extension)
+
+
+@pytest.mark.parametrize('mode', ['recursive_fm', 'sample_ms', 'mean_ms'])
+def test_isolated_prior_variant_is_not_admitted_to_recursive_training(mode):
+    model = apply_variant(small_model(), 'isolated_prior_graph_fm', seed=42)
+    batch = cohort_replay()._batch_from_picks([(0, 0)])
+    with pytest.raises(ValueError, match='recursive supervision comparison currently requires FM variants'):
+        runner.supervised_loss(model, batch, CAPACITIES, mode=mode, device='cpu', steps=1)

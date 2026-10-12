@@ -277,3 +277,118 @@ def test_metadata_describes_actual_sampling_not_unused_prior_helper(case, varian
         assert metadata['noise_rank'] == 0
         assert metadata['source_std'] == 0.
         assert metadata['expected_energy'] == 0.
+
+
+def test_isolated_prior_has_exact_forward_and_inference_parity(case):
+    model, inputs, targets, action, events = case
+    isolated = copy.deepcopy(model)
+    before_keys = tuple(model.dynamics.state_dict())
+    rng = torch.random.get_rng_state()
+    apply_variant(isolated, 'isolated_prior_graph_fm', seed=42)
+    assert torch.equal(rng, torch.random.get_rng_state())
+    assert tuple(isolated.dynamics.backbone.state_dict()) == before_keys
+    assert variant_metadata(isolated)['parameters'] == variant_metadata(model)['parameters']
+    noise = torch.randn(2, 2, 1, 64)
+    kwargs = dict(z_inputs=inputs, z_targets=targets, action=action, action_events=events,
+                  noise=noise, flow_time=torch.tensor([[.1, .3], [.6, .9]]))
+    baseline = experimental_loss(model, **kwargs)
+    actual = experimental_loss(isolated, **kwargs)
+    for left, right in ((actual[0], baseline[0]), (actual[2], baseline[2])):
+        torch.testing.assert_close(left, right, rtol=0, atol=0)
+    assert actual[1].keys() == baseline[1].keys()
+    for key in actual[1]:
+        torch.testing.assert_close(actual[1][key], baseline[1][key], rtol=0, atol=0)
+    torch.testing.assert_close(predict_next(isolated, inputs, action, noise=noise, action_events=events),
+        predict_next(model, inputs, action, noise=noise, action_events=events), rtol=0, atol=0)
+    assert variant_metadata(isolated)['gradient_policy']['condition_encoder'].startswith('shared_trainable')
+
+
+def test_isolated_fm_only_blocks_prior_parameters_but_trains_condition_reference_and_field(case):
+    model, inputs, targets, action, events = case
+    baseline = copy.deepcopy(model)
+    apply_variant(model, 'isolated_prior_graph_fm')
+    kwargs = dict(z_inputs=inputs, z_targets=targets, action=action, action_events=events,
+        prior_weight=0., predict_endpoints=False, noise=torch.randn(2, 2, 1, 64),
+        flow_time=torch.full((2, 2), .35))
+    loss, _, _ = experimental_loss(model, **kwargs)
+    loss.backward()
+    assert all(p.grad is None or torch.count_nonzero(p.grad) == 0
+               for p in model.dynamics.graph_prior.parameters())
+    for parameter in (model.dynamics.flow_head.weight, model.dynamics.reference_proj.weight,
+                      model.dynamics.event_encoder.event_mlp[0].weight,
+                      model.dynamics.action_encoder.edge_conditioning.weight):
+        assert parameter.grad is not None and torch.isfinite(parameter.grad).all()
+        assert parameter.grad.abs().sum() > 0
+    # A nonzero control proves that the test would detect the original coupling.
+    baseline_loss, _, _ = experimental_loss(baseline, **kwargs)
+    baseline_loss.backward()
+    assert baseline.dynamics.graph_prior.output.weight.grad.abs().sum() > 0
+
+
+def test_isolated_combined_prior_gradients_equal_only_weighted_prior_supervision(case):
+    model, inputs, targets, action, events = case
+    apply_variant(model, 'isolated_prior_graph_fm')
+    prior = model.dynamics.graph_prior
+    parameters = tuple(prior.parameters())
+    weight = .37
+    condition = model.dynamics.encode_condition(action, action_events=events)
+    increment = prior(inputs, condition)
+    prior_mse = (increment.float() - prior.project(targets - inputs).detach().float()).square().mean()
+    expected = torch.autograd.grad(weight * prior_mse, parameters)
+    assert any(gradient.abs().sum() > 0 for gradient in expected)
+    loss, metrics, _ = experimental_loss(model, z_inputs=inputs, z_targets=targets,
+        action=action, action_events=events, prior_weight=weight, predict_endpoints=False,
+        noise=torch.randn(2, 2, 1, 64), flow_time=torch.full((2, 2), .35))
+    actual = torch.autograd.grad(loss, parameters)
+    torch.testing.assert_close(metrics['prior_loss'], weight * prior_mse.detach())
+    for observed, wanted in zip(actual, expected):
+        torch.testing.assert_close(observed, wanted, rtol=1e-6, atol=1e-8)
+
+
+def test_prior_start_isolation_preserves_direct_current_state_and_live_original_increment(case):
+    model, inputs, _, action, events = case
+    dynamics = model.dynamics
+    current = inputs.clone().requires_grad_()
+    condition = dynamics.encode_condition(action, action_events=events)
+    noise = torch.randn(2, 2, 1, 64)
+    start, increment, cached = dynamics.prior_start(current, condition, noise,
+                                                   detach_prior_increment=True)
+    assert cached.edge_tokens is condition.edge_tokens
+    assert increment.requires_grad and cached.reference_tokens.requires_grad
+    torch.testing.assert_close(torch.autograd.grad(start.sum(), current, retain_graph=True)[0],
+                               torch.ones_like(current), rtol=0, atol=0)
+    reference_gradient = torch.autograd.grad(cached.reference_tokens.sum(), current, retain_graph=True)[0]
+    expected = dynamics.reference_proj.weight.sum(0).reshape(1, 1, 1, -1).expand_as(current)
+    torch.testing.assert_close(reference_gradient, expected, rtol=1e-6, atol=1e-6)
+    prior_gradient = torch.autograd.grad(increment.square().mean(), dynamics.graph_prior.output.weight)[0]
+    assert prior_gradient.abs().sum() > 0
+    ordinary = dynamics.prior_start(current, condition, noise)
+    explicit_default = dynamics.prior_start(current, condition, noise, detach_prior_increment=False)
+    torch.testing.assert_close(ordinary[0], explicit_default[0], rtol=0, atol=0)
+    assert ordinary[1].requires_grad
+
+
+def test_isolated_checkpoint_restores_gradient_policy_and_fm_isolation(case):
+    model, inputs, targets, action, events = case
+    restored = copy.deepcopy(model)
+    apply_variant(model, 'isolated_prior_graph_fm', seed=42)
+    apply_variant(restored, 'isolated_prior_graph_fm', seed=0)
+    stream = io.BytesIO()
+    torch.save(model.state_dict(), stream)
+    stream.seek(0)
+    restored.load_state_dict(torch.load(stream, weights_only=True))
+    assert variant_metadata(restored) == variant_metadata(model)
+    loss, _, _ = experimental_loss(restored, z_inputs=inputs, z_targets=targets,
+        action=action, action_events=events, prior_weight=0., predict_endpoints=False)
+    loss.backward()
+    assert all(p.grad is None or torch.count_nonzero(p.grad) == 0
+               for p in restored.dynamics.graph_prior.parameters())
+    assert restored.dynamics.reference_proj.weight.grad.abs().sum() > 0
+
+
+@pytest.mark.parametrize('invalid', [1, 'true', None])
+def test_prior_detachment_flag_requires_explicit_boolean(case, invalid):
+    model, inputs, targets, action, events = case
+    with pytest.raises(ValueError, match='detach_prior_increment must be a boolean'):
+        independent_transition_fm_loss(model.dynamics, z_inputs=inputs, z_targets=targets,
+            action=action, action_events=events, detach_prior_increment=invalid)
