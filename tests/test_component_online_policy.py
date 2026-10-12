@@ -2,8 +2,10 @@
 import copy
 from dataclasses import replace
 import json
+import random
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 
@@ -96,10 +98,14 @@ def test_online_variant_loss_trains_dynamics_and_observed_readout_without_codec(
     torch.testing.assert_close(captured[0], observed)
 
 
-def component_trainer(tmp_path, variant):
+def component_trainer(tmp_path, variant, *, policy_seed=42):
     template = make_trainer(tmp_path/'template')
-    config = replace(template.config, method=replace(template.config.method,
+    config = replace(template.config, run=replace(template.config.run, seed=policy_seed),
+        simulation=replace(template.config.simulation, demand_duration_seconds=30.),
+        method=replace(template.config.method,
         critic_value_mode='bounded_cohort_v1', disagreement_weight=0.))
+    config = replace(config, semantic_fingerprint=runner._semantic_fingerprint(**{
+        key: getattr(config, key) for key in ('inputs', 'run', 'simulation', 'resources', 'method', 'data', 'codec')}))
     trainer = runner.ComponentPilotTrainer(config=config, prepared_inputs=template.prepared_inputs,
         topology=template.topology, _offline_data=template.offline_data,
         _codec_validation_data=template.codec_validation_data, pilot_log=tmp_path/'pilot.jsonl')
@@ -158,3 +164,156 @@ def test_physical_reward_path_remains_production_explicit_vehicle_accounting():
     from urban_dreamer.learning.training import MainlineTrainer
     assert runner.ComponentPilotTrainer._imagine_from_seed is MainlineTrainer._imagine_from_seed
     assert runner.ComponentPilotTrainer._collect_episode is MainlineTrainer._collect_episode
+
+
+@pytest.mark.parametrize('overrides,expected', [({}, (42, 42)),
+    ({'seed': 7}, (7, 7)), ({'policy_seed': 43}, (42, 43)),
+    ({'component_seed': 11}, (11, 42)),
+    ({'seed': 9, 'component_seed': 42}, (42, 9)),
+    ({'seed': 9, 'component_seed': 42, 'policy_seed': 0}, (42, 0))])
+def test_legacy_seed_defaults_and_explicit_overrides(overrides, expected):
+    args = SimpleNamespace(**dict(dict(seed=42), **overrides))
+    assert runner.resolved_seeds(args) == expected
+    protocol = runner.seed_protocol(args)
+    if set(overrides) <= {'seed'}:
+        assert protocol is None
+    else:
+        assert protocol['schema_version'] == 1
+        assert (protocol['component_seed'], protocol['policy_seed']) == expected
+        assert protocol['online_demand_seed'] == expected[1]
+
+
+def test_fixed_component_has_reproducible_independent_policy_and_rng_initialization(tmp_path):
+    _, payload = component_trainer(tmp_path/'source', 'gaussian')
+    results = []
+    for index, seed in enumerate((43, 44, 43)):
+        trainer, _ = component_trainer(tmp_path/str(index), 'gaussian', policy_seed=seed)
+        # Payload creation consumes adapter RNG; capture the state immediately
+        # before import to prove import itself leaves the learner RNG unchanged.
+        state = torch.get_rng_state().clone()
+        numpy_state = copy.deepcopy(trainer.rng.bit_generator.state)
+        trainer.initialize_component(payload, dict(component_seed=42, policy_seed=seed))
+        assert torch.equal(torch.get_rng_state(), state)
+        assert trainer.rng.bit_generator.state == numpy_state
+        results.append(dict(policy={name: runner.tensor_digest(getattr(trainer, name)) for name in
+            (*runner.pilot.MODEL_NAMES, 'target_latent_critic')},
+            readout=runner.tensor_digest(trainer.world_model.active_vehicle_fraction_readout),
+            dynamics=runner.tensor_digest(trainer.world_model.dynamics),
+            codec=runner.tensor_digest(trainer.world_model.flow_projector),
+            torch_draw=torch.rand(4).tolist(), numpy_draw=trainer.rng.random(4).tolist(),
+            global_numpy_draw=np.random.random(4).tolist(), python_draw=[random.random() for _ in range(4)],
+            auxiliary_draw=trainer._critic_aux_rng.random(4).tolist()))
+    assert results[0] == results[2]
+    assert results[0]['dynamics'] == results[1]['dynamics']
+    assert results[0]['codec'] == results[1]['codec']
+    for key in ('readout', 'torch_draw', 'numpy_draw', 'global_numpy_draw', 'python_draw', 'auxiliary_draw'):
+        assert results[0][key] != results[1][key]
+    for name in results[0]['policy']:
+        assert results[0]['policy'][name] != results[1]['policy'][name]
+
+
+def test_cli_emits_legacy_or_versioned_seed_identity_before_any_collection(tmp_path, monkeypatch):
+    template, payload = component_trainer(tmp_path/'fixture', 'regression')
+    payload.update(update=10, protocol=dict(planned_updates=20,
+        training_manifest_identity=template.offline_data.manifest['identity']))
+    source_config = template.config
+    calls = []
+    def load_source(*args, **kwargs):
+        calls.append(kwargs['seed'])
+        assert kwargs['seed'] == payload['seed']
+        return payload, {'parent': 'fixed'}
+    monkeypatch.setattr(runner, 'validate_component_source', load_source)
+    monkeypatch.setattr(runner, 'load_config', lambda _: source_config)
+    monkeypatch.setattr(runner.pilot, 'validate_prepared_inputs', lambda _: template.prepared_inputs)
+    monkeypatch.setattr(runner.pilot, 'load_traffic_topology', lambda _: template.topology)
+    monkeypatch.setattr(runner, 'dataset', lambda *args, **kwargs: template.offline_data)
+    captured = []
+    class Captured(RuntimeError):
+        pass
+    def stop_before_collection(trainer, **kwargs):
+        captured.append((trainer.config, copy.deepcopy(kwargs['protocol']),
+                         copy.deepcopy(trainer.metrics['component_admission'])))
+        raise Captured
+    monkeypatch.setattr(runner.pilot, 'OnlinePilot', stop_before_collection)
+    base = ['--experiment-dir', str(tmp_path), '--checkpoint', str(tmp_path/'component.pt'),
+        '--checkpoint-sha256', 'fixed-sha', '--variant', 'regression', '--resume']
+    for index, flags in enumerate(([], ['--seed', '42'], ['--component-seed', '42', '--policy-seed', '43'],
+                                  ['--component-seed', '42', '--policy-seed', '42'])):
+        with pytest.raises(Captured):
+            runner.main([*base, '--output-dir', str(tmp_path/f'run{index}'), *flags])
+    legacy_config, legacy, legacy_admission = captured[0]
+    assert legacy == captured[1][1]
+    assert legacy['schema_version'] == 1 and 'seeds' not in legacy
+    assert 'seeds' not in legacy_admission and legacy_admission['seed'] == 42
+    assert calls == [42, 42, 42, 42]
+    config, split, admission = captured[2]
+    assert config.run.seed == 43 and split['schema_version'] == 2
+    assert split['seeds']['component_seed'] == admission['seed'] == 42
+    assert split['seeds']['policy_seed'] == 43
+    assert admission['seeds'] == split['seeds']
+    assert config.method.evaluation_demand_seed == legacy_config.method.evaluation_demand_seed
+    assert config.semantic_fingerprint != legacy_config.semantic_fingerprint
+    assert captured[3][0].semantic_fingerprint == legacy_config.semantic_fingerprint
+    # Equal numerical seeds still explicitly opt into the new protocol version.
+    assert captured[3][1]['schema_version'] == 2
+    for key in set(legacy) - {'schema_version', 'source', 'runtime_config_fingerprint'}:
+        assert legacy[key] == split[key]
+
+
+@pytest.mark.parametrize('version', [1, 2])
+def test_seed_checkpoint_resume_and_changed_identity_rejection(tmp_path, monkeypatch, version):
+    policy_seed = 42 if version == 1 else 43
+    trainer, payload = component_trainer(tmp_path/'first', 'regression', policy_seed=policy_seed)
+    admission = dict(seed=42, source_sha='fixed')
+    if version == 2:
+        admission['seeds'] = runner.seed_protocol(SimpleNamespace(seed=42, component_seed=42, policy_seed=43))
+    trainer.initialize_component(payload, admission)
+    mock_oracle_codec_gate_for_isolated_fm(trainer, monkeypatch)
+    for name in runner.pilot.MODEL_NAMES:
+        sum(p.square().sum() for p in getattr(trainer, name).parameters()).backward()
+        trainer.optimizers[name].step()
+        trainer.optimizers[name].zero_grad(set_to_none=True)
+    protocol = dict(schema_version=version, source=admission, runner_sha256=runner.sha256(runner.__file__))
+    if version == 2:
+        protocol['seeds'] = admission['seeds']
+    output = tmp_path/'saved'
+    first = runner.pilot.OnlinePilot(trainer, output=output, input_hash='fixed', protocol=protocol, online_episodes=1)
+    first.resume()
+    checkpoint_before = runner.sha256(output/'checkpoints/latest.pt')
+    restored, _ = component_trainer(tmp_path/'second', 'regression', policy_seed=policy_seed)
+    restored.offline_data = trainer.offline_data
+    restored.initialize_component(payload, admission)
+    mock_oracle_codec_gate_for_isolated_fm(restored, monkeypatch)
+    second = runner.pilot.OnlinePilot(restored, output=output, input_hash='fixed', protocol=protocol, online_episodes=1)
+    second.resume()
+    assert runner.strict_resume_audit(restored, output, 'fixed')['exact_state_restored']
+    assert runner.sha256(output/'checkpoints/latest.pt') == checkpoint_before
+    assert restored.pilot_optimizer_steps == dict.fromkeys(runner.pilot.MODEL_NAMES, 1)
+    fields = [('source', 'seed'), (None, 'runner_sha256'), (None, 'schema_version')]
+    if version == 2:
+        fields.extend(('seeds', field) for field in ('component_seed', 'policy_seed', 'online_demand_seed'))
+    for section, field in fields:
+        changed = copy.deepcopy(protocol)
+        target = changed[section] if section else changed
+        target[field] = 'changed' if isinstance(target[field], str) else target[field] + 1
+        with pytest.raises(ValueError, match='protocol/source identity'):
+            runner.pilot.OnlinePilot(restored, output=output, input_hash='fixed',
+                protocol=changed, online_episodes=1).resume()
+    state = copy.deepcopy(restored.state_dict())
+    if version == 2:
+        state['metrics']['component_admission']['seeds']['policy_seed'] = 44
+    else:
+        state['metrics']['component_admission']['seed'] = 44
+    with pytest.raises(ValueError, match='admission'):
+        restored.load_state_dict(state)
+
+
+@pytest.mark.parametrize('mode', ['independent_cohort', 'recursive_fm', 'sample_ms', 'mean_ms'])
+def test_other_completed_supervision_modes_remain_explicitly_unadmitted(tmp_path, mode):
+    path, payload = campaign(tmp_path)
+    payload.update(variant='graph_fm', model={})
+    payload['protocol'].update(mode=mode, horizon=3, variant=dict(variant='graph_fm'))
+    payload['update'] = payload['protocol']['planned_updates']
+    torch.save(payload, path)
+    with pytest.raises(ValueError, match='single-step checkpoint'):
+        runner.validate_component_source(tmp_path, path, runner.sha256(path), variant='graph_fm', seed=42)
