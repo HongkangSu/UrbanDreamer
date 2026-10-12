@@ -146,3 +146,21 @@ Keep training seeds separate; current CIs do not measure training variability.
    efficiency including offline acquisition/warmup, censored/completed-trip metrics.
 6. Full requirement audit before update_goal complete. Nothing is blocked merely
    because jobs take hours. Preserve all negative results and protocol identities.
+
+## Authoritative update 2026-10-12T03:20:46.000071+00:00
+
+Goal was paused for architecture discussion and is now explicitly resumed. Do not mark complete. Previous goal turn progress: new architecture/gradient evidence, source repair, real city executor audits.
+
+Commits: d9f06d1 preserves seed-split WIP/design before structure changes;8ac8052 verifies seed split (63tests);13b1644 adds isolated_prior_graph_fm (root126tests). Current production behavior default unchanged.
+
+Original8training+10prediction results complete; supervision4training+4eval complete, probability_eval preparing strict mode-specific report. Core4xseeds42/43/44 to8192 updates underconvergence_v1 (GPU1 .08) and32matchedmilestone evaluations underconvergence_predictions_v1 (.04) live. no_prior42 completed8192;4096eval available,8192eval inprogress atupdate. Always revalidate status/PID.
+
+New prior_isolation_v1 hasfrozen214sources/plan and5sequentialjobs:8updateGPU smoke(done),fresh8192isolatedpriorseed42,eval2048/4096/8192. GPU1 .08/.04, minfree4096; defaults same asoriginalcore matrix. No modification activefrozenqueues.
+
+Prior diagnostics persisted underprior_diagnostics_v1:32matchedconditions(24traffic+8empty),originalgraphFM3tau,rank64/128/graphregcoarseutility; frozenconvergencesource, original2048checkpoints unchanged. Originalrank16 reducespooledlatenterror .106%,rank1287.643%; improvedcoarse doesnotguaranteeFMendpointquality. Gradientnegativefraction56.94%,mediancos-.0312.
+
+City executor now supportsIngostaticmovements and verifiedrealcityshadow/free-rollout2devseeds; earlier unsupportedprototype notes superseded for this opt-in engine only. Filescity_imagination.py,movement_controls.py,diagnose_city_shadow.py,diagnose_city_rollout.py. Sourcea48697a capturesaudit tools. Legacyproductionunchanged. h120costMAE14.051->4.086seconds/vehicle,positivebias3.15%,undercompletion remains. Repeatedoverlappingcohorts descriptive,notindependentvehiclesorclosedloopcounterfactual.
+
+Active agent slices:policy_runner_impl integrating opt-in cityexecutor via minimalserialtrainer hooks +runner/test and oneepisodesmoke;city_arbiter_impl priorisolationimplementation complete;probability_eval finishes supervisionreport;policy_integration_map writesresidualFMspec(readonlysource);screen_results_audit v3 complete.
+
+New rank/gaussian/finiteK findings inv3audit. no_prior4096h8mass12.09->25.90 despiteenergy9.05->8.06 andlowertrainloss: do notselectmodelbylossalone. SampleMS CRPS/countimprove butcoverage/variancefall; no categoricalcollapseclaim.
