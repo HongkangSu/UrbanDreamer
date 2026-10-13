@@ -130,6 +130,9 @@ class RoutingPpoMethod:
         if not math.isfinite(self.advantage_std_floor) or self.advantage_std_floor <= 0:
             raise ValueError('PPO advantage std floor must be finite and positive')
         self.actor = NextHopActor().to(self.device)
+        self.actor.score_gauge = getattr(args, 'score_gauge', 'legacy')
+        if self.actor.score_gauge not in {'legacy', 'pre_head_legal_reference_v1'}:
+            raise ValueError('unsupported PPO score_gauge')
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=args.actor_lr)
         with torch.random.fork_rng(devices=[]):
             torch.manual_seed(args.seed + 73861)
@@ -201,6 +204,8 @@ class RoutingPpoMethod:
                 advantage_normalization='global_std_floor_1_then_individual_timeout_clip_2.5',
                 reward_scope='global_team_episode_tail_with_individual_actor_timeout',
                 reward_mode='global_with_individual_timeout')
+        if self.actor.score_gauge != 'legacy':
+            protocol.update(version=4, score_gauge=self.actor.score_gauge)
         return protocol
 
     def _actor_advantages(self, advantages, rows):

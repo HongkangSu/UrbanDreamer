@@ -184,6 +184,9 @@ def main(argv=None):
     parser.add_argument('--critic-lr', type=float, default=3e-4)
     parser.add_argument('--ppo-epochs', type=int, default=4)
     parser.add_argument('--ppo-minibatch-size', type=int, default=512)
+    parser.add_argument('--score-gauge', default='legacy',
+                        choices=['legacy', 'pre_head_legal_reference_v1'],
+                        help='Explicit MAPPO/IPPO score stabilization; changing this requires checkpoint protocol migration')
     parser.add_argument('--ppo-target-kl', type=float, default=.01,
                         help='Stop PPO actor epochs when whole-batch categorical KL exceeds this (0 disables)')
     parser.add_argument('--ppo-advantage-std-floor', type=float, default=1e-6)
@@ -229,6 +232,8 @@ def main(argv=None):
     parser.add_argument('--global-reward-only', action=argparse.BooleanOptionalAction, default=True,
                         help='Use only the shared global reward; --no-global-reward-only explicitly selects legacy timeout shaping')
     args = parser.parse_args(argv)
+    if args.score_gauge != 'legacy' and args.method not in {'mappo', 'ippo'}:
+        parser.error('nonlegacy score-gauge requires mappo or ippo')
     try:
         actor_evaluation_label = common.evaluation_policy_label(args.evaluation_temperature, deterministic=args.evaluation_argmax)
     except ValueError as error:

@@ -141,7 +141,20 @@ class NextHopActor(nn.Module):
             raise ValueError("every decision must have at least one legal candidate")
         if not bool(torch.isfinite(features).all()):
             raise ValueError("candidate features must be finite")
-        logits = self.policy_head(self.candidate_scorer(features)).squeeze(-1).masked_fill(~mask, -torch.inf)
+        score_gauge = getattr(self, 'score_gauge', 'legacy')
+        if score_gauge not in {'legacy', 'pre_head_legal_reference_v1'}:
+            raise ValueError('unsupported actor score_gauge')
+        hidden = self.candidate_scorer(features)
+        if score_gauge == 'pre_head_legal_reference_v1':
+            # Subtract before projection: subtracting large raw logits afterward
+            # cannot recover the precision lost to their common offset.
+            first = mask.to(torch.int64).argmax(dim=-1)
+            reference = hidden[torch.arange(len(hidden), device=hidden.device), first]
+            logits = torch.nn.functional.linear(
+                hidden - reference[:, None, :], self.policy_head.weight, bias=None).squeeze(-1)
+        else:
+            logits = self.policy_head(hidden).squeeze(-1)
+        logits = logits.masked_fill(~mask, -torch.inf)
         return apply_shortest_path_prior(logits, features, mask, weight=self.prior_weight,
                                          temperature_seconds=self.prior_temperature_seconds,
                                          prior_costs_seconds=prior_costs_seconds)
