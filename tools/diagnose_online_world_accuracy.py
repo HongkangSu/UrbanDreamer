@@ -72,7 +72,11 @@ def main():
         payload=torch.load(path,map_location='cpu',weights_only=False)
         model=UrbanDreamerWorldModel(adjacency=torch.tensor(topology.network.adjacency,dtype=torch.float32),
              static_features=torch.tensor(topology.network.static_features,dtype=torch.float32),
-             low_frequency_rank=config.method.low_frequency_rank,prior_noise_scale=config.method.prior_noise_scale,
+             low_frequency_rank=config.method.low_frequency_rank,
+             prior_filter=getattr(config.method, 'prior_filter', 'hard'),
+             prior_filter_strength=getattr(config.method, 'prior_filter_strength', 10.0),
+             prior_action_conditioned=getattr(config.method, 'prior_action_conditioned', True),
+             prior_filter_input=getattr(config.method, 'prior_filter_input', False),prior_noise_scale=config.method.prior_noise_scale,
              event_protocol=True,codec_speed_positive=config.codec.speed_positive).to(device)
         model.load_state_dict(payload['training_state']['models']['world_model']);model.eval().requires_grad_(False)
         model.dynamics.set_pretraining_execution_profile(space_chunk=16,time_chunk=65536,mlp_chunk=16384,activation_checkpointing=False)

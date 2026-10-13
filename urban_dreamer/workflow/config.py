@@ -127,6 +127,10 @@ class MethodConfig:
     low_frequency_rank: int = 16
     prior_noise_scale: float = 0.1
     prior_loss_weight: float = 0.1
+    prior_filter: str = 'soft'
+    prior_filter_strength: float = 10.0
+    prior_action_conditioned: bool = False
+    prior_filter_input: bool = False
     fm_steps: int = 2
     fm_solver: str = 'euler'
     picard_iterations: int = 2
@@ -501,6 +505,10 @@ def _semantic_fingerprint(
                  'warmup_completion_patience_seconds'):
         simulation_values.pop(name)
     method_values = asdict(method)
+    if method.prior_filter == 'hard' and method.prior_action_conditioned and not method.prior_filter_input:
+        # Archived configs without these fields keep their original contract.
+        for name in ('prior_filter', 'prior_filter_strength', 'prior_action_conditioned', 'prior_filter_input'):
+            method_values.pop(name, None)
     if method.actor_entropy_mode != 'annealed':
         # Inactive schedule settings retain existing checkpoint identities.
         for name in ('actor_entropy_initial_coefficient', 'actor_entropy_final_coefficient',
@@ -624,10 +632,24 @@ def validate_fm_training_profile(method: MethodConfig, resources: ResourceConfig
 
 def _parse_method(raw: Mapping[str, Any]) -> MethodConfig:
     values = {**asdict(MethodConfig()), **raw}
+    if not any(name in raw for name in ('prior_filter', 'prior_filter_strength', 'prior_action_conditioned',
+                                     'prior_filter_input')):
+        # Absence means historical hard/action-conditioned behavior, not a migration.
+        values.update(prior_filter='hard', prior_action_conditioned=True)
     integer_fields = ('low_frequency_rank', 'fm_steps', 'picard_iterations',
                       'supervision_horizon', 'supervision_increment_updates',
                       'disagreement_samples')
     parsed = {name: _positive_integer(values, name, 'method') for name in integer_fields}
+    parsed['prior_filter'] = _nonempty_string(values, 'prior_filter', 'method')
+    if parsed['prior_filter'] not in {'hard', 'soft'}:
+        raise ConfigError('[method].prior_filter must be hard or soft')
+    parsed['prior_filter_strength'] = _nonnegative_number(values, 'prior_filter_strength', 'method')
+    if not isinstance(values['prior_action_conditioned'], bool):
+        raise ConfigError('[method].prior_action_conditioned must be boolean')
+    parsed['prior_action_conditioned'] = values['prior_action_conditioned']
+    if not isinstance(values['prior_filter_input'], bool):
+        raise ConfigError('[method].prior_filter_input must be boolean')
+    parsed['prior_filter_input'] = values['prior_filter_input']
     if parsed['disagreement_samples'] < 2:
         raise ConfigError('[method].disagreement_samples must be at least two')
     for name in ('prior_noise_scale', 'prior_loss_weight', 'disagreement_weight',

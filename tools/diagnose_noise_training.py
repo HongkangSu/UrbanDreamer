@@ -145,6 +145,10 @@ def run_arm(args,plan):
     codec.requires_grad_(False);codec.eval()
     sigma=float(args.arm)
     dynamics=Dynamics(adjacency=adjacency,static_features=static,low_frequency_rank=config.method.low_frequency_rank,
+    prior_filter=getattr(config.method, 'prior_filter', 'hard'),
+    prior_filter_strength=getattr(config.method, 'prior_filter_strength', 10.0),
+    prior_action_conditioned=getattr(config.method, 'prior_action_conditioned', True),
+    prior_filter_input=getattr(config.method, 'prior_filter_input', False),
                        prior_noise_scale=sigma,event_protocol=True).to(device)
     # The fixed spectral coordinates are shared, never a learned dynamics warm start.
     dynamics.graph_prior.basis.copy_(world['dynamics.graph_prior.basis'].to(device))

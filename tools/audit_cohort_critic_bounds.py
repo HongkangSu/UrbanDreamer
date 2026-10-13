@@ -69,6 +69,10 @@ def main():
     model = UrbanDreamerWorldModel(adjacency=torch.as_tensor(net.adjacency, dtype=torch.float32),
         static_features=torch.as_tensor(net.static_features, dtype=torch.float32),
         low_frequency_rank=config.method.low_frequency_rank,
+        prior_filter=getattr(config.method, 'prior_filter', 'hard'),
+        prior_filter_strength=getattr(config.method, 'prior_filter_strength', 10.0),
+        prior_action_conditioned=getattr(config.method, 'prior_action_conditioned', True),
+        prior_filter_input=getattr(config.method, 'prior_filter_input', False),
         prior_noise_scale=config.method.prior_noise_scale, event_protocol=True,
         codec_speed_positive=config.codec.speed_positive)
     model.load_state_dict(checkpoint['training_state']['models']['world_model'], strict=True)

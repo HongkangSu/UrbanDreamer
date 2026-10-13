@@ -16,7 +16,11 @@ def main():
  base=ROOT/'outputs/noincident_decline_diagnosis_20261008';run=ROOT/'outputs/ingolstadt_online_meso_noincident_noprior_20261007'
  c=load_config(base/'frozen/run_config.toml');top=load_traffic_topology(validate_prepared_inputs(c));n=top.network
  p=torch.load(base/'frozen/checkpoints/latest.pt',map_location='cpu',weights_only=True)
- wm=UrbanDreamerWorldModel(adjacency=torch.tensor(n.adjacency),static_features=torch.tensor(n.static_features),low_frequency_rank=c.method.low_frequency_rank,prior_noise_scale=c.method.prior_noise_scale,event_protocol=True,codec_speed_positive=c.codec.speed_positive)
+ wm=UrbanDreamerWorldModel(adjacency=torch.tensor(n.adjacency),static_features=torch.tensor(n.static_features),low_frequency_rank=c.method.low_frequency_rank,
+ prior_filter=getattr(c.method, 'prior_filter', 'hard'),
+ prior_filter_strength=getattr(c.method, 'prior_filter_strength', 10.0),
+ prior_action_conditioned=getattr(c.method, 'prior_action_conditioned', True),
+ prior_filter_input=getattr(c.method, 'prior_filter_input', False),prior_noise_scale=c.method.prior_noise_scale,event_protocol=True,codec_speed_positive=c.codec.speed_positive)
  wm.load_state_dict(p['training_state']['models']['world_model']);v=CentralizedLatentValueCritic();v.load_state_dict(p['training_state']['models']['latent_critic']);wm.eval().requires_grad_(False);v.eval().requires_grad_(False)
  rows=[]
  for episode in [74,124,424,484]:

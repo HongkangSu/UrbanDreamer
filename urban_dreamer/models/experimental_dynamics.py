@@ -52,6 +52,8 @@ class ExperimentalPrior(nn.Module):
         if projection_rank is not None and (random_projection or isinstance(projection_rank, bool)
                                             or not isinstance(projection_rank, int) or projection_rank < 1):
             raise ValueError("spectral projection rank must be a positive integer without random projection")
+        if (random_projection or projection_rank is not None) and getattr(prior, 'prior_filter', 'hard') != 'hard':
+            raise ValueError('rank/random projection ablations require an explicit hard prior filter')
         self.original_noise_rank = prior.rank
         self.isotropic_noise = bool(isotropic_noise)
         self.noise_rank = prior.basis.shape[0] if isotropic_noise else prior.rank
@@ -86,7 +88,11 @@ class ExperimentalPrior(nn.Module):
 
     @property
     def projection_rank(self):
-        return 0 if self.prediction is None else self.prediction.basis.shape[1]
+        return 0 if self.prediction is None else getattr(self.prediction, 'projection_rank', self.prediction.basis.shape[1])
+
+    @property
+    def prior_action_conditioned(self):
+        return True if self.prediction is None else getattr(self.prediction, 'prior_action_conditioned', True)
 
     @property
     def basis(self):
@@ -259,6 +265,15 @@ def variant_metadata(model):
             "expected_energy": prior.noise_scale ** 2 * original_noise_rank * FLOW_LATENT_DIM,
             "expected_energy_unit": "sum of squared source perturbations over roads and all latent channels per state",
             "gaussian_noise_space": "full_latent" if getattr(dynamics, "variant", None) == "gaussian" else None}
+    prediction = getattr(prior, 'prediction', prior)
+    if prediction is not None and (getattr(prediction, 'prior_filter', 'hard') != 'hard'
+            or not getattr(prediction, 'prior_action_conditioned', True)
+            or getattr(prediction, 'filter_input', False)):
+        metadata['background_prior'] = dict(
+            filter=getattr(prediction, 'prior_filter', 'hard'),
+            strength=getattr(prediction, 'prior_filter_strength', None),
+            input_filtered=getattr(prediction, 'filter_input', False),
+            action_conditioned=getattr(prediction, 'prior_action_conditioned', True))
     if not variant.endswith("fm"):
         # The unused prior noise helper is not the predictor's sampling law.
         gaussian = variant == "gaussian"

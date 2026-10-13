@@ -69,7 +69,11 @@ def main():
     topology = load_traffic_topology(prepared)
     model = UrbanDreamerWorldModel(adjacency=torch.as_tensor(topology.network.adjacency).float(),
         static_features=torch.as_tensor(topology.network.static_features).float(), event_protocol=True,
-        low_frequency_rank=config.method.low_frequency_rank, prior_noise_scale=config.method.prior_noise_scale,
+        low_frequency_rank=config.method.low_frequency_rank,
+        prior_filter=getattr(config.method, 'prior_filter', 'hard'),
+        prior_filter_strength=getattr(config.method, 'prior_filter_strength', 10.0),
+        prior_action_conditioned=getattr(config.method, 'prior_action_conditioned', True),
+        prior_filter_input=getattr(config.method, 'prior_filter_input', False), prior_noise_scale=config.method.prior_noise_scale,
         codec_speed_positive=config.codec.speed_positive).to(device).eval()
     trainer = SimpleNamespace(world_model=model, topology=topology, network=topology.network,
         device=device, config=config, _tensor=lambda x: torch.as_tensor(x, device=device).float())

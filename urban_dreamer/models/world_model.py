@@ -50,12 +50,22 @@ class ConditionEncoding:
 
 
 class LowFrequencyGraphPrior(nn.Module):
-    """Directed message prediction, projected onto a symmetric graph spectrum."""
+    """Directed message prediction with hard or soft symmetric spectral filtering."""
 
-    def __init__(self, adjacency: torch.Tensor, *, rank: int = 16, noise_scale: float = 0.1) -> None:
+    def __init__(self, adjacency: torch.Tensor, *, rank: int = 16, noise_scale: float = 0.1,
+                 prior_filter: str = "hard", prior_filter_strength: float = 10.0,
+                 prior_action_conditioned: bool = True, prior_filter_input: bool = False) -> None:
         super().__init__()
         if rank < 1 or not math.isfinite(noise_scale) or noise_scale < 0:
             raise ValueError("rank must be positive and noise_scale finite and nonnegative")
+        if prior_filter not in {"hard", "soft"}:
+            raise ValueError("prior_filter must be 'hard' or 'soft'")
+        if not math.isfinite(prior_filter_strength) or prior_filter_strength < 0:
+            raise ValueError("prior_filter_strength must be finite and nonnegative")
+        if not isinstance(prior_action_conditioned, bool):
+            raise ValueError("prior_action_conditioned must be a boolean")
+        if not isinstance(prior_filter_input, bool):
+            raise ValueError("prior_filter_input must be a boolean")
         graph = adjacency.detach().float().cpu()
         if not bool(torch.isfinite(graph).all()) or bool((graph < 0).any()):
             raise ValueError("adjacency must be finite and nonnegative")
@@ -80,19 +90,43 @@ class LowFrequencyGraphPrior(nn.Module):
         basis = torch.linalg.qr(basis, mode="reduced").Q
         self.rank = selected_rank
         self.noise_scale = float(noise_scale)
+        self.prior_filter = prior_filter
+        self.prior_filter_strength = float(prior_filter_strength)
+        self.prior_action_conditioned = prior_action_conditioned
+        self.filter_input = prior_filter_input
         # Preserve exact noise coordinates across checkpoint resumes, including signs
         # and rotations within repeated-eigenvalue subspaces.
         self.register_buffer("basis", basis)
+        if prior_filter == "soft":
+            # Full-rank resolvent: every eigenmode has gain 1 / (1 + tau * lambda).
+            # Build in double precision without changing the legacy noise basis.
+            symmetric64 = (graph.double() + graph.double().T) / 2
+            degree64 = symmetric64.sum(-1)
+            inv_sqrt64 = degree64.clamp_min(1e-12).rsqrt()
+            laplacian64 = (torch.diag((degree64 > 0).double())
+                           - inv_sqrt64[:, None] * symmetric64 * inv_sqrt64[None, :])
+            identity = torch.eye(edges, dtype=torch.float64)
+            operator = torch.linalg.solve(identity + self.prior_filter_strength * laplacian64, identity)
+            self.register_buffer("soft_filter_operator", operator.float())
         self.register_buffer("adjacency", graph, persistent=False)
         self.state_proj = nn.Linear(FLOW_LATENT_DIM, FLOW_LATENT_DIM)
         self.upstream_proj = nn.Linear(FLOW_LATENT_DIM, FLOW_LATENT_DIM, bias=False)
         self.downstream_proj = nn.Linear(FLOW_LATENT_DIM, FLOW_LATENT_DIM, bias=False)
         self.condition_proj = nn.Linear(WORLD_MODEL_DIM, FLOW_LATENT_DIM)
+        if not prior_action_conditioned:
+            self.condition_proj.requires_grad_(False)
         self.output = nn.Linear(FLOW_LATENT_DIM, FLOW_LATENT_DIM)
         nn.init.zeros_(self.output.weight)
         nn.init.zeros_(self.output.bias)
 
+    @property
+    def projection_rank(self) -> int:
+        return self.basis.shape[0] if self.prior_filter == "soft" else self.rank
+
     def project(self, values: torch.Tensor) -> torch.Tensor:
+        if self.prior_filter == "soft":
+            operator = self.soft_filter_operator.to(device=values.device, dtype=values.dtype)
+            return torch.matmul(operator, values)
         basis = self.basis.to(device=values.device, dtype=values.dtype)
         return torch.matmul(basis, torch.matmul(basis.T, values))
 
@@ -100,10 +134,12 @@ class LowFrequencyGraphPrior(nn.Module):
         graph = self.adjacency.to(device=z.device, dtype=z.dtype)
         downstream = graph / graph.sum(-1, keepdim=True).clamp_min(1e-12)
         upstream = graph.T / graph.T.sum(-1, keepdim=True).clamp_min(1e-12)
-        hidden = self.state_proj(z)
-        hidden = hidden + torch.matmul(downstream, self.downstream_proj(z))
-        hidden = hidden + torch.matmul(upstream, self.upstream_proj(z))
-        hidden = hidden + self.condition_proj(condition.edge_tokens)
+        filtered_z = self.project(z) if self.filter_input else z
+        hidden = self.state_proj(filtered_z)
+        hidden = hidden + torch.matmul(downstream, self.downstream_proj(filtered_z))
+        hidden = hidden + torch.matmul(upstream, self.upstream_proj(filtered_z))
+        if self.prior_action_conditioned:
+            hidden = hidden + self.condition_proj(condition.edge_tokens)
         return self.project(self.output(F.silu(hidden)))
 
     def sample_noise(self, z: torch.Tensor, noise: torch.Tensor | None = None) -> torch.Tensor:
@@ -670,6 +706,10 @@ class Dynamics(nn.Module):
         static_features: torch.Tensor,
         low_frequency_rank: int = 16,
         prior_noise_scale: float = 0.1,
+        prior_filter: str = "hard",
+        prior_filter_strength: float = 10.0,
+        prior_action_conditioned: bool = True,
+        prior_filter_input: bool = False,
         event_protocol: bool = False,
     ) -> None:
         super().__init__()
@@ -678,7 +718,9 @@ class Dynamics(nn.Module):
         self.event_protocol = bool(event_protocol)
         self.event_encoder = (EventActionEncoder(adjacency=adjacency, static_features=static_features)
                               if self.event_protocol else None)
-        self.graph_prior = LowFrequencyGraphPrior(adjacency, rank=low_frequency_rank, noise_scale=prior_noise_scale)
+        self.graph_prior = LowFrequencyGraphPrior(adjacency, rank=low_frequency_rank, noise_scale=prior_noise_scale,
+            prior_filter=prior_filter, prior_filter_strength=prior_filter_strength,
+            prior_action_conditioned=prior_action_conditioned, prior_filter_input=prior_filter_input)
         self.spatial_proj = nn.Linear(FLOW_LATENT_DIM, WORLD_MODEL_DIM)
         self.reference_proj = nn.Linear(FLOW_LATENT_DIM, WORLD_MODEL_DIM, bias=False)
         self.flow_time = FlowTimeEmbedder()
@@ -809,14 +851,17 @@ class Dynamics(nn.Module):
         self, z: torch.Tensor, condition: ConditionEncoding, noise: torch.Tensor | None = None,
         *, detach_prior_increment: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor, ConditionEncoding]:
-        """Optionally isolate the learned increment on FM source/reference paths.
+        """Isolate state-only prior increments on FM source/reference paths.
 
+        Action-conditioned legacy priors detach only when explicitly requested.
         The original increment remains live for prior supervision. This does
         not freeze the shared condition encoder, reference projection, or the
         direct current-state derivative through ``z``.
         """
         if not isinstance(detach_prior_increment, bool):
             raise ValueError('detach_prior_increment must be a boolean')
+        detach_prior_increment = (detach_prior_increment
+                                  or not getattr(self.graph_prior, "prior_action_conditioned", True))
         increment = self.graph_prior(z, condition)
         coarse = z + (increment.detach() if detach_prior_increment else increment)
         cached = ConditionEncoding(condition.edge_tokens, self.reference_proj(coarse))
@@ -916,7 +961,8 @@ class Dynamics(nn.Module):
         _validate_transition_tensor(action, name="action", expected_shape=tuple(z.shape[:-1]))
         condition = self.encode_condition(action, action_events=action_events)
         increment = self.graph_prior(z, condition)
-        coarse = z + increment
+        coarse = z + (increment if getattr(self.graph_prior, "prior_action_conditioned", True)
+                      else increment.detach())
 
         def repeat_samples(value: torch.Tensor) -> torch.Tensor:
             return value.unsqueeze(0).expand(n_samples, *value.shape).reshape(n_samples * z.shape[0], *value.shape[1:])
@@ -1027,11 +1073,17 @@ class ActiveVehicleFractionReadout(nn.Module):
 class UrbanDreamerWorldModel(nn.Module):
     def __init__(self, *, adjacency: torch.Tensor, static_features: torch.Tensor,
                  low_frequency_rank: int = 16, prior_noise_scale: float = 0.1,
+                 prior_filter: str = "hard", prior_filter_strength: float = 10.0,
+                 prior_action_conditioned: bool = True,
+                 prior_filter_input: bool = False,
                  event_protocol: bool = False, codec_speed_positive: bool = False) -> None:
         super().__init__()
         self.flow_projector = FlowProjector(adjacency=adjacency, positive_speed=codec_speed_positive)
         self.dynamics = Dynamics(adjacency=adjacency, static_features=static_features,
                                  low_frequency_rank=low_frequency_rank, prior_noise_scale=prior_noise_scale,
+                                 prior_filter=prior_filter, prior_filter_strength=prior_filter_strength,
+                                 prior_action_conditioned=prior_action_conditioned,
+                                 prior_filter_input=prior_filter_input,
                                  event_protocol=event_protocol)
         self.active_vehicle_fraction_readout = ActiveVehicleFractionReadout()
 
@@ -1215,7 +1267,8 @@ def independent_transition_fm_loss(
                                        solver=solver, picard_iterations=picard_iterations)
     else:
         predicted = target
-    loss = flow_mse + prior_weight * prior_mse
+    loss = (flow_mse if prior_weight == 0 and not getattr(dynamics.graph_prior, "prior_action_conditioned", True)
+            else flow_mse + prior_weight * prior_mse)
     return loss, {'flow_mse': flow_mse.detach(), 'weighted_flow_mse': flow_mse.detach(),
                   'prior_mse': prior_mse.detach(), 'prior_loss': (prior_weight * prior_mse).detach()}, predicted.reshape_as(z_inputs)
 
@@ -1279,7 +1332,8 @@ def recursive_fm_loss(
         predictions.append(current)
     flow_mse = (torch.stack(flow_losses) * weights).sum() / weights.sum()
     prior_mse = (torch.stack(prior_losses) * weights).sum() / weights.sum()
-    loss = flow_mse + prior_weight * prior_mse
+    loss = (flow_mse if prior_weight == 0 and not getattr(dynamics.graph_prior, "prior_action_conditioned", True)
+            else flow_mse + prior_weight * prior_mse)
     return loss, {"flow_mse": flow_mse.detach(), "weighted_flow_mse": flow_mse.detach(),
                   "prior_mse": prior_mse.detach(), "prior_loss": (prior_weight * prior_mse).detach(),
                   "t_mean": flow_time.mean().detach(),

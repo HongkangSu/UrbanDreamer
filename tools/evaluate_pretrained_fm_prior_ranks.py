@@ -52,8 +52,14 @@ class ProjectionRankPrior(LowFrequencyGraphPrior):
     """
     def __init__(self, original, projection_basis=None, coefficients=None):
         nn.Module.__init__(self)
+        if getattr(original, 'prior_filter', 'hard') != 'hard':
+            raise ValueError('projection-rank interventions require a hard-filter reference')
         self.rank = original.rank
         self.noise_scale = original.noise_scale
+        self.prior_filter = 'hard'
+        self.prior_filter_strength = getattr(original, 'prior_filter_strength', 10.0)
+        self.prior_action_conditioned = getattr(original, 'prior_action_conditioned', True)
+        self.filter_input = getattr(original, 'filter_input', False)
         for name, module in original._modules.items():
             self.add_module(name, copy.deepcopy(module))
         for name, value in original._buffers.items():
@@ -77,6 +83,10 @@ class ProjectionRankPrior(LowFrequencyGraphPrior):
         with torch.no_grad():
             self.output.weight.copy_(coefficients[:-1].T)
             self.output.bias.copy_(coefficients[-1])
+
+    @property
+    def projection_rank(self):
+        return self.prediction_rank
 
     def project(self, values):
         if self.projection_basis is None:

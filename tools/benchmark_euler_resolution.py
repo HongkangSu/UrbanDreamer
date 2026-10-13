@@ -90,7 +90,11 @@ def main():
     torch.cuda.set_per_process_memory_fraction(.06, device)
     model = UrbanDreamerWorldModel(adjacency=torch.as_tensor(topology.network.adjacency).float(),
         static_features=torch.as_tensor(topology.network.static_features).float(), event_protocol=True,
-        low_frequency_rank=config.method.low_frequency_rank, prior_noise_scale=config.method.prior_noise_scale,
+        low_frequency_rank=config.method.low_frequency_rank,
+        prior_filter=getattr(config.method, 'prior_filter', 'hard'),
+        prior_filter_strength=getattr(config.method, 'prior_filter_strength', 10.0),
+        prior_action_conditioned=getattr(config.method, 'prior_action_conditioned', True),
+        prior_filter_input=getattr(config.method, 'prior_filter_input', False), prior_noise_scale=config.method.prior_noise_scale,
         codec_speed_positive=config.codec.speed_positive).to(device).eval().requires_grad_(False)
     trainer = SimpleNamespace(world_model=model, network=topology.network, topology=topology,
         config=replace(config, run=replace(config.run, device=args.device),

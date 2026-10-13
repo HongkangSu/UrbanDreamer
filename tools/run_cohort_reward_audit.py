@@ -108,7 +108,11 @@ def main():
             raise ValueError('real collection is not the same frozen zero-prior greedy policy')
     model = UrbanDreamerWorldModel(adjacency=torch.tensor(network.adjacency, dtype=torch.float32),
         static_features=torch.tensor(network.static_features, dtype=torch.float32),
-        low_frequency_rank=config.method.low_frequency_rank, prior_noise_scale=config.method.prior_noise_scale,
+        low_frequency_rank=config.method.low_frequency_rank,
+        prior_filter=getattr(config.method, 'prior_filter', 'hard'),
+        prior_filter_strength=getattr(config.method, 'prior_filter_strength', 10.0),
+        prior_action_conditioned=getattr(config.method, 'prior_action_conditioned', True),
+        prior_filter_input=getattr(config.method, 'prior_filter_input', False), prior_noise_scale=config.method.prior_noise_scale,
         event_protocol=True, codec_speed_positive=config.codec.speed_positive).to(device)
     model.load_state_dict(payload['training_state']['models']['world_model'], strict=True)
     model.flow_projector.__class__ = SparseGraphCodec

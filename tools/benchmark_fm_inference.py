@@ -81,7 +81,11 @@ def main():
     windows=source_result['windows'];result['windows']=windows
     model=UrbanDreamerWorldModel(adjacency=torch.as_tensor(topology.network.adjacency,dtype=torch.float32),
         static_features=torch.as_tensor(topology.network.static_features,dtype=torch.float32),event_protocol=True,
-        low_frequency_rank=config.method.low_frequency_rank,prior_noise_scale=config.method.prior_noise_scale,
+        low_frequency_rank=config.method.low_frequency_rank,
+        prior_filter=getattr(config.method, 'prior_filter', 'hard'),
+        prior_filter_strength=getattr(config.method, 'prior_filter_strength', 10.0),
+        prior_action_conditioned=getattr(config.method, 'prior_action_conditioned', True),
+        prior_filter_input=getattr(config.method, 'prior_filter_input', False),prior_noise_scale=config.method.prior_noise_scale,
         codec_speed_positive=config.codec.speed_positive).to(device).eval().requires_grad_(False)
     payload=torch.load(args.source/'source_checkpoint.pt',map_location='cpu',weights_only=True)
     model.load_state_dict(payload['training_state']['models']['world_model']);del payload

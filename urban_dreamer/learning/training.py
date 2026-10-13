@@ -148,6 +148,10 @@ class MainlineTrainer:
             static_features=self._tensor(self.network.static_features),
             low_frequency_rank=config.method.low_frequency_rank,
             prior_noise_scale=config.method.prior_noise_scale, event_protocol=True,
+            prior_filter=getattr(config.method, 'prior_filter', 'hard'),
+            prior_filter_strength=getattr(config.method, 'prior_filter_strength', 10.0),
+            prior_action_conditioned=getattr(config.method, 'prior_action_conditioned', True),
+            prior_filter_input=getattr(config.method, 'prior_filter_input', False),
             codec_speed_positive=config.codec.speed_positive).to(self.device)
         self.actor = NextHopActor().to(self.device)
         self.evaluation_temperature = None
