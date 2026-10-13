@@ -1,0 +1,274 @@
+{
+  "date": "2026-10-13",
+  "status": "completed_bounded_analysis",
+  "evidence_scope": "Recorded SUMO mesoscopic replay on real city road networks; not field-sensor traffic.",
+  "checkpoint_sha256": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+  "conclusion": "Raw 30-second count/speed increments do not show strong low-frequency dominance under the tested model graph operators. Speed shows modest enrichment, while count does not. A fixed narrow prior cannot be justified by majority low-frequency energy of total observed increments.",
+  "spectral_protocol": {
+    "cities": 3,
+    "validation_demand_groups_per_city": 64,
+    "validation_actual_pairs_per_city": 768,
+    "train_groups_per_city": 64,
+    "interval_seconds": 30,
+    "channel_scale": "training-only increment RMS",
+    "bootstrap": "2000 whole demand-group resamples; pooled energy ratios",
+    "boundary_ties": "include complete eigenspaces",
+    "active_graph_role": "sensitivity check; mask selected only from training; induced adjacency renormalized",
+    "active_graph_omitted_joint_energy_less_than": 0.0001
+  },
+  "active_graph_lowest_ten_percent": [
+    {
+      "city": "ingolstadt_custom",
+      "space": "raw_count",
+      "roads": "784",
+      "modes": "79",
+      "energy_fraction": "0.07653567600142223",
+      "ci95_lower": "0.07224549355892372",
+      "ci95_upper": "0.08135552199321454",
+      "uniform_energy_reference": "0.10076530612244898"
+    },
+    {
+      "city": "ingolstadt_custom",
+      "space": "raw_speed",
+      "roads": "784",
+      "modes": "79",
+      "energy_fraction": "0.14018912966495295",
+      "ci95_lower": "0.13708861473715922",
+      "ci95_upper": "0.14339153721374237",
+      "uniform_energy_reference": "0.10076530612244898"
+    },
+    {
+      "city": "ingolstadt_custom",
+      "space": "raw_joint",
+      "roads": "784",
+      "modes": "79",
+      "energy_fraction": "0.10985364586623278",
+      "ci95_lower": "0.10606016000070564",
+      "ci95_upper": "0.11375898359320202",
+      "uniform_energy_reference": "0.10076530612244898"
+    },
+    {
+      "city": "coulommiers",
+      "space": "raw_count",
+      "roads": "1737",
+      "modes": "174",
+      "energy_fraction": "0.06598358549464624",
+      "ci95_lower": "0.06376506292949582",
+      "ci95_upper": "0.06835480207325736",
+      "uniform_energy_reference": "0.1001727115716753"
+    },
+    {
+      "city": "coulommiers",
+      "space": "raw_speed",
+      "roads": "1737",
+      "modes": "174",
+      "energy_fraction": "0.14292059590061867",
+      "ci95_lower": "0.13806038857113168",
+      "ci95_upper": "0.1491093885848007",
+      "uniform_energy_reference": "0.1001727115716753"
+    },
+    {
+      "city": "coulommiers",
+      "space": "raw_joint",
+      "roads": "1737",
+      "modes": "174",
+      "energy_fraction": "0.10436010870667609",
+      "ci95_lower": "0.10119242517434666",
+      "ci95_upper": "0.10843956611917867",
+      "uniform_energy_reference": "0.1001727115716753"
+    },
+    {
+      "city": "montereau_fault_yonne",
+      "space": "raw_count",
+      "roads": "1924",
+      "modes": "193",
+      "energy_fraction": "0.06615079574418338",
+      "ci95_lower": "0.0637111590806476",
+      "ci95_upper": "0.06852175076603208",
+      "uniform_energy_reference": "0.10031185031185032"
+    },
+    {
+      "city": "montereau_fault_yonne",
+      "space": "raw_speed",
+      "roads": "1924",
+      "modes": "193",
+      "energy_fraction": "0.10693176238178193",
+      "ci95_lower": "0.10115146240404206",
+      "ci95_upper": "0.11270524548783302",
+      "uniform_energy_reference": "0.10031185031185032"
+    },
+    {
+      "city": "montereau_fault_yonne",
+      "space": "raw_joint",
+      "roads": "1924",
+      "modes": "193",
+      "energy_fraction": "0.08626406829979169",
+      "ci95_lower": "0.08273794256466742",
+      "ci95_upper": "0.08983560640096062",
+      "uniform_energy_reference": "0.10031185031185032"
+    }
+  ],
+  "graph_caveat": "Full Coulommiers and Montereau graphs have 2426/4483 and 2202/4302 zero modes. Rank-16 or nominal-10%-mode truncation splits a repeated zero eigenspace and is not a unique low-frequency subspace.",
+  "input_output_probe": {
+    "train_windows": 768,
+    "validation_windows": 384,
+    "validation_groups": 32,
+    "output_parameters_each": 4160,
+    "fit": "F64 closed-form ridge, relative trace-scaled lambda 1e-6; frozen completed-pretrained encoder and old prior body, condition branch omitted",
+    "raw_target_metrics": [
+      {
+        "target": "raw_next",
+        "filter": "hard_r16",
+        "arm": "input_output",
+        "full_normalized_sse": 0.9948230740748085,
+        "count_mae": 0.25094408292056114,
+        "count_mae_occupied": 1.267952753763756,
+        "speed_mae": 0.39212454490257914,
+        "speed_mae_occupied": 1.3698690799093949
+      },
+      {
+        "target": "raw_next",
+        "filter": "hard_r16",
+        "arm": "output_only",
+        "full_normalized_sse": 0.993724587741769,
+        "count_mae": 0.2512514434982204,
+        "count_mae_occupied": 1.2707752639205112,
+        "speed_mae": 0.3933180635664155,
+        "speed_mae_occupied": 1.3705001079169548
+      },
+      {
+        "target": "raw_next",
+        "filter": "hard_r16",
+        "arm": "zero_prior",
+        "full_normalized_sse": 1.0,
+        "count_mae": 0.2507617050394817,
+        "count_mae_occupied": 1.263046210636402,
+        "speed_mae": 0.3579404406945903,
+        "speed_mae_occupied": 1.3471337722190277
+      },
+      {
+        "target": "raw_next",
+        "filter": "soft_tau10",
+        "arm": "input_output",
+        "full_normalized_sse": 0.9733969344793154,
+        "count_mae": 0.2502663967254595,
+        "count_mae_occupied": 1.2843317240447567,
+        "speed_mae": 0.39694015508220803,
+        "speed_mae_occupied": 1.3939937334756114
+      },
+      {
+        "target": "raw_next",
+        "filter": "soft_tau10",
+        "arm": "output_only",
+        "full_normalized_sse": 0.9428855206042571,
+        "count_mae": 0.24692129795708598,
+        "count_mae_occupied": 1.2853364415248152,
+        "speed_mae": 0.39907920723720663,
+        "speed_mae_occupied": 1.4019207188460563
+      },
+      {
+        "target": "raw_next",
+        "filter": "soft_tau10",
+        "arm": "zero_prior",
+        "full_normalized_sse": 1.0,
+        "count_mae": 0.2507617050394817,
+        "count_mae_occupied": 1.263046210636402,
+        "speed_mae": 0.3579404406945903,
+        "speed_mae_occupied": 1.3471337722190277
+      },
+      {
+        "target": "raw_next",
+        "filter": "identity_tau0",
+        "arm": "output_only",
+        "full_normalized_sse": 0.7347402027124726,
+        "count_mae": 0.22683761399524374,
+        "count_mae_occupied": 1.5552060853095553,
+        "speed_mae": 0.46445383455508277,
+        "speed_mae_occupied": 1.7263201236217456
+      }
+    ],
+    "raw_full_sse_paired_contrasts": [
+      {
+        "ci95_high": 0.0014199118490644538,
+        "ci95_low": 0.0008206790014542161,
+        "filter": "hard_r16",
+        "groups": 32,
+        "input_output_minus_output_only": 0.0010984863330394726,
+        "lower_is_better": true,
+        "metric": "full_normalized_sse",
+        "target": "raw_next"
+      },
+      {
+        "ci95_high": 0.032464074494198775,
+        "ci95_low": 0.029065155678870157,
+        "filter": "soft_tau10",
+        "groups": 32,
+        "input_output_minus_output_only": 0.030511413875058263,
+        "lower_is_better": true,
+        "metric": "full_normalized_sse",
+        "target": "raw_next"
+      }
+    ],
+    "identity_role": "Exploratory posthoc control; original ablation artifacts preserved",
+    "conclusion": "Input filtering increases full latent error in both hard/soft probes. Identity filtering improves latent and all-road count error over tau=10, but worsens occupied-road count and speed error. Frozen-body results are not jointly trained world-model or policy performance."
+  },
+  "implemented_contract": {
+    "prior_filter": "soft",
+    "operator": "(I + tau L_sym)^-1",
+    "prior_filter_strength": 10,
+    "prior_filter_input": false,
+    "prior_action_conditioned": false,
+    "noise_basis": "unchanged historical rank-16 coordinates",
+    "fm": "action-conditioned; prior increment detached on FM source/reference paths",
+    "legacy": "Archived configs omitting all new fields retain original hard/action-conditioned behavior and fingerprints",
+    "strength_status": "provisional; not optimized or established by these results"
+  },
+  "causal_limitation": "A state-only prior supervised with observed action-bearing transitions estimates a behavior-data conditional background mean; it is not an identified zero-action counterfactual.",
+  "tests": {
+    "focused_passed": 431,
+    "seconds": 50.9,
+    "real_replay_smoke": "one soft-prior optimizer update; action invariance and background/FM gradients verified",
+    "static": "Python compilation/AST and whitespace; no configured lint/typecheck tool found"
+  },
+  "quality_limitations": [
+    "Development validation previously inspected; not untouched external testing.",
+    "No fully trained new soft/state-only world model or downstream policy comparison.",
+    "Observed total increment spectrum does not identify spectrum of action-free conditional mean.",
+    "Physical decoding uses raw-next count and the existing next/following interval-speed target. Zero-prior physical baseline decodes current latent state.",
+    "Other previously authorized broad experiment work remains paused."
+  ],
+  "evidence": [
+    {
+      "path": "outputs/traffic_increment_spectrum_20261013/v1/report.md",
+      "sha256": "2525febd16e8c117e5c6500ff0d1bcdba6f8dfb3c9143fd027103f016e921951"
+    },
+    {
+      "path": "outputs/traffic_increment_spectrum_20261013/v1/verification.json",
+      "sha256": "dacde1d32eeb27f57c5c69ea35a42664478c431c35520bf0f3831cf0b24e2d6b"
+    },
+    {
+      "path": "outputs/traffic_increment_spectrum_20261013/v1/training_active_graph_supplement/energy_summary.csv",
+      "sha256": "c9054e66f60cfff29cf77664d5b0e8f568894a4b28e94c3137f3c065f76ba704"
+    },
+    {
+      "path": "outputs/traffic_increment_spectrum_20261013/input_output_v1/summary.json",
+      "sha256": "3c825c3df27f2317a0692576c158d9817f99feb9ed07fba5698e116c9881636e"
+    },
+    {
+      "path": "outputs/traffic_increment_spectrum_20261013/input_output_v1/verification.json",
+      "sha256": "9a40de88d31cb5e5ef7c8f9f817656f1746bb1e11d57baa7c60b9122d9ec4bd5"
+    },
+    {
+      "path": "outputs/traffic_increment_spectrum_20261013/input_output_v1/identity_filter_supplement/summary.json",
+      "sha256": "0f2b295d9b9cba74f71795b99876b3981bdaec0684e72efc626e0069d5783055"
+    },
+    {
+      "path": "outputs/traffic_increment_spectrum_20261013/input_output_v1/identity_filter_supplement/verification.json",
+      "sha256": "fcd39df6993560683799c32b30a2e695939a30ac9d027ce45c949984a9c1a6a8"
+    },
+    {
+      "path": "outputs/traffic_increment_spectrum_20261013/soft_runtime_smoke/verification.json",
+      "sha256": "6411d09cf8fa877f4338f125260c36eade32742923cde80147ecd8b6f644972a"
+    }
+  ]
+}
