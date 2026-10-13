@@ -22,6 +22,8 @@ def one_thread():
 def method(cls, *, pure=False):
     torch.manual_seed(89)
     args = SimpleNamespace(seed=42, actor_lr=3e-4, critic_lr=3e-4,
+        # The fixture uses two context coordinates and exposure-second rewards.
+        reward_objective='legacy_exposure',
         global_reward_only=pure, iql_batch_size=8, iql_replay_capacity=32)
     runner = SimpleNamespace(device=torch.device('cpu'), deadline=60.,
         network=SimpleNamespace(edge_count=2))
