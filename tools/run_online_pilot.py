@@ -141,9 +141,11 @@ def evaluation_row(collected, index, demand_hash):
     metrics = dict(collected.metrics)
     population = collected.total_vehicle_count
     nonarrivals = int(metrics['evaluation_nonarrival_count'])
-    complete = bool(collected.transitions[-1].terminal)
+    episode_terminal = bool(collected.transitions[-1].terminal)
+    complete = nonarrivals == 0
     return dict(episode_index=index, demand_hash=demand_hash, total_vehicle_count=population,
         arrived_count=population - nonarrivals, nonarrival_count=nonarrivals, complete=complete,
+        episode_terminal=episode_terminal,
         observed_minutes_per_vehicle=collected.total_travel_minutes,
         travel_minutes_per_vehicle=collected.total_travel_minutes if complete else None,
         travel_time_is_censored=not complete, metrics=metrics)
@@ -159,14 +161,15 @@ def compare_paired(before, after):
         if (first['episode_index'], first['demand_hash'], first['total_vehicle_count']) != (
                 second['episode_index'], second['demand_hash'], second['total_vehicle_count']):
             raise ValueError('paired evaluation does not share the identical realized demand')
+        complete_pair = first['nonarrival_count'] == 0 and second['nonarrival_count'] == 0
         rows.append(dict(episode_index=first['episode_index'], demand_hash=first['demand_hash'],
             completion_rate_before=first['metrics']['evaluation_completion_rate'],
             completion_rate_after=second['metrics']['evaluation_completion_rate'],
             nonarrival_delta=second['nonarrival_count'] - first['nonarrival_count'],
             observed_minutes_delta=second['observed_minutes_per_vehicle'] - first['observed_minutes_per_vehicle'],
             completed_travel_minutes_delta=(second['travel_minutes_per_vehicle'] - first['travel_minutes_per_vehicle'])
-                if first['complete'] and second['complete'] else None,
-            censored_pair=not (first['complete'] and second['complete']),
+                if complete_pair else None,
+            censored_pair=not complete_pair,
             selection_score_delta=second['metrics']['evaluation_selection_score'] - first['metrics']['evaluation_selection_score']))
     population = sum(row['total_vehicle_count'] for row in before)
     return dict(pairs=rows, demand_vehicle_count=population,
