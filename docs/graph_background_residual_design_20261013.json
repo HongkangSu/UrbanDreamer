@@ -1,0 +1,314 @@
+{
+  "status": "proposed_architecture_with_bounded_predictability_screen",
+  "objective": "Extract state-conditioned spatial background that is demonstrably predictable; let conditional Flow Matching model action-dependent and unexplained remaining increments.",
+  "distinction": "Energy concentration in low frequencies is neither necessary nor sufficient for conditional predictability. High graph frequency is not synonymous with stochasticity.",
+  "existing_implementation": {
+    "background": "State-only prior, complete state input, soft output resolvent (I + tau L_sym)^-1.",
+    "fm": "Action-conditioned transport from Z_t + stop_gradient(background) + source noise to the transition endpoint.",
+    "prior_training": "Independent filtered-increment MSE; action branch omitted and FM paths detached from the background increment.",
+    "unresolved": "Fixed tau=10 and supervision in filtered latent coordinates are not validated by complete retraining or physical traffic improvements."
+  },
+  "graph_contract": {
+    "nodes": "Traffic road semantics fixed by topology and vehicle class, not validation activity.",
+    "edges": "Actual legal passenger lane connections already provided by traffic/topology.py; preserve directed messages.",
+    "spectral_operator": "Explicit symmetric normalized Laplacian of the traffic adjacency for graph-frequency analysis.",
+    "disconnected_components": "Retain components and complete repeated eigenspaces; do not select arbitrary directions within a large nullspace.",
+    "isolated_traffic_nodes": "Use an explicit local prediction path; do not label isolation as evidence of a traffic-wide smooth mode.",
+    "activity_mask": "The existing training-active induced graph is a sensitivity analysis, not an automatically justified production graph."
+  },
+  "proposed_background": {
+    "input": "Full current traffic latent state and, in a later matched-capacity experiment, causally available past state history; no current or future routing actions.",
+    "filter_bank_example": [
+      "B0 = (I + 10 L)^-1",
+      "B1 = (I + L)^-1 - (I + 10 L)^-1",
+      "B2 = I - (I + L)^-1"
+    ],
+    "reconstruction": "B0 + B1 + B2 = I, so the decomposition discards no graph modes.",
+    "background_form": "b_phi(Z,H) = sum_k g_k B_k f_phi,k(Z,H), with complete inputs and state-only gates.",
+    "gate_policy": "Do not force higher-frequency gates to zero. Compare a complete state-mean predictor with multiscale heads before claiming a spectral benefit. Gates and scales must be selected on training/inner validation only.",
+    "scale_status": "1 and 10 illustrate a complete smooth bank, not validated optimal scales.",
+    "supervision": "Supervise predictable means while checking decoded count and speed errors, occupied-road errors and total-count errors. Keep background and FM endpoint definitions aligned.",
+    "loss_caveat": "Soft bands overlap and are not orthogonal. The sum of squared band errors is not the full-state squared error."
+  },
+  "residual_transport": {
+    "target": "r_star = Z_next - Z_t - stop_gradient(b_phi(Z_t,H_t))",
+    "path": "r_s = (1-s) epsilon + s r_star",
+    "velocity_target": "r_star - epsilon",
+    "prediction": "Z_hat_next = Z_t + b_phi(Z_t,H_t) + r_hat_theta",
+    "condition": "Full allowed state/history and routing conditions; no additional future information for the actor.",
+    "frequency_support": "FM residual can contain any frequency, including low-frequency action effects and background prediction errors.",
+    "source_noise": "Keep original noise coordinates and scale for the first controlled comparison; changing noise is a separate intervention.",
+    "gradient_contract": "FM loss must not move the background predictor through source/reference paths. Background is trained with its own objective.",
+    "current_equivalence": "The existing absolute-state path is a translated residual path; conceptual residualization alone is not a new experimental improvement."
+  },
+  "predictability_screen": {
+    "checkpoint": "Completed 49,636-update Ingolstadt pretraining checkpoint; no undertrained replacement.",
+    "fixed_selection": "Existing 768 training and 384 development-validation windows, disjoint demand groups.",
+    "latent_forecast": "Saved fully solved unfiltered state-only frozen-body output head.",
+    "physical_forecast": "One 65x2 train-only ridge head for actual raw next-minus-current count/speed increments; shared across all frequencies.",
+    "bands": "Fixed complete-eigenspace intervals [0,.1), [.1,.25), [.25,.5), [.5,1), [1,1.5), [1.5,2].",
+    "baselines": "Zero increment and per-road training mean increment.",
+    "skill": "1 - pooled held-out band prediction SSE / pooled baseline band SSE; undefined if baseline energy is zero.",
+    "uncertainty": "2000 whole demand-group resamples; descriptive intervals, not proof after selecting favorable bands.",
+    "interpretation": "Positive skill is an initial indication of predictable structure under this probe. A negative result does not rule out a newly trained predictor with richer state history.",
+    "forbidden_claims": [
+      "Causal zero-action traffic evolution identified from behavior replay",
+      "Soft prior plus FM already beats regression",
+      "High-frequency residuals are necessarily stochastic",
+      "Frozen-body development skill proves downstream policy improvement"
+    ]
+  },
+  "subsequent_validation": [
+    "Use a new split or nested validation to choose frequency allocation and strength.",
+    "Retrain matched-budget state-only deterministic, Gaussian, FM-only and background-plus-FM variants sufficiently.",
+    "Check full and decoded prediction errors, residual conditional means/dispersion, CRPS or Energy Score, coverage and multistep statistics.",
+    "Evaluate matched-action ranking/regret and real SUMO routing cost under equal real-interaction budgets."
+  ],
+  "primary_references": [
+    "https://arxiv.org/abs/0912.3848",
+    "https://arxiv.org/abs/2210.02747"
+  ],
+  "completed_screen": {
+    "status": "complete",
+    "elapsed_seconds": 27.822755575180054,
+    "protocol": {
+      "actions_used": false,
+      "baselines": [
+        "zero increment persistence",
+        "per-road/channel training mean increment"
+      ],
+      "bootstrap": "2000 whole demand-group resamples; pooled sums; same resample seed",
+      "device": "cpu",
+      "eigspace_tolerance": 1e-08,
+      "frequency_edges": [
+        0.0,
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        1.5,
+        2.0000001
+      ],
+      "joint_scaling": "each physical channel divided by its train-only global increment RMS; no centering",
+      "latent_head": "saved raw_next__identity_tau0__output_only; 65x64; no refit",
+      "limits": [
+        "development validation previously inspected",
+        "frozen old action-conditioned body with condition removed",
+        "one-step linear-head probe; not fully retrained soft/FМ model",
+        "state-only prediction is not a causal zero-action background",
+        "Ingolstadt SUMO replay, not sensor traffic"
+      ],
+      "metrics": [
+        "held-out energy fraction",
+        "1-SSE_pred/SSE_zero",
+        "1-SSE_pred/SSE_train_mean"
+      ],
+      "noise_used": false,
+      "physical_head": "train-only F64 ridge, 65x2, relative lambda 1e-6; frozen same state-only front",
+      "reference_hashes": {
+        "basis": "a34391d005d5b25160f923dae964d2d4b80d11f2017c52633810ad87e9cc72a2",
+        "checkpoint": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+        "identity_coefficients": "829d54f2031a3090280ada2d469f711fc9e574aa47885997f16368da0666de8d",
+        "selection": "5cd68618387e9989d96974555e75927848c7e98b2799ec170ca5371d0219dfe4"
+      },
+      "seed": 20261013,
+      "state_inputs": "current flow encoding, native state/downstream/upstream branches; condition branch omitted",
+      "status": "prespecified_before_scores",
+      "targets": "raw actual adjacent 30-second endpoint increments; births included; no speed interval averaging",
+      "threads": 2,
+      "train_groups": 64,
+      "validation_fitting": false,
+      "validation_groups": 32,
+      "windows_per_group": 12
+    },
+    "all_frequency_metrics": [
+      {
+        "groups": 32,
+        "skill_vs_train_mean": 0.20825734271205387,
+        "skill_vs_train_mean_ci95_high": 0.223419967401278,
+        "skill_vs_train_mean_ci95_low": 0.196131528207649,
+        "skill_vs_zero": 0.21085756749784135,
+        "skill_vs_zero_ci95_high": 0.22515163895310653,
+        "skill_vs_zero_ci95_low": 0.1996091705156945,
+        "space": "count",
+        "train_mean_skill_vs_zero": 0.0032841792239592937,
+        "train_mean_skill_vs_zero_ci95_high": 0.004987585414250373,
+        "train_mean_skill_vs_zero_ci95_low": 0.0012627111753549247
+      },
+      {
+        "groups": 32,
+        "skill_vs_train_mean": 0.24812944661743652,
+        "skill_vs_train_mean_ci95_high": 0.26874356882750483,
+        "skill_vs_train_mean_ci95_low": 0.2310309910046826,
+        "skill_vs_zero": 0.2517712926583574,
+        "skill_vs_zero_ci95_high": 0.27042149567092133,
+        "skill_vs_zero_ci95_low": 0.23617347536039968,
+        "space": "joint",
+        "train_mean_skill_vs_zero": 0.004843714153369483,
+        "train_mean_skill_vs_zero_ci95_high": 0.007662364548895351,
+        "train_mean_skill_vs_zero_ci95_low": 0.0016618342191452307
+      },
+      {
+        "groups": 32,
+        "skill_vs_train_mean": 0.26289861252596325,
+        "skill_vs_train_mean_ci95_high": 0.27854629521955954,
+        "skill_vs_train_mean_ci95_low": 0.24977247638593936,
+        "skill_vs_zero": 0.26525979728752724,
+        "skill_vs_zero_ci95_high": 0.27963110065975416,
+        "skill_vs_zero_ci95_low": 0.25288889430051475,
+        "space": "latent",
+        "train_mean_skill_vs_zero": 0.003203337833422859,
+        "train_mean_skill_vs_zero_ci95_high": 0.0049857554278609495,
+        "train_mean_skill_vs_zero_ci95_low": 0.0011611177958885666
+      },
+      {
+        "groups": 32,
+        "skill_vs_train_mean": 0.2902759912458207,
+        "skill_vs_train_mean_ci95_high": 0.3140898703149161,
+        "skill_vs_train_mean_ci95_low": 0.26883574019046097,
+        "skill_vs_zero": 0.2948799092725223,
+        "skill_vs_zero_ci95_high": 0.3158681140176106,
+        "skill_vs_zero_ci95_low": 0.2760962987926474,
+        "space": "speed",
+        "train_mean_skill_vs_zero": 0.006486913180213771,
+        "train_mean_skill_vs_zero_ci95_high": 0.010810568137165744,
+        "train_mean_skill_vs_zero_ci95_low": 0.00184446442881947
+      }
+    ],
+    "joint_band_metrics": [
+      {
+        "band": 0,
+        "energy_fraction": 0.03532935366610286,
+        "energy_fraction_ci95_high": 0.03750796495153606,
+        "energy_fraction_ci95_low": 0.03364775074210835,
+        "groups": 32,
+        "lower": 0.0,
+        "modes": 39,
+        "skill_vs_train_mean": -0.009993894681490367,
+        "skill_vs_train_mean_ci95_high": 0.06206628828080907,
+        "skill_vs_train_mean_ci95_low": -0.07551154801937354,
+        "skill_vs_zero": -0.005294459885589742,
+        "skill_vs_zero_ci95_high": 0.06541223073453295,
+        "skill_vs_zero_ci95_low": -0.06962837266501953,
+        "space": "joint",
+        "upper": 0.1,
+        "windows": 384
+      },
+      {
+        "band": 1,
+        "energy_fraction": 0.07442393182030181,
+        "energy_fraction_ci95_high": 0.0788257951432685,
+        "energy_fraction_ci95_low": 0.07090059878614072,
+        "groups": 32,
+        "lower": 0.1,
+        "modes": 50,
+        "skill_vs_train_mean": 0.19562705167911387,
+        "skill_vs_train_mean_ci95_high": 0.22456569579345398,
+        "skill_vs_train_mean_ci95_low": 0.1688867192644673,
+        "skill_vs_zero": 0.20125765435112575,
+        "skill_vs_zero_ci95_high": 0.22682996427512014,
+        "skill_vs_zero_ci95_low": 0.17735461454859003,
+        "space": "joint",
+        "upper": 0.25,
+        "windows": 384
+      },
+      {
+        "band": 2,
+        "energy_fraction": 0.14174279719828115,
+        "energy_fraction_ci95_high": 0.1449643841555682,
+        "energy_fraction_ci95_low": 0.13846241262456743,
+        "groups": 32,
+        "lower": 0.25,
+        "modes": 120,
+        "skill_vs_train_mean": 0.24920593889998366,
+        "skill_vs_train_mean_ci95_high": 0.2750716501714886,
+        "skill_vs_train_mean_ci95_low": 0.22774320218362765,
+        "skill_vs_zero": 0.2516409574997497,
+        "skill_vs_zero_ci95_high": 0.27582507934630285,
+        "skill_vs_zero_ci95_low": 0.23086342849744046,
+        "space": "joint",
+        "upper": 0.5,
+        "windows": 384
+      },
+      {
+        "band": 3,
+        "energy_fraction": 0.2837615081214998,
+        "energy_fraction_ci95_high": 0.28757981939183286,
+        "energy_fraction_ci95_low": 0.2793692163777558,
+        "groups": 32,
+        "lower": 0.5,
+        "modes": 217,
+        "skill_vs_train_mean": 0.2774114710110207,
+        "skill_vs_train_mean_ci95_high": 0.29651779581704407,
+        "skill_vs_train_mean_ci95_low": 0.26118712455597726,
+        "skill_vs_zero": 0.2820500100502191,
+        "skill_vs_zero_ci95_high": 0.29938149664204894,
+        "skill_vs_zero_ci95_low": 0.26696529434293037,
+        "space": "joint",
+        "upper": 1.0,
+        "windows": 384
+      },
+      {
+        "band": 4,
+        "energy_fraction": 0.2591891636201108,
+        "energy_fraction_ci95_high": 0.26294647582646175,
+        "energy_fraction_ci95_low": 0.25448655196330294,
+        "groups": 32,
+        "lower": 1.0,
+        "modes": 235,
+        "skill_vs_train_mean": 0.26115226396082525,
+        "skill_vs_train_mean_ci95_high": 0.28026868263475,
+        "skill_vs_train_mean_ci95_low": 0.24488047932199863,
+        "skill_vs_zero": 0.26475925610872797,
+        "skill_vs_zero_ci95_high": 0.28199407918680486,
+        "skill_vs_zero_ci95_low": 0.24968543198485615,
+        "space": "joint",
+        "upper": 1.5,
+        "windows": 384
+      },
+      {
+        "band": 5,
+        "energy_fraction": 0.2055532455737034,
+        "energy_fraction_ci95_high": 0.20791037521784272,
+        "energy_fraction_ci95_low": 0.20323054441207522,
+        "groups": 32,
+        "lower": 1.5,
+        "modes": 192,
+        "skill_vs_train_mean": 0.25393707685253364,
+        "skill_vs_train_mean_ci95_high": 0.2712190106403557,
+        "skill_vs_train_mean_ci95_low": 0.2390346798478188,
+        "skill_vs_zero": 0.25615745855395833,
+        "skill_vs_zero_ci95_high": 0.2725402372651863,
+        "skill_vs_zero_ci95_low": 0.24207286669459327,
+        "space": "joint",
+        "upper": 2.0000001,
+        "windows": 384
+      }
+    ],
+    "finding": "Under this frozen state-only front, predictable state-dependent physical background exists, but lowest graph frequencies do not isolate it. Low-band speed is predictable while low-band count is poor; medium/high bands also have stable positive skill. This does not establish benefit of a learned frequency allocation or FM residual over deterministic prediction.",
+    "evidence": [
+      {
+        "path": "outputs/traffic_increment_spectrum_20261013/predictability_v1/summary.json",
+        "sha256": "9b985e0db3b506b4154279828c96ee638d84784fe40815cc5ae63123dae0107d"
+      },
+      {
+        "path": "outputs/traffic_increment_spectrum_20261013/predictability_v1/aggregate_and_baseline_metrics.json",
+        "sha256": "af7d1e44232088ed24cd26b3fd174dab1879ece6b562d36c3a5f7498727ed39a"
+      },
+      {
+        "path": "outputs/traffic_increment_spectrum_20261013/predictability_v1/verification.json",
+        "sha256": "b92e7024e7bb8114cf4c2bd9993c626ec64045423e859040f93692a58534736b"
+      },
+      {
+        "path": "outputs/traffic_increment_spectrum_20261013/predictability_v1/demand_group_metrics.csv",
+        "sha256": "cf9c05cb597266c202a15e5efb4bba7557404aa9d49e6c000b4f141c75601ae5"
+      }
+    ],
+    "root_verification": "All 24 space-band pooled scores independently reconstructed from group CSV; 79 combined focused tests passed in 7.57 seconds."
+  },
+  "filter_bank_algebra_verification": {
+    "path": "outputs/traffic_increment_spectrum_20261013/background_design_v1/filter_bank_verification.json",
+    "sha256": "5c4727bf864c8298df8c6be5179a3a664511e81976ff3f0ade55e08f64ae0468",
+    "conclusion": "Complete gain reconstruction error 1.11e-16 on the 853-road eigensystem; construction is verified, model effectiveness is not."
+  }
+}
