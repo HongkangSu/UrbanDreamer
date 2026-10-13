@@ -18,6 +18,7 @@ def fixture(tmp_path, *, passes=16, seconds=0.):
     config = load_config(Path(__file__).parents[1] / 'configs/ingolstadt_custom.toml')
     config = replace(config, run=replace(config.run, output_dir=source, online_training_episodes=2000),
         resources=replace(config.resources, imagination_passes_per_episode=passes,
+                          imagination_rollouts_per_pass=8,
                           imagination_time_budget_seconds=seconds, world_model_imagination_precision="fp32"),
         method=replace(config.method, disagreement_samples=3),
         codec=replace(config.codec, decoder_pretrain_enabled=False))
@@ -295,12 +296,13 @@ def test_sample_continuation_from_existing_budget_migration(tmp_path):
 
 
 
-def test_precision_continuation_from_two_sample_run_preserves_exact_state(tmp_path):
+@pytest.mark.parametrize('precision', ['fp16', 'bf16'])
+def test_precision_continuation_from_two_sample_run_preserves_exact_state(tmp_path, precision):
     source, _, state, protocol = fixture(tmp_path, passes=2, seconds=60.)
     samples = tmp_path / 'samples'
     migration.migrate(source, samples, kind=migration.SAMPLES_KIND)
-    target = tmp_path / 'bf16'
-    manifest = migration.migrate(samples, target, kind=migration.PRECISION_KIND, precision='bf16')
+    target = tmp_path / precision
+    manifest = migration.migrate(samples, target, kind=migration.PRECISION_KIND, precision=precision)
     config = load_config(target / 'run_config.toml')
     before = load_config(samples / 'run_config.toml')
     restored = load_checkpoint(output_dir=target, expected_config_fingerprint=config.semantic_fingerprint,
@@ -308,11 +310,11 @@ def test_precision_continuation_from_two_sample_run_preserves_exact_state(tmp_pa
     migration._assert_equal(state, restored.training_state)
     assert restored.next_unit == manifest['global_completed_episodes'] == 81
     assert config.method.disagreement_samples == before.method.disagreement_samples == 2
-    assert config.resources.world_model_imagination_precision == 'bf16'
+    assert config.resources.world_model_imagination_precision == precision
     assert before.semantic_fingerprint != config.semantic_fingerprint
     assert manifest['old_budgets'] == manifest['new_budgets']
     assert manifest['old_imagination_precision'] == 'fp32'
-    assert manifest['new_imagination_precision'] == 'bf16'
+    assert manifest['new_imagination_precision'] == precision
     assert json.loads((target / 'pilot_protocol.json').read_text())['source'] == protocol['source']
     assert (target / 'source_history/milestones/history.json').exists()
     assert migration.validate_budget_continuation(target, config, 'input', 'pretrained') == manifest
@@ -331,10 +333,10 @@ def test_precision_transfer_rejects_other_changes(tmp_path, section, field, valu
         migration.validate_precision_transfer_config(before, after)
 
 
-@pytest.mark.parametrize('precision', ['fp32', 'tf32', 'fp16', True])
-def test_precision_transfer_only_allows_bf16_target(tmp_path, precision):
+@pytest.mark.parametrize('precision', ['fp32', 'tf32', 'float16', True])
+def test_precision_transfer_only_allows_autocast_target(tmp_path, precision):
     source, _, _, _ = fixture(tmp_path, passes=2, seconds=60.)
-    with pytest.raises(ValueError, match='exactly fp32 source and bf16 target'):
+    with pytest.raises(ValueError, match='exactly fp32 source and fp16 or bf16 target'):
         migration.migrate(source, tmp_path / 'target', kind=migration.PRECISION_KIND, precision=precision)
     assert not (tmp_path / 'target').exists()
 

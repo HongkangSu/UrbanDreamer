@@ -33,8 +33,8 @@ def _profile(resources):
     for value in (profile.space_chunk, profile.time_chunk, profile.mlp_chunk):
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise ValueError('imagination chunk sizes must be nonnegative integers')
-    if profile.precision not in {'fp32', 'bf16', 'tf32'}:
-        raise ValueError('imagination precision must be fp32, bf16, or tf32')
+    if profile.precision not in {'fp32', 'fp16', 'bf16', 'tf32'}:
+        raise ValueError('imagination precision must be fp32, fp16, bf16, or tf32')
     if profile.compile_mode not in {'default', 'reduce-overhead'}:
         raise ValueError('imagination compile mode must be default or reduce-overhead')
     if not isinstance(profile.compile, bool):
@@ -102,9 +102,10 @@ class _VelocityInference:
                 and action_events is None):
             forward = self.compiled
         # Autocast surrounds only the velocity call. The caller retains FP32
-        # prior/noise/conditions and integrator state, even for BF16 inference.
-        amp = (torch.autocast('cuda', dtype=torch.bfloat16)
-               if supported and self.profile.precision == 'bf16' else nullcontext())
+        # prior/noise/conditions and integrator state for either autocast dtype.
+        amp_dtype = {'fp16': torch.float16, 'bf16': torch.bfloat16}.get(self.profile.precision)
+        amp = (torch.autocast('cuda', dtype=amp_dtype)
+               if supported and amp_dtype is not None else nullcontext())
         tf32 = _velocity_tf32() if supported and self.profile.precision == 'tf32' else nullcontext()
         with tf32, amp:
             result = forward(action, packed_latents=packed_latents, flow_time=flow_time,

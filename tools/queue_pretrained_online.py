@@ -183,7 +183,7 @@ def validate_completed_source(checkpoint, config):
             simulation.session_protocol != 'event' or simulation.observation_step_seconds != 1 or
             simulation.incident_start_seconds < 1000000):
         raise ValueError('source does not match the approved Euler/no-incident/meso/prior/entropy settings')
-    if (resources.world_model_imagination_precision not in {'fp32', 'bf16', 'tf32'} or
+    if (resources.world_model_imagination_precision not in {'fp32', 'fp16', 'bf16', 'tf32'} or
             resources.world_model_imagination_compile_mode != 'default' or
             (resources.world_model_imagination_space_chunk,
              resources.world_model_imagination_time_chunk,
@@ -216,7 +216,8 @@ def target_config(source, seed_dir):
     from tools.continue_mainline_entropy_annealing import annealed_config
     config = annealed_config(source, seed_dir)
     config = replace(config, method=replace(config.method, disagreement_weight=0.))
-    config = replace(config, resources=replace(source.resources, **{COMPILE_FIELD: True}))
+    config = replace(config, resources=replace(source.resources, **{COMPILE_FIELD: True},
+                                               world_model_imagination_precision='fp16'))
     return replace(config, semantic_fingerprint=_semantic_fingerprint(**{
         key: getattr(config, key) for key in ('inputs', 'run', 'simulation', 'resources', 'method', 'data', 'codec')}))
 
@@ -225,6 +226,7 @@ def validate_profile_transfer(source, target):
     before, after = source.resolved_snapshot(), target.resolved_snapshot()
     for snapshot in (before, after):
         snapshot['resources'].pop(COMPILE_FIELD)
+        snapshot['resources'].pop('world_model_imagination_precision')
         snapshot['run'].pop('output_dir')
         for name in ('actor_entropy_mode', 'actor_entropy_initial_coefficient',
                      'actor_entropy_final_coefficient', 'actor_entropy_hold_fraction',
@@ -234,8 +236,9 @@ def validate_profile_transfer(source, target):
     from tools.continue_mainline_entropy_annealing import annealed_config
     expected_method = replace(annealed_config(source, target.run.output_dir).method, disagreement_weight=0.)
     if (before != after or not target.resources.world_model_imagination_compile
+            or target.resources.world_model_imagination_precision != 'fp16'
             or target.method != expected_method):
-        raise ValueError('seed may change only entropy schedule, global reward risk setting, imagination compile flag and output location')
+        raise ValueError('seed may change only entropy schedule, global reward risk setting, imagination compile flag, FP16 imagination precision and output location')
 
 
 def stage_seed(source_dir, seed_dir):
@@ -334,10 +337,13 @@ def choose_device(requested, minimum_free_gib=3.):
 
 
 def launch_command(args, device):
-    return [str(args.python), str(args.execution_source / 'tools/run_online_pilot.py'),
+    command = [str(args.python), str(args.execution_source / 'tools/run_online_pilot.py'),
             '--source-dir', str(args.seed_dir), '--output-dir', str(args.output_dir),
             '--device', device, '--online-episodes', '2000', '--evaluation-every', '20',
             '--threads', '4', '--gpu-memory-fraction', '.25']
+    if (args.output_dir / 'latest_profile_change.json').is_file():
+        command.extend(['--run-config', str(args.output_dir / 'run_config.toml')])
+    return command
 
 
 def recover_unrecorded_child(args):

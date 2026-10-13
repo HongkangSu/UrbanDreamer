@@ -210,7 +210,7 @@ def commands(args, cache):
                '--device', args.device]
     fm = [sys.executable, '-u', str(tools / 'run_complete_pretrain.py'),
           '--config', str(output / 'run_config.toml'),
-          '--codec-dir', str(args.previous_city_dir / 'codec'),
+          '--codec-dir', str(getattr(args, 'codec_dir', None) or args.previous_city_dir / 'codec'),
           '--cache-manifest', str(args.city_dir / 'cache/cache_manifest.json'),
           '--output-dir', str(output), '--device', args.device,
           '--threads', '4', '--batch-size', '64', '--accumulation-steps', '1',
@@ -386,6 +386,8 @@ def main(argv=None):
     parser.add_argument('--device', choices=('cuda:0', 'cuda:1'), required=True)
     parser.add_argument('--previous-supervisor-pid', type=int, required=True)
     parser.add_argument('--previous-world-model-dir', type=path)
+    parser.add_argument('--codec-dir', type=path,
+                        help='original accepted codec artifacts when continuing a prior supplement')
     parser.add_argument('--cache-builder-pid', type=int,
                         help='track an existing producer and fail if it exits before cache completion')
     parser.add_argument('--replace-waiting-supervisor', action='store_true')

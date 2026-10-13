@@ -1,4 +1,4 @@
-"""Record a checkpoint-preserving online rollout/prior configuration change."""
+"""Record a checkpoint-preserving online imagination/prior configuration change."""
 from __future__ import annotations
 
 import argparse
@@ -20,10 +20,18 @@ from urban_dreamer.workflow.config import load_config, _semantic_fingerprint
 from urban_dreamer.workflow.checkpoint import load_checkpoint, save_checkpoint, CheckpointPhase
 
 
-def changed_config(config, *, rollouts, evaluation_weight, hold, off):
-    resources = replace(config.resources, imagination_rollouts_per_pass=rollouts)
-    method = replace(config.method, sp_prior_evaluation_weight=evaluation_weight,
-                     sp_prior_hold_episodes=hold, sp_prior_off_episode=off)
+def changed_config(config, *, rollouts=None, evaluation_weight=None, hold=None, off=None,
+                   precision='fp16'):
+    if precision not in {'fp32', 'fp16', 'bf16', 'tf32'}:
+        raise ValueError('imagination precision must be fp32, fp16, bf16, or tf32')
+    resources = replace(config.resources, world_model_imagination_precision=precision,
+        imagination_rollouts_per_pass=(config.resources.imagination_rollouts_per_pass
+                                       if rollouts is None else rollouts))
+    method = replace(config.method,
+        sp_prior_evaluation_weight=(config.method.sp_prior_evaluation_weight
+                                   if evaluation_weight is None else evaluation_weight),
+        sp_prior_hold_episodes=config.method.sp_prior_hold_episodes if hold is None else hold,
+        sp_prior_off_episode=config.method.sp_prior_off_episode if off is None else off)
     target = replace(config, resources=resources, method=method)
     return replace(target, semantic_fingerprint=_semantic_fingerprint(**{
         key:getattr(target,key) for key in ('inputs','run','simulation','resources','method','data','codec')}))
@@ -32,9 +40,14 @@ def changed_config(config, *, rollouts, evaluation_weight, hold, off):
 def revised_protocol(protocol, config):
     result = copy.deepcopy(protocol)
     result['config_fingerprint'] = config.semantic_fingerprint
+    if 'runtime_config_fingerprint' in result:
+        result['runtime_config_fingerprint'] = config.semantic_fingerprint
+    if 'config_semantics_unchanged' in result:
+        result['config_semantics_unchanged'] = False
     result['budgets'] = learning_budgets(config)
-    result['prior'].update(evaluation_weight=config.method.sp_prior_evaluation_weight,
-        hold_episodes=config.method.sp_prior_hold_episodes, off_episode=config.method.sp_prior_off_episode)
+    if 'prior' in result:
+        result['prior'].update(evaluation_weight=config.method.sp_prior_evaluation_weight,
+            hold_episodes=config.method.sp_prior_hold_episodes, off_episode=config.method.sp_prior_off_episode)
     return result
 
 
@@ -63,10 +76,11 @@ def archive_prior_evaluations(output, backup):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run-dir', type=Path, required=True)
-    parser.add_argument('--rollouts', type=int, default=8)
-    parser.add_argument('--evaluation-prior-weight', type=float, default=0.)
-    parser.add_argument('--prior-hold', type=int, default=200)
-    parser.add_argument('--prior-off', type=int, default=1000)
+    parser.add_argument('--rollouts', type=int)
+    parser.add_argument('--evaluation-prior-weight', type=float)
+    parser.add_argument('--prior-hold', type=int)
+    parser.add_argument('--prior-off', type=int)
+    parser.add_argument('--imagination-precision', choices=('fp32', 'fp16', 'bf16', 'tf32'), default='fp16')
     args = parser.parse_args()
     output = args.run_dir.resolve()
     status = json.loads((output/'runtime_status.json').read_text())
@@ -90,7 +104,7 @@ def main():
     if checkpoint.next_unit != len(progress['online']):
         raise ValueError('checkpoint/history cursor mismatch')
     target = changed_config(old, rollouts=args.rollouts, evaluation_weight=args.evaluation_prior_weight,
-                            hold=args.prior_hold, off=args.prior_off)
+                            hold=args.prior_hold, off=args.prior_off, precision=args.imagination_precision)
     if target.semantic_fingerprint == old.semantic_fingerprint:
         raise ValueError('requested settings are already active')
     stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
@@ -98,7 +112,8 @@ def main():
     backup.mkdir(parents=True, exist_ok=False)
     os.link(output/'checkpoints/latest.pt', backup/'checkpoint.pt')
     for name in ['run_config.toml','pilot_protocol.json','pilot_progress.json','runtime_status.json','launch.json']:
-        shutil.copyfile(output/name, backup/name)
+        if (output/name).exists():
+            shutil.copyfile(output/name, backup/name)
     export_run_config(target, backup/'target_config.toml')
     target = load_config(backup/'target_config.toml')
     protocol = revised_protocol(json.loads((backup/'pilot_protocol.json').read_text()), target)
@@ -115,11 +130,13 @@ def main():
     shutil.copyfile(backup/'target_config.toml', output/'run_config.toml')
     atomic_json(output/'pilot_protocol.json', protocol)
     atomic_json(output/'pilot_progress.json', progress)
-    record = dict(kind='rollout_and_policy_prior_profile_change', boundary=checkpoint.next_unit,
+    record = dict(kind='imagination_and_policy_prior_profile_change', boundary=checkpoint.next_unit,
         before=dict(rollouts=old.resources.imagination_rollouts_per_pass,
+            imagination_precision=old.resources.world_model_imagination_precision,
             evaluation_prior=old.method.sp_prior_evaluation_weight, hold=old.method.sp_prior_hold_episodes,
             off=old.method.sp_prior_off_episode),
         after=dict(rollouts=target.resources.imagination_rollouts_per_pass,
+            imagination_precision=target.resources.world_model_imagination_precision,
             evaluation_prior=target.method.sp_prior_evaluation_weight, hold=target.method.sp_prior_hold_episodes,
             off=target.method.sp_prior_off_episode),
         old_checkpoint_sha256=sha256_file(backup/'checkpoint.pt'),

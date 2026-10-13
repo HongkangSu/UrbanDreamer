@@ -1,13 +1,92 @@
 import copy
 from dataclasses import dataclass
+import pickle
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 
-from tools.recover_pretrain_decoder import candidate_training_state, verify_initial_report, validate_recovery_codec
+from tools.recover_pretrain_decoder import (
+    candidate_training_state, load_recovery_state, save_recovery_state,
+    verify_initial_report, validate_recovery_codec,
+)
 from tools.probe_slow_codec import freeze_encoder_for_decoder_probe
 from tools.migrate_mainline_prior import _assert_equal
+from tools.train_codec_ready import FrameSampler
+from urban_dreamer.workflow.checkpoint import _normalize_plain_value
+
+
+def recovery_payload():
+    source, _ = states()
+    source['rng']['numpy_global'] = list(np.random.RandomState(42).get_state())
+    source['metrics']['decoder_pretrain_updates'] += 3
+    sampler = FrameSampler([{'frames': 7}, {'frames': 9}], 2, 42)
+    sampler.next()
+    return dict(training_state=source, sampler=sampler.state_dict(), updates=3,
+                protected_hashes={'checkpoint': 'abc'})
+
+
+def test_legacy_numpy_recovery_load_and_plain_round_trip_preserve_state(tmp_path):
+    payload = recovery_payload()
+    path = tmp_path / 'recovery.pt'
+    torch.save(payload, path)
+    with pytest.raises(pickle.UnpicklingError, match='numpy'):
+        torch.load(path, weights_only=True)
+    original_globals = torch.serialization.get_safe_globals()
+    loaded = load_recovery_state(path, protected_hashes=payload['protected_hashes'],
+                                 initial_decoder_updates=420)
+    assert torch.serialization.get_safe_globals() == original_globals
+    normalized = lambda value: _normalize_plain_value(value, path='test')
+    _assert_equal(normalized(payload), normalized(loaded))
+    before_rng = np.random.RandomState()
+    before_rng.set_state(tuple(payload['training_state']['rng']['numpy_global']))
+    save_recovery_state(path, **loaded)
+    plain = torch.load(path, weights_only=True)
+    assert torch.serialization.get_unsafe_globals_in_checkpoint(path) == []
+    _assert_equal(normalized(payload), plain)
+    after_rng = np.random.RandomState()
+    after_rng.set_state(tuple(plain['training_state']['rng']['numpy_global']))
+    np.testing.assert_array_equal(before_rng.randint(2**32, size=100, dtype=np.uint32),
+                                  after_rng.randint(2**32, size=100, dtype=np.uint32))
+    samplers = [FrameSampler([{'frames': 7}, {'frames': 9}], 2, seed) for seed in (7, 99)]
+    for sampler, state in zip(samplers, (payload['sampler'], plain['sampler'])):
+        sampler.load_state_dict(state)
+    for _ in range(30):
+        left, right = [sampler.next() for sampler in samplers]
+        assert left[0] == right[0]
+        np.testing.assert_array_equal(left[1], right[1])
+
+
+@pytest.mark.parametrize('change,match', [
+    ({'extra': 1}, 'schema'), ({'protected_hashes': {}}, 'source changed'),
+    ({'updates': True}, 'update count'), ({'updates': -1}, 'update count'),
+    ({'updates': 4}, 'update count'),
+])
+def test_recovery_resume_rejects_invalid_identity_or_cursor(tmp_path, change, match):
+    payload = recovery_payload()
+    path = tmp_path / 'recovery.pt'
+    torch.save(dict(payload, **change), path)
+    with pytest.raises(ValueError, match=match):
+        load_recovery_state(path, protected_hashes=payload['protected_hashes'],
+                            initial_decoder_updates=420)
+
+
+def _unexpected_recovery_global():
+    raise AssertionError('untrusted checkpoint callable must not execute')
+
+
+def test_recovery_numpy_allowlist_does_not_allow_arbitrary_globals(tmp_path):
+    class Unexpected:
+        def __reduce__(self):
+            return (_unexpected_recovery_global, ())
+    path = tmp_path / 'recovery.pt'
+    payload = recovery_payload()
+    payload['unexpected'] = Unexpected()
+    torch.save(payload, path)
+    with pytest.raises(pickle.UnpicklingError, match='_unexpected_recovery_global'):
+        load_recovery_state(path, protected_hashes=payload['protected_hashes'],
+                            initial_decoder_updates=420)
 
 
 def states():

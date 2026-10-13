@@ -72,7 +72,68 @@ def verify_old_rows(rows, previous_rows):
                 raise ValueError(f"previous archive identity changed: {old['path']} ({key})")
 
 
-def prepare(city, previous_city_dir, output, *, collection=COLLECTION, live_manifest=LIVE_MANIFEST):
+def preserve_previous_canonical(duplicates, previous_rows, previous_census):
+    """Keep existing compact-cache sources when new paths sort before them."""
+    excluded = {path for group in previous_census.get('verified_duplicate_groups', [])
+                for path in group['files'][1:]}
+    canonical = {row['path'] for row in previous_rows} - excluded
+    anchored = []
+    for group in duplicates:
+        old_canonical = canonical.intersection(group['files'])
+        if len(old_canonical) > 1:
+            raise ValueError('supplement merged distinct previous canonical trajectories')
+        files = group['files']
+        if old_canonical:
+            anchor = next(iter(old_canonical))
+            files = [anchor] + [path for path in files if path != anchor]
+        anchored.append({**group, 'files': files})
+    return anchored
+
+
+def collection_sources(collection, live_manifest, collection_manifests):
+    pairs = [(collection, live_manifest)] if collection_manifests is None else collection_manifests
+    if not pairs:
+        raise ValueError('at least one collection manifest is required')
+    sources = sorted({(str(Path(root).resolve()), str(Path(manifest).resolve()))
+                      for root, manifest in pairs})
+    if len({root for root, _ in sources}) != len(sources):
+        raise ValueError('a collection root must have only one manifest')
+    return [dict(collection_root=root, live_manifest=manifest) for root, manifest in sources]
+
+
+def validate_collection(source, city, config, prepared):
+    live = json.loads(Path(source['live_manifest']).read_text())
+    configs = {row['command'][row['command'].index('--config') + 1]
+               for row in live['runs'] if row['city'] == city}
+    if not configs or live.get('input_hashes_by_city', {}).get(city) != prepared.input_hashes:
+        raise ValueError('live collection input identity differs from previous pretraining')
+    for path in configs:
+        actual = load_config(Path(path))
+        if (actual.inputs.network_name != city
+                or validate_prepared_inputs(actual).input_hashes != prepared.input_hashes
+                or physics_identity(actual.simulation) != physics_identity(config.simulation)
+                or any(actual.resolved_snapshot()['simulation'][key] != config.resolved_snapshot()['simulation'][key]
+                       for key in PHYSICAL)):
+            raise ValueError('live collection physics/inputs differ from previous pretraining')
+
+
+def scan_supplement_metadata(path, config, prepared, edge_ids, previous_by_path, sources, city):
+    row = scan_metadata(path, config, prepared, edge_ids)
+    if path in previous_by_path:
+        # This field participates in immutable cache receipt identity, including
+        # historical rows which were written with the original collection root.
+        row['root'] = previous_by_path[path]['root']
+    else:
+        roots = [source['collection_root'] for source in sources
+                 if Path(path).is_relative_to(Path(source['collection_root']) / city)]
+        if len(roots) != 1:
+            raise ValueError(f'archive has no unambiguous collection root: {path}')
+        row['root'] = roots[0]
+    return row
+
+
+def prepare(city, previous_city_dir, output, *, collection=COLLECTION, live_manifest=LIVE_MANIFEST,
+            collection_manifests=None):
     previous, output = Path(previous_city_dir).resolve(), Path(output).resolve()
     if output == previous or previous in output.parents:
         raise ValueError('supplement output must be isolated from the previous city run')
@@ -84,32 +145,31 @@ def prepare(city, previous_city_dir, output, *, collection=COLLECTION, live_mani
     if previous_census['input_hashes'] != prepared.input_hashes:
         raise ValueError('previous frozen inputs differ from census')
     topology = load_traffic_topology(prepared)
-    live = json.loads(Path(live_manifest).read_text())
-    configs = {row['command'][row['command'].index('--config') + 1]
-               for row in live['runs'] if row['city'] == city}
-    if not configs or live['input_hashes_by_city'][city] != prepared.input_hashes:
-        raise ValueError('live collection input identity differs from previous pretraining')
-    for path in configs:
-        actual = load_config(Path(path))
-        if (validate_prepared_inputs(actual).input_hashes != prepared.input_hashes
-                or physics_identity(actual.simulation) != physics_identity(config.simulation)
-                or any(actual.resolved_snapshot()['simulation'][key] != config.resolved_snapshot()['simulation'][key]
-                       for key in PHYSICAL)):
-            raise ValueError('live collection physics/inputs differ from previous pretraining')
+    sources = collection_sources(collection, live_manifest, collection_manifests)
+    for source in sources:
+        validate_collection(source, city, config, prepared)
     frozen_path = output / 'census/frozen_candidates.json'
     old_paths = {r['path'] for r in previous_rows}
     if frozen_path.exists():
         frozen = json.loads(frozen_path.read_text())
     else:
-        frozen = freeze_committed(Path(collection) / city)
-        frozen['latest_committed_paths'] = frozen['paths']
-        frozen['paths'] = sorted(old_paths | set(frozen['paths']))
+        collections = [freeze_committed(Path(source['collection_root']) / city) for source in sources]
+        latest_paths = sorted({path for current in collections for path in current['paths']})
+        frozen = dict(frozen_at=min(current['frozen_at'] for current in collections),
+                      committed_bounds=(collections[0]['committed_bounds'] if len(sources) == 1 else
+                                        {source['collection_root']: current['committed_bounds']
+                                         for source, current in zip(sources, collections)}),
+                      latest_committed_paths=latest_paths, paths=sorted(old_paths | set(latest_paths)))
         frozen.update(city=city, input_hashes=prepared.input_hashes,
-                      previous_city_dir=str(previous), collection_root=str(Path(collection).resolve()))
+                      previous_city_dir=str(previous), collection_sources=sources)
+        if len(sources) == 1:
+            frozen['collection_root'] = sources[0]['collection_root']
         write_json(frozen_path, frozen)
     if (frozen.get('city') != city or frozen.get('input_hashes') != prepared.input_hashes
             or frozen.get('previous_city_dir') != str(previous)
-            or not old_paths <= set(frozen['paths'])):
+            or not old_paths <= set(frozen['paths'])
+            or (frozen.get('collection_sources') != sources if 'collection_sources' in frozen else
+                len(sources) != 1 or frozen.get('collection_root') != sources[0]['collection_root'])):
         raise ValueError('existing frozen supplement differs from requested anchor/inputs')
     for label, source in [('network_xml', prepared.network_xml), ('network_agents', prepared.network_agents_csv),
                           ('od_file', prepared.od_file), ('edge_registry', prepared.edge_registry)]:
@@ -122,15 +182,19 @@ def prepare(city, previous_city_dir, output, *, collection=COLLECTION, live_mani
             shutil.copy2(source, destination)
     config = refreshed(config, inputs=replace(config.inputs, network_dir=output / 'inputs'),
                        run=replace(config.run, output_dir=output / 'world_model', seed=seed),
-                       data=replace(config.data, archive_roots=(Path(collection).resolve() / city,)))
+                       data=replace(config.data, archive_roots=tuple(sorted(
+                           set(config.data.archive_roots) |
+                           {Path(source['collection_root']) / city for source in sources}))))
     export_relative(config, output / 'base_config.toml')
     export_relative(config, output / 'pilot/run_config.toml')
     with ThreadPoolExecutor(max_workers=4) as pool:
-        rows = list(pool.map(lambda path: scan_metadata(path, config, prepared,
-                            list(topology.network.edge_ids)), frozen['paths']))
+        previous_by_path = {row['path']: row for row in previous_rows}
+        rows = list(pool.map(lambda path: scan_supplement_metadata(path, config, prepared,
+                            list(topology.network.edge_ids), previous_by_path, sources, city), frozen['paths']))
     verify_old_rows(rows, previous_rows)
     holdout = anchored_holdout(rows, previous_rows, previous_holdout, seed=seed)
     duplicates, unique = verify_duplicates(rows)
+    duplicates = preserve_previous_canonical(duplicates, previous_rows, previous_census)
     census = dict(schema_version=1, city=city, frozen_at=frozen['frozen_at'],
                   input_hashes=prepared.input_hashes, committed_bounds=frozen['committed_bounds'],
                   files=len(rows), unique_trajectories=unique, verified_duplicate_groups=duplicates)
@@ -181,8 +245,13 @@ def main(argv=None):
     parser.add_argument('--city', required=True, choices=('coulommiers', 'montereau_fault_yonne'))
     parser.add_argument('--previous-city-dir', required=True, type=Path)
     parser.add_argument('--output-dir', required=True, type=Path)
+    parser.add_argument('--collection-manifest', action='append', type=Path,
+                        help='Repeat for each compatible collection; archive root is the manifest parent.')
     args = parser.parse_args(argv)
-    print(json.dumps(prepare(args.city, args.previous_city_dir, args.output_dir), indent=2), flush=True)
+    sources = ([(manifest.parent, manifest) for manifest in args.collection_manifest]
+               if args.collection_manifest else None)
+    print(json.dumps(prepare(args.city, args.previous_city_dir, args.output_dir,
+                             collection_manifests=sources), indent=2), flush=True)
 
 
 if __name__ == '__main__':

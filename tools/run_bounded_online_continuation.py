@@ -87,6 +87,8 @@ def main():
     config = load_config(output / 'run_config.toml')
     if config.method.critic_value_mode != 'bounded_cohort_v1':
         raise ValueError('this continuation requires bounded critics')
+    # Direct continuations use the same parallel rollout setup as queued runs.
+    os.environ.setdefault('URB_IMAGINATION_WORKERS', '8')
     migration = json.loads((output / 'critic_migration.json').read_text())
     if sha256_file(output / 'source_checkpoint.pt') != migration['source_checkpoint_sha256']:
         raise ValueError('source checkpoint ancestry changed')

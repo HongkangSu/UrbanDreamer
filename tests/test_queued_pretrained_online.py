@@ -86,6 +86,19 @@ def test_final_pretrain_requires_process_exit(tmp_path, monkeypatch):
     assert queue.inspect_source(source, pretrain_pid=5, pretrain_identity='old-reused-pid')['ready']
 
 
+@pytest.mark.parametrize('source_precision', ['fp32', 'bf16', 'fp16'])
+def test_online_seed_defaults_to_fp16_and_strictly_allows_only_precision_transfer(tmp_path, source_precision):
+    _, config, _ = source_fixture(tmp_path)
+    config = replace(config, resources=replace(config.resources,
+                                              world_model_imagination_precision=source_precision))
+    target = queue.target_config(config, tmp_path / 'seed')
+    assert target.resources.world_model_imagination_precision == 'fp16'
+    queue.validate_profile_transfer(config, target)
+    with pytest.raises(ValueError, match='FP16 imagination precision'):
+        queue.validate_profile_transfer(config, replace(target, resources=replace(target.resources,
+                                        world_model_imagination_precision='fp32')))
+
+
 @pytest.mark.parametrize('entropy_mode', ['population', 'annealed'])
 def test_paper_seed_preserves_pretraining_and_is_idempotent(tmp_path, entropy_mode):
     source, config, state = source_fixture(tmp_path, entropy_mode=entropy_mode)

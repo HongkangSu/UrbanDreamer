@@ -487,9 +487,7 @@ def test_presets_use_verified_imagination_compile_profiles():
     for path in paths:
         config = load_config(path)
         resource = config.resources
-        assert resource.world_model_imagination_precision == ('bf16' if path.name in {
-            'ingolstadt_custom.toml', 'ingolstadt_custom_offline.toml',
-            'ingolstadt_actor_warmstart.toml'} else 'fp32'), path
+        assert resource.world_model_imagination_precision == 'fp16', path
         assert resource.world_model_imagination_compile is True, path
         assert resource.world_model_imagination_compile_mode == 'default', path
         assert resource.world_model_imagination_space_chunk == 16, path
@@ -502,4 +500,4 @@ def test_presets_use_verified_imagination_compile_profiles():
 def test_omitted_imagination_compile_retains_legacy_disabled_default(tmp_path):
     config = load_config(_write_config(tmp_path / 'legacy.toml'))
     assert config.resources.world_model_imagination_compile is False
-    assert config.resources.world_model_imagination_precision == 'fp32'
+    assert config.resources.world_model_imagination_precision == 'fp16'

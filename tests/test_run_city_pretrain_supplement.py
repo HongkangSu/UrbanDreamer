@@ -50,6 +50,14 @@ def test_commands_keep_checked_migration_and_ingo_profile(tmp_path):
     assert not any('run_online' in word for word in fm)
 
 
+def test_chained_supplement_uses_original_codec_artifacts(tmp_path):
+    args = options(tmp_path)
+    args.codec_dir = tmp_path / 'original' / 'codec'
+    fm = runner.commands(args, dict(status='complete', entries=[
+        dict(split='train'), dict(split='validation')]))['world_model']
+    assert fm[fm.index('--codec-dir') + 1] == str(args.codec_dir)
+
+
 def test_commands_reject_incomplete_or_single_partition_cache(tmp_path):
     args = options(tmp_path)
     with pytest.raises(ValueError, match='complete cache'):

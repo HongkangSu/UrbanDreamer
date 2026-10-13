@@ -19,8 +19,39 @@ def configured(tmp_path, fields=''):
     return cfg.load_config(path)
 
 
+def test_fp16_default_is_explicitly_fingerprinted(tmp_path):
+    default = configured(tmp_path)
+    explicit = configured(tmp_path, 'world_model_imagination_precision = "fp16"\n')
+    legacy = configured(tmp_path, 'world_model_imagination_precision = "fp32"\n')
+    assert default.resources.world_model_imagination_precision == 'fp16'
+    assert default.semantic_fingerprint == explicit.semantic_fingerprint
+    assert default.semantic_fingerprint != legacy.semantic_fingerprint
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA required for actual FP16 execution')
+def test_cuda_fp16_velocity_keeps_prior_conditions_integrator_and_parameters_fp32(tmp_path):
+    dynamics = _small_dynamics().cuda().eval()
+    torch.nn.init.normal_(dynamics.flow_head.weight, std=.001)
+    trainer = SimpleNamespace(config=configured(tmp_path), world_model=SimpleNamespace(dynamics=dynamics))
+    assert inference.configure_imagination_inference(trainer)['precision'] == 'fp16'
+    action = torch.zeros(2, 1, 3, device='cuda')
+    latent = torch.randn(2, 1, 3, 64, device='cuda')
+    ids = tuple(map(id, dynamics.parameters()))
+    with torch.no_grad():
+        condition = dynamics.encode_condition(action)
+        start, increment, cached = dynamics.prior_start(latent, condition)
+        result = dynamics.solve(start, action, cached, steps=3, solver='euler')
+        velocity = dynamics(action, packed_latents=start, flow_time=torch.zeros(2, 1, device='cuda'),
+                            condition=cached).latent_velocity
+    assert all(tensor.dtype == torch.float32 for tensor in (
+        start, increment, condition.edge_tokens, cached.reference_tokens, velocity, result))
+    assert torch.isfinite(result).all() and velocity.abs().sum() > 0
+    assert ids == tuple(map(id, dynamics.parameters()))
+    assert all(parameter.dtype == torch.float32 for parameter in dynamics.parameters())
+
+
 def test_legacy_resource_defaults_preserve_exact_fingerprint(tmp_path, monkeypatch):
-    config = configured(tmp_path)
+    config = configured(tmp_path, 'world_model_imagination_precision = "fp32"\n')
     old_asdict = cfg.asdict
     def historical(value):
         result = old_asdict(value)
@@ -34,7 +65,7 @@ def test_legacy_resource_defaults_preserve_exact_fingerprint(tmp_path, monkeypat
 
 
 @pytest.mark.parametrize('field,value', [('space_chunk','0'),('time_chunk','65536'),
-    ('mlp_chunk','65536'),('precision','"bf16"'),('precision','"tf32"'),('compile','true'),('compile_mode','"reduce-overhead"')])
+    ('mlp_chunk','65536'),('precision','"fp32"'),('precision','"bf16"'),('precision','"tf32"'),('compile','true'),('compile_mode','"reduce-overhead"')])
 def test_nondefault_inference_resources_are_fingerprinted(tmp_path, field, value):
     default = configured(tmp_path)
     changed = configured(tmp_path, f'world_model_imagination_{field} = {value}\n')
@@ -42,14 +73,15 @@ def test_nondefault_inference_resources_are_fingerprinted(tmp_path, field, value
 
 
 @pytest.mark.parametrize('field,value', [('space_chunk','-1'),('time_chunk','true'),
-    ('mlp_chunk','0.5'),('precision','"fp16"'),('compile','1'),('compile_mode','"max-autotune"'),('compile_mode','true')])
+    ('mlp_chunk','0.5'),('precision','"float16"'),('compile','1'),('compile_mode','"max-autotune"'),('compile_mode','true')])
 def test_invalid_inference_resources_rejected(tmp_path, field, value):
     with pytest.raises(cfg.ConfigError, match='world_model_imagination_'):
         configured(tmp_path, f'world_model_imagination_{field} = {value}\n')
 
 
-def test_cpu_fallback_identity_and_idempotent_configuration(tmp_path, monkeypatch):
-    config = configured(tmp_path, 'world_model_imagination_precision = "bf16"\n'
+@pytest.mark.parametrize('precision', ['fp16', 'bf16'])
+def test_cpu_fallback_identity_and_idempotent_configuration(tmp_path, monkeypatch, precision):
+    config = configured(tmp_path, f'world_model_imagination_precision = "{precision}"\n'
         'world_model_imagination_compile = true\nworld_model_imagination_space_chunk = 64\n')
     dynamics = _small_dynamics()
     optimizer = torch.optim.Adam(dynamics.parameters())
@@ -109,27 +141,31 @@ def test_static_compile_dispatch_and_fp32_output(monkeypatch, batch, device, gra
     assert result.latent_velocity.dtype == torch.float32
 
 
-def test_bf16_autocast_only_encloses_velocity_and_not_training(monkeypatch):
+@pytest.mark.parametrize('precision,dtype', [('fp16', torch.float16), ('bf16', torch.bfloat16)])
+def test_autocast_only_encloses_velocity_and_not_training(monkeypatch, precision, dtype):
     contexts = []
     @contextmanager
-    def autocast(device, dtype):
-        assert device == 'cuda' and dtype == torch.bfloat16
+    def autocast(device, **kwargs):
+        assert device == 'cuda' and kwargs['dtype'] == dtype
         contexts.append('enter')
         yield
         contexts.append('exit')
     monkeypatch.setattr(torch, 'autocast', autocast)
     def eager(*a, **kw):
+        assert kw['packed_latents'].dtype == torch.float32
+        assert kw['flow_time'].dtype == torch.float32
+        assert kw['condition'].dtype == torch.float32
         contexts.append('forward')
-        return DynamicsOutput(torch.ones(1,dtype=torch.bfloat16))
+        return DynamicsOutput(torch.ones(1,dtype=dtype))
     wrapper = inference._VelocityInference(SimpleNamespace(n_edges=3,forward=eager),
-        inference.ImaginationInferenceProfile(64,32768,65536,'bf16',False))
+        inference.ImaginationInferenceProfile(64,32768,65536,precision,False))
     latent = SimpleNamespace(shape=(3,1,3,64),device=SimpleNamespace(type='cuda'),dtype=torch.float32)
     with torch.no_grad():
-        result = wrapper(None,packed_latents=latent,flow_time=torch.zeros(3,1),condition=object())
+        result = wrapper(None,packed_latents=latent,flow_time=torch.zeros(3,1),condition=torch.zeros(1))
     assert contexts == ['enter','forward','exit']
     assert result.latent_velocity.dtype == torch.float32
     contexts.clear()
-    wrapper(None,packed_latents=latent,flow_time=torch.zeros(3,1),condition=object())
+    wrapper(None,packed_latents=latent,flow_time=torch.zeros(3,1),condition=torch.zeros(1))
     assert contexts == ['forward']
 
 
@@ -157,7 +193,8 @@ def test_cpu_eager_matches_original_and_preserves_gradients(tmp_path):
 
 
 
-def test_no_grad_training_forward_stays_eager_fp32(monkeypatch):
+@pytest.mark.parametrize('precision', ['fp16', 'bf16'])
+def test_no_grad_training_forward_stays_eager_fp32(monkeypatch, precision):
     monkeypatch.setattr(torch, 'autocast', lambda *a, **k: pytest.fail('training autocast altered'))
     monkeypatch.setattr(torch, 'compile', lambda *a, **k: lambda *args, **kw: pytest.fail('training compiled'))
     calls = []
@@ -166,7 +203,7 @@ def test_no_grad_training_forward_stays_eager_fp32(monkeypatch):
         return DynamicsOutput(torch.ones(1))
     dynamics = SimpleNamespace(n_edges=3,forward=eager,training=True)
     wrapper = inference._VelocityInference(dynamics,
-        inference.ImaginationInferenceProfile(16,32768,16384,'bf16',True))
+        inference.ImaginationInferenceProfile(16,32768,16384,precision,True))
     latent = SimpleNamespace(shape=(24,1,3,64),device=SimpleNamespace(type='cuda'),dtype=torch.float32)
     with torch.no_grad():
         wrapper(None,packed_latents=latent,flow_time=torch.zeros(24,1),condition=object())

@@ -45,7 +45,7 @@ sumo_extra_args = ["--collision.action", "warn"]
 # Finish whole imagination passes within the per-episode target when possible.
 imagination_passes_per_episode = 2
 imagination_time_budget_seconds = 60.0
-world_model_imagination_precision = "fp32"
+world_model_imagination_precision = "fp16"
 world_model_imagination_compile = true
 world_model_imagination_compile_mode = "default"
 world_model_imagination_space_chunk = 16

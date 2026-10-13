@@ -88,7 +88,7 @@ class ResourceConfig:
     world_model_imagination_space_chunk: int = 16
     world_model_imagination_time_chunk: int = 32768
     world_model_imagination_mlp_chunk: int = 16384
-    world_model_imagination_precision: str = "fp32"
+    world_model_imagination_precision: str = "fp16"
     world_model_imagination_compile: bool = False
     world_model_imagination_compile_mode: str = "default"
     imagination_rollouts_per_pass: int = 8
@@ -444,8 +444,8 @@ def _parse_resources(raw: Mapping[str, Any]) -> ResourceConfig:
     imagination = {name: _nonnegative_integer(values, name, section)
                    for name in imagination_defaults if name.endswith('_chunk')}
     imagination_precision = _nonempty_string(values, 'world_model_imagination_precision', section)
-    if imagination_precision not in {'fp32', 'bf16', 'tf32'}:
-        raise ConfigError('[resources].world_model_imagination_precision must be fp32, bf16, or tf32')
+    if imagination_precision not in {'fp32', 'fp16', 'bf16', 'tf32'}:
+        raise ConfigError('[resources].world_model_imagination_precision must be fp32, fp16, bf16, or tf32')
     imagination_compile = values['world_model_imagination_compile']
     if not isinstance(imagination_compile, bool):
         raise ConfigError('[resources].world_model_imagination_compile must be boolean')
@@ -533,9 +533,12 @@ def _semantic_fingerprint(
                 method_values.pop(name)
     resource_values = asdict(resources)
     for name, spec in ResourceConfig.__dataclass_fields__.items():
+        # Keep checkpoint identities for explicitly configured legacy FP32 runs.
+        # FP16 is the execution default, but must be represented in the fingerprint.
+        historical_default = 'fp32' if name == 'world_model_imagination_precision' else spec.default
         if (name.startswith('world_model_imagination_') or name in {
                 'imagination_rollouts_per_pass', 'imagination_passes_per_episode', 'imagination_time_budget_seconds'
-                }) and getattr(resources, name) == spec.default:
+                }) and getattr(resources, name) == historical_default:
             resource_values.pop(name, None)
     if not resources.world_model_pretrain_compile_blocks:
         # Disabled compilation retains historical checkpoint fingerprints.

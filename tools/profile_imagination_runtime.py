@@ -112,6 +112,8 @@ def main():
     parser.add_argument('--workers', type=int, default=8)
     parser.add_argument('--trace-pass', type=int, default=1)
     parser.add_argument('--assumed-fp32-tflops', type=float, default=35.58)
+    parser.add_argument('--imagination-precision', choices=('fp32', 'fp16', 'bf16', 'tf32'),
+                        help='Override only velocity inference precision in this private profiler.')
     args = parser.parse_args()
     if min(args.passes, args.threads, args.workers) < 1 or not 0 < args.memory_fraction <= 1:
         parser.error('positive passes/threads/workers and memory fraction in (0,1] required')
@@ -152,7 +154,10 @@ def main():
     checkpoint = load_checkpoint(output_dir=snapshot,
         expected_config_fingerprint=config.semantic_fingerprint,
         expected_input_hash=combined_input_hash(prepared))
-    trainer = training.MainlineTrainer(config=replace(config, run=replace(config.run,
+    execution_config = (replace(config, resources=replace(config.resources,
+                        world_model_imagination_precision=args.imagination_precision))
+                        if args.imagination_precision is not None else config)
+    trainer = training.MainlineTrainer(config=replace(execution_config, run=replace(config.run,
         device=args.device, output_dir=output)), prepared_inputs=prepared, topology=topology)
     install_sparse_codec(trainer)
     trainer.load_state_dict(checkpoint.training_state)
@@ -170,6 +175,7 @@ def main():
         rollouts_per_pass=training.IMAGINED_ROLLOUTS_PER_PASS, horizon=training.IMAGINED_HORIZON,
         fm_steps=config.method.fm_steps, solver=config.method.fm_solver,
         samples=config.method.disagreement_samples, threads=args.threads, workers=args.workers,
+        imagination_precision=execution_config.resources.world_model_imagination_precision,
         note='Private optimizer updates only. GPU spans include queueing/contention; phase totals may overlap.')
     atomic_json(output / 'protocol.json', protocol)
     recorder = PhaseRecorder(device=device)

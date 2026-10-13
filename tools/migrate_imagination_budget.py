@@ -90,8 +90,8 @@ def validate_precision_transfer_config(source, target):
     if before != after:
         raise ValueError('precision continuation may change only imagination precision, output directory and device')
     if (source.resources.world_model_imagination_precision != 'fp32' or
-            target.resources.world_model_imagination_precision != 'bf16'):
-        raise ValueError('precision continuation requires exactly fp32 source and bf16 target')
+            target.resources.world_model_imagination_precision not in {'fp16', 'bf16'}):
+        raise ValueError('precision continuation requires exactly fp32 source and fp16 or bf16 target')
 
 
 def _validate_transfer(source, target, kind):
@@ -253,7 +253,7 @@ def migrate(source_dir, output_dir, *, device=None, passes=None, time_budget_sec
         passes = source_config.resources.imagination_passes_per_episode if passes is None else passes
         time_budget_seconds = (source_config.resources.imagination_time_budget_seconds
                                if time_budget_seconds is None else time_budget_seconds)
-        precision = 'bf16' if precision is None else precision
+        precision = 'fp16' if precision is None else precision
     else:
         raise ValueError(f'unsupported imagination continuation kind: {kind!r}')
     config = replace(source_config,
@@ -342,7 +342,7 @@ def main(argv=None):
     parser.add_argument('--passes', type=int)
     parser.add_argument('--kind', choices=(BUDGET_KIND, SAMPLES_KIND, PRECISION_KIND), default=BUDGET_KIND)
     parser.add_argument('--samples', type=int)
-    parser.add_argument('--precision', choices=('bf16',))
+    parser.add_argument('--precision', choices=('fp16', 'bf16'))
     parser.add_argument('--time-budget-seconds', type=float)
     args = parser.parse_args(argv)
     torch.set_num_threads(1)

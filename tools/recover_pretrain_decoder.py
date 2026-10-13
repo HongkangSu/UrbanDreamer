@@ -12,6 +12,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+import numpy as np
 import torch
 
 from tools.calibrate_frozen_decoder import calibration_pairs, file_hash, verify_partition_separation
@@ -24,11 +25,42 @@ from urban_dreamer.learning.codec_training import codec_objective, decoder_param
 from urban_dreamer.learning.training import MainlineTrainer
 from urban_dreamer.traffic.routing import validate_prepared_inputs
 from urban_dreamer.traffic.topology import load_traffic_topology
+from urban_dreamer.workflow.checkpoint import _normalize_plain_value
 from urban_dreamer.workflow.config import load_config
 from urban_dreamer.workflow.pipeline import combined_input_hash
 
 DECODER_PREFIXES = tuple('flow_projector.' + name + '.' for name in
                         ('decoder_shared', 'decoder_speed', 'decoder_volume', 'decoder_other'))
+
+
+def load_recovery_state(path, *, protected_hashes, initial_decoder_updates):
+    # Historical recovery saves contain only one NumPy array: MT19937's
+    # uint32 RNG keys. Keep weights-only loading and scope its exact allowlist.
+    with torch.serialization.safe_globals([
+            np._core.multiarray._reconstruct, np.ndarray, np.dtype,
+            type(np.dtype(np.uint32))]):
+        saved = torch.load(path, map_location='cpu', weights_only=True)
+    if not isinstance(saved, dict) or set(saved) != {
+            'training_state', 'sampler', 'updates', 'protected_hashes'}:
+        raise ValueError('decoder recovery checkpoint has an invalid schema')
+    if saved['protected_hashes'] != protected_hashes:
+        raise ValueError('decoder recovery source changed before resume')
+    updates = saved['updates']
+    if (type(updates) is not int or updates < 0
+            or saved['training_state']['metrics']['decoder_pretrain_updates']
+            != initial_decoder_updates + updates):
+        raise ValueError('decoder recovery update count differs')
+    return saved
+
+
+def save_recovery_state(path, *, training_state, sampler, updates, protected_hashes):
+    # Reuse the main checkpoint serializer so future saves need no allowlist;
+    # this also preserves integer optimizer keys and all replay/RNG fields.
+    payload = _normalize_plain_value(dict(training_state=training_state, sampler=sampler,
+        updates=updates, protected_hashes=protected_hashes), path='decoder_recovery')
+    temporary = path.with_suffix('.tmp')
+    torch.save(payload, temporary)
+    temporary.replace(path)
 
 
 def verify_initial_report(report, protected_hashes, decoder_revision):
@@ -133,9 +165,8 @@ def run(args):
         sampler = FrameSampler(entries, args.batch_size // 2, config.run.seed)
         recovery_state = output / 'recovery_state.pt'
         if args.resume:
-            saved = torch.load(recovery_state, map_location='cpu', weights_only=True)
-            if saved['protected_hashes'] != hashes:
-                raise ValueError('decoder recovery source changed before resume')
+            saved = load_recovery_state(recovery_state, protected_hashes=hashes,
+                initial_decoder_updates=initial['metrics']['decoder_pretrain_updates'])
             MainlineTrainer.load_state_dict(trainer, saved['training_state'])
             sampler.load_state_dict(saved['sampler'])
             updates = saved['updates']
@@ -152,10 +183,8 @@ def run(args):
             current_hashes = {str(path): file_hash(path) for path in protected}
             if current_hashes != hashes:
                 raise ValueError('frozen source changed during decoder recovery')
-            temporary = recovery_state.with_suffix('.tmp')
-            torch.save(dict(training_state=trainer.state_dict(), sampler=sampler.state_dict(),
-                            updates=updates, protected_hashes=hashes), temporary)
-            temporary.replace(recovery_state)
+            save_recovery_state(recovery_state, training_state=trainer.state_dict(),
+                sampler=sampler.state_dict(), updates=updates, protected_hashes=hashes)
             write_status(output / 'status.json', phase=phase, calibration_updates=updates,
                          frozen_source_sha256=hashes, **values)
 

@@ -425,6 +425,56 @@ class OnlinePilot:
         return result
 
 
+def validate_profile_continuation(output, config, input_hash, source_hash, args):
+    """Resume a recorded profile change while retaining the frozen seed ancestry."""
+    from tools.change_online_training_profile import changed_config, revised_protocol
+    output = Path(output)
+    record = json.loads((output / 'latest_profile_change.json').read_text())
+    if (record.get('kind') != 'imagination_and_policy_prior_profile_change'
+            or record.get('new_fingerprint') != config.semantic_fingerprint
+            or record.get('model_optimizer_replay_rng_preserved') is not True):
+        raise ValueError('online profile change identity or preservation proof differs')
+    backup = Path(record['backup'])
+    old = load_config(backup / 'run_config.toml')
+    if (old.semantic_fingerprint != record['old_fingerprint']
+            or sha256_file(backup / 'checkpoint.pt') != record['old_checkpoint_sha256']):
+        raise ValueError('online profile change source ancestry differs')
+    settings = record['after']
+    expected = changed_config(old, rollouts=settings['rollouts'],
+        evaluation_weight=settings['evaluation_prior'], hold=settings['hold'], off=settings['off'],
+        precision=settings['imagination_precision'])
+    if expected.semantic_fingerprint != config.semantic_fingerprint:
+        raise ValueError('online runtime configuration differs from its recorded profile change')
+    protocol = json.loads((output / 'pilot_protocol.json').read_text())
+    original = json.loads((backup / 'pilot_protocol.json').read_text())
+    if protocol != revised_protocol(original, config):
+        raise ValueError('online profile continuation protocol differs from its recorded source')
+    if protocol['source']['sha256'] != source_hash:
+        raise ValueError('online profile continuation pretraining seed ancestry differs')
+    if 'evaluation' in protocol:
+        temperature = None if args.evaluation_policy == 'argmax' else args.evaluation_temperature
+        evaluation = training.evaluation_protocol(temperature,
+            prior_weight=config.method.sp_prior_evaluation_weight,
+            demand_seed=config.method.evaluation_demand_seed)
+        if protocol['evaluation'] != evaluation:
+            raise ValueError('online profile continuation evaluation policy differs')
+    elif args.evaluation_policy != 'argmax':
+        raise ValueError('legacy online profile continuation requires its frozen argmax evaluation policy')
+    for name, value in (('online_episode_budget', args.online_episodes),
+                        ('evaluation_every', args.evaluation_every), ('threads', args.threads),
+                        ('gpu_memory_fraction', args.gpu_memory_fraction), ('device', args.device)):
+        if protocol[name] != value:
+            raise ValueError(f'online profile continuation runner setting differs: {name}')
+    checkpoint = load_checkpoint(output_dir=output,
+        expected_config_fingerprint=config.semantic_fingerprint, expected_input_hash=input_hash)
+    history = checkpoint.training_state['metrics'].get('online_pilot_progress', {})
+    if (checkpoint.phase is not CheckpointPhase.ONLINE_TRAINING
+            or checkpoint.next_unit < record['boundary']
+            or len(history.get('online', [])) != checkpoint.next_unit):
+        raise ValueError('online profile continuation checkpoint/history cursor differs')
+    return protocol
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-dir', type=Path, default=ROOT / 'outputs/ingolstadt_bf16_pretrain_20261002')
@@ -486,9 +536,12 @@ def main(argv=None):
     budget_migration = json.loads(budget_path.read_text()) if args.run_config and budget_path.is_file() else None
     decoder_path = args.output_dir / 'decoder_migration.json'
     decoder_migration = json.loads(decoder_path.read_text()) if args.run_config and decoder_path.is_file() else None
+    profile_path = args.output_dir / 'latest_profile_change.json'
+    profile_migration = json.loads(profile_path.read_text()) if args.run_config and profile_path.is_file() else None
     if args.run_config:
         if (meso_initialization is None and prior_migration is None and calibrated_initialization is None
-                and entropy_migration is None and budget_migration is None and decoder_migration is None):
+                and entropy_migration is None and budget_migration is None and decoder_migration is None
+                and profile_migration is None):
             from tools.migrate_online_backend import validate_backend_only_change
             validate_backend_only_change(source_config, config)
             if not (args.output_dir / 'backend_migration.json').is_file():
@@ -542,7 +595,9 @@ def main(argv=None):
     elif entropy_mode != 'legacy':
         protocol['actor_entropy'] = dict(mode=entropy_mode, base_coefficient=.002,
             coefficient='base/(episode_population*max(global_advantage_std,1))' if entropy_mode == 'population' else 'zero')
-    if decoder_migration is not None:
+    if profile_migration is not None:
+        protocol = validate_profile_continuation(args.output_dir, config, input_hash, source_hash, args)
+    elif decoder_migration is not None:
         from tools.migrate_calibrated_decoder import validate_decoder_continuation, rewrite_protocol
         validate_decoder_continuation(args.output_dir, config, input_hash, source_hash)
         protocol = rewrite_protocol(json.loads((args.output_dir / 'source_protocol.json').read_text()),
@@ -610,16 +665,17 @@ def main(argv=None):
         if libsumo.__version__ != migration['target_engine_version']:
             raise ValueError('installed libsumo version differs from migrated engine provenance')
         protocol.update(runtime_config_fingerprint=config.semantic_fingerprint, backend_migration=migration)
-    protocol['evaluation'] = training.evaluation_protocol(evaluation_temperature,
-        prior_weight=config.method.sp_prior_evaluation_weight, demand_seed=config.method.evaluation_demand_seed)
-    protocol['evaluation_policy'] = protocol['evaluation']['archive_policy']
+    if profile_migration is None:
+        protocol['evaluation'] = training.evaluation_protocol(evaluation_temperature,
+            prior_weight=config.method.sp_prior_evaluation_weight, demand_seed=config.method.evaluation_demand_seed)
+        protocol['evaluation_policy'] = protocol['evaluation']['archive_policy']
     trainer = PilotTrainer(config=config, prepared_inputs=prepared, topology=topology,
                            pilot_log=args.output_dir / 'pilot_metrics.jsonl')
     trainer.evaluation_temperature = evaluation_temperature
     trainer.world_model.flow_projector.__class__ = SparseGraphCodec
     trainer.world_model.flow_projector.register_buffer('sparse_adjacency',
         trainer._tensor(topology.network.adjacency).to_sparse().coalesce(), persistent=False)
-    if decoder_migration is not None or budget_migration is not None:
+    if profile_migration is not None or decoder_migration is not None or budget_migration is not None:
         continued = load_checkpoint(output_dir=args.output_dir,
             expected_config_fingerprint=config.semantic_fingerprint, expected_input_hash=input_hash)
         trainer.load_state_dict(continued.training_state)
