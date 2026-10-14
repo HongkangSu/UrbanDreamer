@@ -1,0 +1,487 @@
+{
+  "status": "complete",
+  "experiment": "Frozen completed-pretrain diagnostic separating coarse source shift and coarse reference conditioning",
+  "checkpoint_sha256": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+  "completed_pretrain_wm_updates": 49636,
+  "protocol": {
+    "arms": {
+      "native": {
+        "reference_on": true,
+        "source_on": true
+      },
+      "reference_only": {
+        "reference_on": true,
+        "source_on": false
+      },
+      "source_only": {
+        "reference_on": false,
+        "source_on": true
+      },
+      "zero_mean": {
+        "reference_on": false,
+        "source_on": false
+      }
+    },
+    "bootstrap": "2000pairedwhole demandgroups; fixedsame32states16groups; one frozencheckpoint uncertaintyonly",
+    "bootstrap_seed": 20261019,
+    "cached_diagonals": [
+      "native",
+      "zero_mean"
+    ],
+    "caveats": [
+      "Mechanism inferenceintervention on oldcompletedFM, notretraining orpolicynecessity proof.",
+      "Source/reference effects mayinteract; reportallmetrics, noassumptionnativealwaysworse.",
+      "Development SUMO replay onrealcitynetwork; notexternaltest orfield sensor traffic."
+    ],
+    "checkpoint_sha256": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+    "conditions": 32,
+    "contrasts": [
+      "source_effect_reference_off",
+      "source_effect_reference_on",
+      "reference_effect_source_off",
+      "reference_effect_source_on",
+      "joint_effect",
+      "source_only_vs_zero",
+      "reference_only_vs_zero",
+      "interaction_E11-E10-E01+E00"
+    ],
+    "demand_groups": 16,
+    "device": "cuda:0",
+    "execution": "FP32onlinechunks deterministicCUBLAS/TF32off; CPU/BLAS2; noAMP/compile",
+    "gate": "First2bothdiagonals exactcachedbank checks beforeanycross forecasts; originalsource noise bitexact",
+    "gpu_memory_fraction": 0.03,
+    "horizons": [
+      1
+    ],
+    "increment": "ORIGINAL action-conditioned native b(z,A), allweights unchanged; not state-only background",
+    "metrics": "count/speed MAE/pooledRMSE,CRPS/EnergyScore,90%coverage/width,totalcount,actualtarget occupiedmask",
+    "new_diagonal_predictions_only_for_reproducibility_gate": true,
+    "new_forecasts": [
+      "source_only",
+      "reference_only"
+    ],
+    "point_metrics": "mean of decoded8draws; probabilitymetrics useALL8",
+    "preservation": "Native prior modules unchanged; temporary prior_start restored original instanceattribute presence evenonexception",
+    "reference": "reference_proj(z+b ifreference_on elsez); referenceoff iscurrentstate, notNone/zeros",
+    "reference_hashes": {
+      "cache_manifest": "5937f92c0b3d99592ea1695188db89c9422c319869b67dd2db047c9446f1de53",
+      "cached_banks": "1b17d7b2928d5f6456d4bbe902e34c99d727a181f56cf2ad04f09fe27b1eeb58",
+      "cached_summary": "d0a79d5218334109cbfeca04b73e76cc7d832b0dd17bed54b381190539886c05",
+      "checkpoint": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+      "conditions": "3ccabb2cef301edae36a434edc8770190ec6c4ff69fc645ac35ea9adfdb318a7",
+      "scales": "c3c41f4ca3b2dfd34aa1fc13e76cafed16580cafc508308ef16eb9bb252fa52d"
+    },
+    "sample_chunk": 4,
+    "samples": 8,
+    "source": "z+(b ifsource_on else0)+sameoriginalU16Gaussiannoise",
+    "status": "prespecified_before_scores",
+    "steps": 100,
+    "target": "Productionaligned HYBRIDCt nextcount andRAWnext/followingmean speed; FULLfactualstate/actions/events",
+    "training_performed": false
+  },
+  "runtime_seconds": 251.69062089920044,
+  "peak_gpu_allocated_mib": 178.1435546875,
+  "training_performed": false,
+  "new_forecast_arms": 2,
+  "cached_forecast_arms": 2,
+  "eval_conditions": 32,
+  "eval_demand_groups": 16,
+  "solver_steps": 100,
+  "draws_per_condition": 8,
+  "prior_scope": "Original completed checkpoint action-conditioned hard rank16 prior; not the newer state-only background head",
+  "conclusions_zh": [
+    "新增两个拆分版本均显著劣于一起保留粗预测和一起去掉粗预测；未找到单独使用粗预测信息的整体优势。",
+    "粗预测对起始样本和参考状态的作用有很强的交互，拆开只改一处导致明显退化。",
+    "当前模型对采样起点与参考中心一致性敏感；同时去掉两处粗预测仍保持这一一致性，所以拆分版本退化不能作为粗预测必要性的证据。",
+    "完整粗预测相比无粗预测：有车道路数量MAE改善约1.4%，该口径速度MAE和Energy Score差异区间跨零；全路网数量及速度MAE改善约3.5%及1.9%，差异区间均不跨零。",
+    "完整粗预测的总车辆数绝对误差为18.48，无粗预测为14.29；前者高4.19，配对区间[2.19,6.69]。局部点精度收益与全网总量误差存在权衡，整体必要性未建立。",
+    "这些是固定预训练模型上的单步推理干预，不能证明充分重训后的prior架构普遍无用或证明路由策略收益。"
+  ],
+  "arms": [
+    {
+      "arm": "native",
+      "states": 32,
+      "metrics": {
+        "count_mae_occupied": 0.6487913702406778,
+        "speed_mae_occupied": 0.9884472535299724,
+        "energy_score": 9.618728763206423,
+        "count_crps_occupied": 0.5599795059020128,
+        "speed_crps_occupied": 0.9050197080484477,
+        "count_coverage90_occupied": 0.3497425156398399,
+        "speed_coverage90_occupied": 0.38680144425486085,
+        "count_mae_all": 0.14182190394918961,
+        "speed_mae_all": 0.3112791545463839,
+        "total_count_absolute_error": 18.48048333031134
+      }
+    },
+    {
+      "arm": "reference_only",
+      "states": 32,
+      "metrics": {
+        "count_mae_occupied": 1.327074111485357,
+        "speed_mae_occupied": 1.9340780496590544,
+        "energy_score": 23.165837493442606,
+        "count_crps_occupied": 1.236361733684388,
+        "speed_crps_occupied": 1.8110955668258817,
+        "count_coverage90_occupied": 0.14733167019001747,
+        "speed_coverage90_occupied": 0.27827755928495246,
+        "count_mae_all": 0.47539922224468684,
+        "speed_mae_all": 0.9029065461973146,
+        "total_count_absolute_error": 121.2719754552044
+      }
+    },
+    {
+      "arm": "source_only",
+      "states": 32,
+      "metrics": {
+        "count_mae_occupied": 1.3519326424575113,
+        "speed_mae_occupied": 1.9039423343644977,
+        "energy_score": 23.09966977170666,
+        "count_crps_occupied": 1.264467756068892,
+        "speed_crps_occupied": 1.7696620333403867,
+        "count_coverage90_occupied": 0.14498781255755944,
+        "speed_coverage90_occupied": 0.24820153381796517,
+        "count_mae_all": 0.4547692129835081,
+        "speed_mae_all": 0.8472264608365001,
+        "total_count_absolute_error": 78.61396988395649
+      }
+    },
+    {
+      "arm": "zero_mean",
+      "states": 32,
+      "metrics": {
+        "count_mae_occupied": 0.6581064412565558,
+        "speed_mae_occupied": 0.997155977623284,
+        "energy_score": 9.555207108872303,
+        "count_crps_occupied": 0.5627288078901493,
+        "speed_crps_occupied": 0.9086738725594117,
+        "count_coverage90_occupied": 0.351728279074797,
+        "speed_coverage90_occupied": 0.3994925837778038,
+        "count_mae_all": 0.14703925320887729,
+        "speed_mae_all": 0.3173582795808617,
+        "total_count_absolute_error": 14.29216354781638
+      }
+    }
+  ],
+  "mechanism_contrasts": [
+    {
+      "arm": "source_only",
+      "label": "source_effect_reference_off",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.760308582679339,
+          "ci_low": 0.6298790272888664,
+          "demand_groups": 16,
+          "estimate": 0.6938262012009556
+        },
+        "speed_mae_occupied": {
+          "ci_high": 1.0456301086625346,
+          "ci_low": 0.7807517473152992,
+          "demand_groups": 16,
+          "estimate": 0.9067863567412138
+        },
+        "energy_score": {
+          "ci_high": 17.3914496404239,
+          "ci_low": 9.825066786061061,
+          "demand_groups": 16,
+          "estimate": 13.544462662834357
+        },
+        "count_mae_all": {
+          "ci_high": 0.4039553604803575,
+          "ci_low": 0.21630277235034973,
+          "demand_groups": 16,
+          "estimate": 0.3077299597746308
+        },
+        "speed_mae_all": {
+          "ci_high": 0.6569850605530816,
+          "ci_low": 0.4150593239537174,
+          "demand_groups": 16,
+          "estimate": 0.5298681812556385
+        },
+        "total_count_absolute_error": {
+          "ci_high": 89.35296609129895,
+          "ci_low": 43.631580614588906,
+          "demand_groups": 16,
+          "estimate": 64.3218063361401
+        }
+      },
+      "reference": "zero_mean"
+    },
+    {
+      "arm": "native",
+      "label": "source_effect_reference_on",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": -0.5982976418945092,
+          "ci_low": -0.7613995420818602,
+          "demand_groups": 16,
+          "estimate": -0.6782827412446792
+        },
+        "speed_mae_occupied": {
+          "ci_high": -0.7970638645778617,
+          "ci_low": -1.0817333699571665,
+          "demand_groups": 16,
+          "estimate": -0.9456307961290822
+        },
+        "energy_score": {
+          "ci_high": -10.569799054748065,
+          "ci_low": -16.47292772805458,
+          "demand_groups": 16,
+          "estimate": -13.54710873023618
+        },
+        "count_mae_all": {
+          "ci_high": -0.23584927527847283,
+          "ci_low": -0.4338704923465033,
+          "demand_groups": 16,
+          "estimate": -0.33357731829549725
+        },
+        "speed_mae_all": {
+          "ci_high": -0.4554678997785122,
+          "ci_low": -0.7252728588071625,
+          "demand_groups": 16,
+          "estimate": -0.5916273916509307
+        },
+        "total_count_absolute_error": {
+          "ci_high": -72.3732538086018,
+          "ci_low": -135.8374670508862,
+          "demand_groups": 16,
+          "estimate": -102.79149212489305
+        }
+      },
+      "reference": "reference_only"
+    },
+    {
+      "arm": "reference_only",
+      "label": "reference_effect_source_off",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.7525756974730712,
+          "ci_low": 0.5886364137492288,
+          "demand_groups": 16,
+          "estimate": 0.6689676702288012
+        },
+        "speed_mae_occupied": {
+          "ci_high": 1.078708309456904,
+          "ci_low": 0.7833110920350465,
+          "demand_groups": 16,
+          "estimate": 0.9369220720357705
+        },
+        "energy_score": {
+          "ci_high": 16.585766148083163,
+          "ci_low": 10.611242301777882,
+          "demand_groups": 16,
+          "estimate": 13.610630384570303
+        },
+        "count_mae_all": {
+          "ci_high": 0.4271927652526235,
+          "ci_low": 0.2325223788320987,
+          "demand_groups": 16,
+          "estimate": 0.32835996903580955
+        },
+        "speed_mae_all": {
+          "ci_high": 0.7177368765534301,
+          "ci_low": 0.44895299324758114,
+          "demand_groups": 16,
+          "estimate": 0.585548266616453
+        },
+        "total_count_absolute_error": {
+          "ci_high": 141.36385568552058,
+          "ci_low": 75.2552458139368,
+          "demand_groups": 16,
+          "estimate": 106.97981190738803
+        }
+      },
+      "reference": "zero_mean"
+    },
+    {
+      "arm": "native",
+      "label": "reference_effect_source_on",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": -0.6373242129378699,
+          "ci_low": -0.7705023136428819,
+          "demand_groups": 16,
+          "estimate": -0.7031412722168335
+        },
+        "speed_mae_occupied": {
+          "ci_high": -0.7930148911915532,
+          "ci_low": -1.0485898926974098,
+          "demand_groups": 16,
+          "estimate": -0.9154950808345252
+        },
+        "energy_score": {
+          "ci_high": -9.806035032708955,
+          "ci_low": -17.244176982605467,
+          "demand_groups": 16,
+          "estimate": -13.480941008500237
+        },
+        "count_mae_all": {
+          "ci_high": -0.2192287302379148,
+          "ci_low": -0.4109966892926105,
+          "demand_groups": 16,
+          "estimate": -0.31294730903431844
+        },
+        "speed_mae_all": {
+          "ci_high": -0.4199194317688136,
+          "ci_low": -0.664567191907777,
+          "demand_groups": 16,
+          "estimate": -0.5359473062901163
+        },
+        "total_count_absolute_error": {
+          "ci_high": -40.44658303708535,
+          "ci_low": -84.87695994683644,
+          "demand_groups": 16,
+          "estimate": -60.13348655364514
+        }
+      },
+      "reference": "source_only"
+    },
+    {
+      "arm": "native",
+      "label": "joint_effect",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": -0.0033196114080810816,
+          "ci_low": -0.015251351006315651,
+          "demand_groups": 16,
+          "estimate": -0.009315071015877929
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.0027303031822654795,
+          "ci_low": -0.019709103688777662,
+          "demand_groups": 16,
+          "estimate": -0.008708724093311538
+        },
+        "energy_score": {
+          "ci_high": 0.14837786513456272,
+          "ci_low": -0.024051780701388515,
+          "demand_groups": 16,
+          "estimate": 0.06352165433412016
+        },
+        "count_mae_all": {
+          "ci_high": -0.003183337351646305,
+          "ci_low": -0.007517955842074605,
+          "demand_groups": 16,
+          "estimate": -0.00521734925968767
+        },
+        "speed_mae_all": {
+          "ci_high": -0.0030927058449639003,
+          "ci_low": -0.009436751812551339,
+          "demand_groups": 16,
+          "estimate": -0.006079125034477823
+        },
+        "total_count_absolute_error": {
+          "ci_high": 6.685853268043513,
+          "ci_low": 2.188011590179935,
+          "demand_groups": 16,
+          "estimate": 4.18831978249496
+        }
+      },
+      "reference": "zero_mean"
+    },
+    {
+      "label": "interaction_E11_minus_E10_minus_E01_plus_E00",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": -1.244186665767173,
+          "ci_low": -1.5013967146912701,
+          "demand_groups": 16,
+          "estimate": -1.3721089424456347
+        },
+        "speed_mae_occupied": {
+          "ci_high": -1.6081090115365124,
+          "ci_low": -2.092934109933427,
+          "demand_groups": 16,
+          "estimate": -1.852417152870296
+        },
+        "energy_score": {
+          "ci_high": -20.605932459844446,
+          "ci_low": -33.62046967885602,
+          "demand_groups": 16,
+          "estimate": -27.091571393070538
+        },
+        "count_mae_all": {
+          "ci_high": -0.4505300403748722,
+          "ci_low": -0.8404851489119491,
+          "demand_groups": 16,
+          "estimate": -0.641307278070128
+        },
+        "speed_mae_all": {
+          "ci_high": -0.8786698209174693,
+          "ci_low": -1.369701389903245,
+          "demand_groups": 16,
+          "estimate": -1.1214955729065692
+        },
+        "total_count_absolute_error": {
+          "ci_high": -120.8550867589732,
+          "ci_low": -216.11152957963134,
+          "demand_groups": 16,
+          "estimate": -167.11329846103314
+        }
+      }
+    }
+  ],
+  "scale_diagnostic": {
+    "status": "descriptive_posthoc_diagnostic",
+    "conditions": 32,
+    "median_increment_to_noise_norm": 1.893094360108869,
+    "min_increment_to_noise_norm": 0.6988444856853268,
+    "max_increment_to_noise_norm": 2.6802426254028293,
+    "median_increment_relative_to_current": 0.025728311389684677,
+    "median_reference_token_relative_change": 0.032428836449980736,
+    "interpretation": "Crossed initial source minus reference center is epsilon plus or minus b; diagonals retain epsilon. This scale comparison is descriptive and is not evidence of prior necessity."
+  },
+  "verification": {
+    "status": "pass",
+    "rows": 128,
+    "independent_metric_checks": 2176,
+    "independent_summary_checks": 408,
+    "independent_contrast_checks": 720
+  },
+  "diagonal_gates": {
+    "checked": 4,
+    "all_bit_identical": true
+  },
+  "preservation": {
+    "parameters_unchanged": true,
+    "method_restored": true,
+    "source_unchanged": true,
+    "checkpoint_unchanged": true,
+    "data_unchanged": true,
+    "noise_unchanged": true
+  },
+  "limitations": [
+    "Frozen crossed source/reference conditions differ from the matched source/reference conditions used in training.",
+    "Original action-conditioned native prior is evaluated; no causal zero-action or state-only-background claim.",
+    "One checkpoint, development SUMO replay on one real-city network,16demandgroups; no new training seeds, multi-step forecast or policy result.",
+    "Small per-road MAE gains coexist with greater network-total count error and no established Energy Score gain; no system routing-cost improvement was measured.",
+    "The source/reference scale diagnostic was derived after forecasts as a descriptive mechanism check, not a prespecified superiority test."
+  ],
+  "changed_files": [
+    "tools/evaluate_prior_source_reference.py",
+    "tests/test_prior_source_reference.py",
+    "docs/prior_source_reference_20261014.json"
+  ],
+  "simplification": "Reuse both completed diagonal sample banks; evaluate only crossed conditions through a temporary prior_start override. No model-core edits, training, dependencies or changes to ongoing jobs.",
+  "artifact_hashes": {
+    "outputs/prior_source_reference_20261014/v1/protocol.json": "1e764b0861113d274d35b4d877e774cdb3cb823ea0c8dcabc9cd02bc35632a06",
+    "outputs/prior_source_reference_20261014/v1/source_manifest.json": "d0c5d41e8b01662a8c6109580990f60923fc906863356f99eb8c59d248c38874",
+    "outputs/prior_source_reference_20261014/v1/conditions.json": "3ccabb2cef301edae36a434edc8770190ec6c4ff69fc645ac35ea9adfdb318a7",
+    "outputs/prior_source_reference_20261014/v1/bank_manifest.json": "58f9fbe45a739d67270bd841ad9d29453a06612cba0d9bfad1d442d0e772137d",
+    "outputs/prior_source_reference_20261014/v1/diagonal_gate.json": "163a51650166635074a20e1f23f6db09b492ec835ae84bc09c243d8e34072d9b",
+    "outputs/prior_source_reference_20261014/v1/increment_diagnostics.json": "1f2f90443b948a79f210c4ab6e49355599e46cb0cb31fe02909eee7f10cfe2fc",
+    "outputs/prior_source_reference_20261014/v1/summary.json": "a317d2c0035953d4a954438b6a645db9f3be9d19704f2b1d105d4952e30389d4",
+    "outputs/prior_source_reference_20261014/v1/states.jsonl": "f67d362c53bdf41428f9cc0c59f1189b57184655cf0e739f8d42abac9b2ec130",
+    "outputs/prior_source_reference_20261014/v1/independent_arithmetic_verification.json": "c488bb4f4e7bc07cf49769151e80b424b08513725c0f814a1bd34cea08e90319",
+    "outputs/prior_source_reference_20261014/v1/source_reference_scale_diagnostic.json": "5f133739b488d1b209df3e965c07ab25f56abb068658235719b92ec6b67beb96"
+  },
+  "independent_verifier": "tmp/verify_prior_source_reference_20261014.py",
+  "validation": [
+    "58focusedtests passed3.68s",
+    "py_compile passed for tool andtests",
+    "Allfour source/reference formulas andnoise exact percondition",
+    "Bothcached diagonal arms reproduced exactly on firsttwo states beforecrossscores",
+    "128rows/2176independent decoded metrics/408summaryCI/720contrastCIchecks",
+    "Originalcheckpoint and240frozen sourcefile hashes unchanged; live tool equals run source"
+  ]
+}
