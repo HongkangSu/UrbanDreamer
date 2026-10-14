@@ -1,0 +1,612 @@
+{
+  "status": "complete",
+  "experiment": "Low-budget completed-pretrain FM final-head adaptation with matched state-only hard and soft background priors",
+  "checkpoint_sha256": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+  "completed_pretrain_wm_updates": 49636,
+  "protocol": {
+    "FM_backbone_training_updated": false,
+    "bootstrap_seed": 20261018,
+    "budget_choice": "Twofixedt upfront for ALL4priors afteruserrequestedsoftarms; all768realwindowsretained,1536augmentations/prior; noquality-based time/ridge tuning",
+    "caveats": [
+      "Lowbudgetcoupled lastlayer calibration of oldfrozenFM, not fullyretrainedarchitecture.",
+      "Finitefeature augmentation/64groups; closedformconvergence is onlyforchosenlinearhead, notfullFM optimization.",
+      "One checkpoint, eightvalidationdemandgroups, developmentreplay, nopolicyorexternaltestclaim."
+    ],
+    "checkpoint_sha256": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+    "comparisons": [
+      "unchangednative",
+      "old_hard_r16",
+      "old_hard_r64",
+      "old_soft_tau0.1",
+      "old_soft_tau10",
+      "adapt_hard_r16",
+      "adapt_hard_r64",
+      "adapt_soft_tau0.1",
+      "adapt_soft_tau10"
+    ],
+    "device": "cuda:0",
+    "eval": "H1Euler100K8FP32online, FULL observedinitialstate/FULL factualactions includingbirthactions, HYBRIDCtcount/RAWfollowingmean speed",
+    "feature": "temporary flow_head forward_pre_hook underno_grad; final256D transformer features, originalflowhead retainedduring extraction",
+    "gate": "first2nativeoldhead+samepriors reproducibleagainstcachedsame-profilebanks, strictnoise/body equalitybeforeadaptedscores",
+    "gpu_memory_fraction": 0.03,
+    "interpolation": "x_t=(1-t)start+t target",
+    "main_eval_conditions": 16,
+    "main_eval_demand_groups": 8,
+    "no_SGD": true,
+    "objective": "F64anchoredridge ||HW-Y||²+lambda||W-W0||²; lambda=1e-4traceGram/257, bias anchored, notunedusingvalidation",
+    "only_fitted": "flow_head weight256x64+bias64=16448parameters; codec/prior/actionencoder/transformer/referenceproj frozen",
+    "primary_pairs": [
+      "eachadapted-sameprioroldhead",
+      "adaptedhard64-adaptedhard16",
+      "adaptedsoft.1-adaptedsoft10"
+    ],
+    "prior_families": [
+      "hard_r16",
+      "hard_r64",
+      "soft_tau0.1",
+      "soft_tau10"
+    ],
+    "reference_hashes": {
+      "basis": "a34391d005d5b25160f923dae964d2d4b80d11f2017c52633810ad87e9cc72a2",
+      "cache_manifest": "5937f92c0b3d99592ea1695188db89c9422c319869b67dd2db047c9446f1de53",
+      "cached_banks": "f4b0ae6d28259c50f80d0d24977f109f54e981297736b617050aac1dc3e62f84",
+      "checkpoint": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+      "conditions": "3ccabb2cef301edae36a434edc8770190ec6c4ff69fc645ac35ea9adfdb318a7",
+      "prior_heads": "85e586855b007febec5f46740ad3df1540265935bf3f4f9745e92f13ffcf28fc",
+      "scale_reference": "c3c41f4ca3b2dfd34aa1fc13e76cafed16580cafc508308ef16eb9bb252fa52d",
+      "soft_old_banks": "1b17d7b2928d5f6456d4bbe902e34c99d727a181f56cf2ad04f09fe27b1eeb58",
+      "soft_old_conditions": "3ccabb2cef301edae36a434edc8770190ec6c4ff69fc645ac35ea9adfdb318a7",
+      "soft_strong_head": "1316213bb38f582a3a84d7f84a5fbfe7ec9d2ebd55395d5f4a96402e2ad0e199",
+      "soft_weak_head": "9d2e128f9830b6167668cdb37de98cd43c4380ad535c3f55248cdcc6a17b2c11",
+      "train_selection": "5cd68618387e9989d96974555e75927848c7e98b2799ec170ca5371d0219dfe4"
+    },
+    "sample_chunk": 4,
+    "solver": "W=W0+(G+lambdaI)^-1(C-GW0), exactconvex optimum of frozen featureproblem; notfulljointtraining",
+    "source": "z+b_state_prior+originalnoise16; HYBRIDCt encodedtarget",
+    "source_coefficients": "paired CPUstable_seed(seed,traincache,start,time) across ALL4matchedHYBRIDpriors",
+    "state_training_updated": false,
+    "status": "prespecified_before_features_or_fit",
+    "threads": 2,
+    "times": [
+      0.25,
+      0.75
+    ],
+    "train_groups": 64,
+    "train_windows": 768,
+    "velocity_target": "target-start"
+  },
+  "runtime_seconds": 359.41433238983154,
+  "peak_gpu_allocated_mib": 364.8955078125,
+  "trainable_coefficients_per_variant": 16448,
+  "training_windows_per_variant": 768,
+  "augmented_windows_per_variant": 1536,
+  "train_groups": 64,
+  "eval_conditions": 16,
+  "eval_demand_groups": 8,
+  "solver_steps": 100,
+  "decoded_draws_per_condition": 8,
+  "conclusions_zh": [
+    "在相同输出层适配后，硬滤波rank16在占用道路点预测和联合Energy Score上优于rank64、软tau0.1及软tau10。",
+    "强软滤波tau10接近硬rank64；其相对rank64的速度误差和Energy Score差异区间跨零，不能宣称整体优于rank64。",
+    "弱软滤波tau0.1在点误差、CRPS和Energy Score上明显落后，低成本末层适配未解决该差距。",
+    "同一先验的末层适配改善部分速度误差，但rank64和两个软滤波的车辆数误差上升；所有同先验前后Energy Score差异区间跨零，未建立整体概率质量收益。",
+    "保留原已完成预训练模型，不据此替换主实验模型，不追加全量联合训练或调参网格。"
+  ],
+  "arms": [
+    {
+      "arm": "adapt_hard_r16",
+      "states": 16,
+      "metrics": {
+        "count_mae_occupied": 0.6177750833363992,
+        "speed_mae_occupied": 0.8546570921460528,
+        "energy_score": 10.36730968545113,
+        "count_crps_occupied": 0.5248972858180951,
+        "speed_crps_occupied": 0.7731632201147172,
+        "count_coverage90_occupied": 0.3862155612895861,
+        "speed_coverage90_occupied": 0.4583802053375167
+      }
+    },
+    {
+      "arm": "adapt_hard_r64",
+      "states": 16,
+      "metrics": {
+        "count_mae_occupied": 0.6577252303714369,
+        "speed_mae_occupied": 0.8762433317856115,
+        "energy_score": 10.658121306873905,
+        "count_crps_occupied": 0.5594534255392396,
+        "speed_crps_occupied": 0.7844823559390632,
+        "count_coverage90_occupied": 0.37302560308239696,
+        "speed_coverage90_occupied": 0.4487674762086378
+      }
+    },
+    {
+      "arm": "adapt_soft_tau0.1",
+      "states": 16,
+      "metrics": {
+        "count_mae_occupied": 1.0107151683389612,
+        "speed_mae_occupied": 1.265406214800917,
+        "energy_score": 14.612684365375364,
+        "count_crps_occupied": 0.9003317329511197,
+        "speed_crps_occupied": 1.1346456167476022,
+        "count_coverage90_occupied": 0.28684399031170416,
+        "speed_coverage90_occupied": 0.4232750201062263
+      }
+    },
+    {
+      "arm": "adapt_soft_tau10",
+      "states": 16,
+      "metrics": {
+        "count_mae_occupied": 0.6459399588404425,
+        "speed_mae_occupied": 0.8786800942554323,
+        "energy_score": 10.596300289193954,
+        "count_crps_occupied": 0.5506647757460281,
+        "speed_crps_occupied": 0.791895314637542,
+        "count_coverage90_occupied": 0.3949691615258464,
+        "speed_coverage90_occupied": 0.45608839089143643
+      }
+    },
+    {
+      "arm": "native",
+      "states": 16,
+      "metrics": {
+        "count_mae_occupied": 0.611276748584466,
+        "speed_mae_occupied": 0.8574480253490686,
+        "energy_score": 10.443199949591522,
+        "count_crps_occupied": 0.5230954666110577,
+        "speed_crps_occupied": 0.7794650599445481,
+        "count_coverage90_occupied": 0.35679921698419437,
+        "speed_coverage90_occupied": 0.41306269443396837
+      }
+    },
+    {
+      "arm": "old_hard_r16",
+      "states": 16,
+      "metrics": {
+        "count_mae_occupied": 0.6135062443766708,
+        "speed_mae_occupied": 0.8603810785214203,
+        "energy_score": 10.375605072531927,
+        "count_crps_occupied": 0.5229115607218349,
+        "speed_crps_occupied": 0.7782653333868832,
+        "count_coverage90_occupied": 0.37080345717193064,
+        "speed_coverage90_occupied": 0.42824597948928084
+      }
+    },
+    {
+      "arm": "old_hard_r64",
+      "states": 16,
+      "metrics": {
+        "count_mae_occupied": 0.6302948706508611,
+        "speed_mae_occupied": 0.8916184293021627,
+        "energy_score": 10.615618227556714,
+        "count_crps_occupied": 0.5388797617061629,
+        "speed_crps_occupied": 0.8025218971498794,
+        "count_coverage90_occupied": 0.37086821892861244,
+        "speed_coverage90_occupied": 0.4228990548627263
+      }
+    },
+    {
+      "arm": "old_soft_tau0.1",
+      "states": 16,
+      "metrics": {
+        "count_mae_occupied": 0.9590682716751111,
+        "speed_mae_occupied": 1.305859161720864,
+        "energy_score": 14.652713377348686,
+        "count_crps_occupied": 0.858918500327873,
+        "speed_crps_occupied": 1.182647216888323,
+        "count_coverage90_occupied": 0.2907902305567003,
+        "speed_coverage90_occupied": 0.38370927738981464
+      }
+    },
+    {
+      "arm": "old_soft_tau10",
+      "states": 16,
+      "metrics": {
+        "count_mae_occupied": 0.6293906624575238,
+        "speed_mae_occupied": 0.9056900852489027,
+        "energy_score": 10.65067907830628,
+        "count_crps_occupied": 0.53871814998747,
+        "speed_crps_occupied": 0.8202185554106383,
+        "count_coverage90_occupied": 0.37651455459125727,
+        "speed_coverage90_occupied": 0.41443688005717544
+      }
+    }
+  ],
+  "same_prior_and_rank_pairs": [
+    {
+      "arm": "adapt_hard_r16",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.010737472617807905,
+          "ci_low": -0.0015057947081380738,
+          "demand_groups": 8,
+          "estimate": 0.004268838959728398
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.0024243193627324355,
+          "ci_low": -0.01301644673897859,
+          "demand_groups": 8,
+          "estimate": -0.0057239863753675915
+        },
+        "energy_score": {
+          "ci_high": 0.08661906236945069,
+          "ci_low": -0.08517888859872043,
+          "demand_groups": 8,
+          "estimate": -0.008295387080796801
+        }
+      },
+      "reference": "old_hard_r16",
+      "states": 16
+    },
+    {
+      "arm": "adapt_hard_r64",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.037279434763683825,
+          "ci_low": 0.017442287454837373,
+          "demand_groups": 8,
+          "estimate": 0.02743035972057585
+        },
+        "speed_mae_occupied": {
+          "ci_high": -0.004636572974965026,
+          "ci_low": -0.025615228127270823,
+          "demand_groups": 8,
+          "estimate": -0.01537509751655123
+        },
+        "energy_score": {
+          "ci_high": 0.18479277738847866,
+          "ci_low": -0.0822043761522929,
+          "demand_groups": 8,
+          "estimate": 0.042503079317190606
+        }
+      },
+      "reference": "old_hard_r64",
+      "states": 16
+    },
+    {
+      "arm": "adapt_soft_tau0.1",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.07295926406658078,
+          "ci_low": 0.02959966458708123,
+          "demand_groups": 8,
+          "estimate": 0.05164689666385018
+        },
+        "speed_mae_occupied": {
+          "ci_high": -0.025112596259886703,
+          "ci_low": -0.056073357356636766,
+          "demand_groups": 8,
+          "estimate": -0.04045294691994679
+        },
+        "energy_score": {
+          "ci_high": 0.3706423855818474,
+          "ci_low": -0.515917628698822,
+          "demand_groups": 8,
+          "estimate": -0.04002901197332409
+        }
+      },
+      "reference": "old_soft_tau0.1",
+      "states": 16
+    },
+    {
+      "arm": "adapt_soft_tau10",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.02222635912491769,
+          "ci_low": 0.011087261917382725,
+          "demand_groups": 8,
+          "estimate": 0.016549296382918736
+        },
+        "speed_mae_occupied": {
+          "ci_high": -0.017119352151179615,
+          "ci_low": -0.03756763440564312,
+          "demand_groups": 8,
+          "estimate": -0.02700999099347043
+        },
+        "energy_score": {
+          "ci_high": 0.06841731177145469,
+          "ci_low": -0.19604038617042163,
+          "demand_groups": 8,
+          "estimate": -0.05437878911232724
+        }
+      },
+      "reference": "old_soft_tau10",
+      "states": 16
+    },
+    {
+      "arm": "adapt_hard_r64",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.05194990719624603,
+          "ci_low": 0.026329605906454043,
+          "demand_groups": 8,
+          "estimate": 0.039950147035037756
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.030917323468609866,
+          "ci_low": 0.012601693277677442,
+          "demand_groups": 8,
+          "estimate": 0.02158623963955869
+        },
+        "energy_score": {
+          "ci_high": 0.4864572156612227,
+          "ci_low": 0.11526462997630217,
+          "demand_groups": 8,
+          "estimate": 0.2908116214227748
+        }
+      },
+      "reference": "adapt_hard_r16",
+      "states": 16
+    },
+    {
+      "arm": "adapt_soft_tau0.1",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.3914180205399358,
+          "ci_low": 0.32562799194300696,
+          "demand_groups": 8,
+          "estimate": 0.3647752094985186
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.47081104669649637,
+          "ci_low": 0.2891540826096552,
+          "demand_groups": 8,
+          "estimate": 0.3867261205454848
+        },
+        "energy_score": {
+          "ci_high": 5.2449110720063326,
+          "ci_low": 2.784337873556966,
+          "demand_groups": 8,
+          "estimate": 4.016384076181409
+        }
+      },
+      "reference": "adapt_soft_tau10",
+      "states": 16
+    }
+  ],
+  "soft_hard_pairs": [
+    {
+      "arm": "adapt_soft_tau0.1",
+      "reference": "adapt_hard_r16",
+      "states": 16,
+      "metrics": {
+        "count_mae_occupied": {
+          "estimate": 0.39294008500256206,
+          "ci_low": 0.35209726114745854,
+          "ci_high": 0.4215917098533115,
+          "demand_groups": 8
+        },
+        "speed_mae_occupied": {
+          "estimate": 0.4107491226548643,
+          "ci_low": 0.3108151482910437,
+          "ci_high": 0.4993707174626923,
+          "demand_groups": 8
+        },
+        "energy_score": {
+          "estimate": 4.245374679924233,
+          "ci_low": 2.9422044178544606,
+          "ci_high": 5.53726714531794,
+          "demand_groups": 8
+        }
+      }
+    },
+    {
+      "arm": "adapt_soft_tau0.1",
+      "reference": "adapt_hard_r64",
+      "states": 16,
+      "metrics": {
+        "count_mae_occupied": {
+          "estimate": 0.3529899379675243,
+          "ci_low": 0.31872930730535903,
+          "ci_high": 0.3766495920136287,
+          "demand_groups": 8
+        },
+        "speed_mae_occupied": {
+          "estimate": 0.3891628830153056,
+          "ci_low": 0.2859134715156838,
+          "ci_high": 0.4820235772889618,
+          "demand_groups": 8
+        },
+        "energy_score": {
+          "estimate": 3.9545630585014586,
+          "ci_low": 2.7367691089904285,
+          "ci_high": 5.118427689221435,
+          "demand_groups": 8
+        }
+      }
+    },
+    {
+      "arm": "adapt_soft_tau10",
+      "reference": "adapt_hard_r16",
+      "states": 16,
+      "metrics": {
+        "count_mae_occupied": {
+          "estimate": 0.028164875504043438,
+          "ci_low": 0.022173824009521344,
+          "ci_high": 0.03299686856986694,
+          "demand_groups": 8
+        },
+        "speed_mae_occupied": {
+          "estimate": 0.024023002109379528,
+          "ci_low": 0.014852255807619431,
+          "ci_high": 0.031970610403685984,
+          "demand_groups": 8
+        },
+        "energy_score": {
+          "estimate": 0.22899060374282415,
+          "ci_low": 0.10066241477246599,
+          "ci_high": 0.3561742181472622,
+          "demand_groups": 8
+        }
+      }
+    },
+    {
+      "arm": "adapt_soft_tau10",
+      "reference": "adapt_hard_r64",
+      "states": 16,
+      "metrics": {
+        "count_mae_occupied": {
+          "estimate": -0.011785271530994318,
+          "ci_low": -0.021814794160330764,
+          "ci_high": -4.889963609110707e-05,
+          "demand_groups": 8
+        },
+        "speed_mae_occupied": {
+          "estimate": 0.002436762469820837,
+          "ci_low": -0.01166131228619064,
+          "ci_high": 0.016092028643221935,
+          "demand_groups": 8
+        },
+        "energy_score": {
+          "estimate": -0.06182101767995063,
+          "ci_low": -0.17921471515906984,
+          "ci_high": 0.05425532645387861,
+          "demand_groups": 8
+        }
+      }
+    }
+  ],
+  "fits": {
+    "augmented_windows_per_prior": 1536,
+    "backbone_unchanged": true,
+    "fits": {
+      "hard_r16": {
+        "adapted_train_sse": 15288.714020759333,
+        "anchor_penalty": 2.5959557333313827,
+        "bias_anchored": true,
+        "coefficients_shape": [
+          257,
+          64
+        ],
+        "normal_equation_relative_residual": 5.945991873216356e-16,
+        "original_train_sse": 20043.67905982025,
+        "parameter_relative_l2": 0.32852930128510766,
+        "parameters": 16448,
+        "relative_ridge": 0.0001,
+        "ridge": 59.77100109994063
+      },
+      "hard_r64": {
+        "adapted_train_sse": 18471.92453119345,
+        "anchor_penalty": 8.072976422751614,
+        "bias_anchored": true,
+        "coefficients_shape": [
+          257,
+          64
+        ],
+        "normal_equation_relative_residual": 6.014371577430609e-16,
+        "original_train_sse": 28718.597646413837,
+        "parameter_relative_l2": 0.5810818232061686,
+        "parameters": 16448,
+        "relative_ridge": 0.0001,
+        "ridge": 59.4156114031307
+      },
+      "soft_tau0.1": {
+        "adapted_train_sse": 31846.7339107031,
+        "anchor_penalty": 23.004425226893307,
+        "bias_anchored": true,
+        "coefficients_shape": [
+          257,
+          64
+        ],
+        "normal_equation_relative_residual": 6.36594059330028e-16,
+        "original_train_sse": 91136.55462102313,
+        "parameter_relative_l2": 1.0732531690347928,
+        "parameters": 16448,
+        "relative_ridge": 0.0001,
+        "ridge": 49.630482242270425
+      },
+      "soft_tau10": {
+        "adapted_train_sse": 16110.147879144643,
+        "anchor_penalty": 5.110464145995837,
+        "bias_anchored": true,
+        "coefficients_shape": [
+          257,
+          64
+        ],
+        "normal_equation_relative_residual": 6.797514134991087e-16,
+        "original_train_sse": 23542.913009298034,
+        "parameter_relative_l2": 0.47000447469808637,
+        "parameters": 16448,
+        "relative_ridge": 0.0001,
+        "ridge": 57.49073059855254
+      }
+    },
+    "original_flowhead_unchanged_during_features": true,
+    "training_windows": 768,
+    "used_times": [
+      0.25,
+      0.75
+    ]
+  },
+  "verification": {
+    "status": "pass",
+    "rows": 144,
+    "independent_metric_checks": 2448,
+    "independent_summary_checks": 918,
+    "head_checks": {
+      "hard_r16": {
+        "normal_equation_relative_residual": 5.945991873216356e-16,
+        "original_train_sse": 20043.67905982025,
+        "adapted_train_sse": 15288.714020759333
+      },
+      "hard_r64": {
+        "normal_equation_relative_residual": 6.01437140144263e-16,
+        "original_train_sse": 28718.597646413837,
+        "adapted_train_sse": 18471.92453119345
+      },
+      "soft_tau0.1": {
+        "normal_equation_relative_residual": 6.36594059330028e-16,
+        "original_train_sse": 91136.55462102313,
+        "adapted_train_sse": 31846.7339107031
+      },
+      "soft_tau10": {
+        "normal_equation_relative_residual": 6.797514134845978e-16,
+        "original_train_sse": 23542.913009298034,
+        "adapted_train_sse": 16110.147879144643
+      }
+    }
+  },
+  "old_head_native_gates": {
+    "verified_rows": 10,
+    "all_bit_identical": true
+  },
+  "limitations": [
+    "Only the final affine FM output head was fully solved; the backbone and prior were frozen, so this is not full joint optimization.",
+    "Two fixed flow times approximate the continuous-time training objective.",
+    "One completed checkpoint, development replay, eight evaluation demand groups; no new training-seed replication or downstream policy evaluation.",
+    "The original pretrained native prior is action-conditioned; the four comparison priors are state-only matched HYBRID-Ct heads.",
+    "Soft-versus-hard supplementary contrasts were declared after source freezing but before the first adapted forecast scores; the immutable run source is unchanged."
+  ],
+  "changed_files": [
+    "tools/adapt_fm_output_head.py",
+    "tests/test_adapt_fm_output_head.py",
+    "docs/fm_head_adaptation_20261014.json"
+  ],
+  "simplification": "Reuse completed pretrained backbone and existing prior heads; use one forward-only feature pass and an anchored closed-form final-layer solve, without new dependencies.",
+  "artifact_hashes": {
+    "outputs/fm_head_adaptation_20261014/v1/protocol.json": "fbd279dc593b7d7936e75799f5749f42130d6cc395cc3dd405fa4f6879df924f",
+    "outputs/fm_head_adaptation_20261014/v1/source_manifest.json": "920464a51f716bc62e07713783685c94c09d217b1db3c431e3bccb792bfeb22f",
+    "outputs/fm_head_adaptation_20261014/v1/conditions.json": "6ba5b65130447dded6d70ca80c27d91686c4fb2fc61e4e96a2e35320d25dae44",
+    "outputs/fm_head_adaptation_20261014/v1/fit_diagnostics.json": "047618d70c7ebe9f27668b2ecf74126688d951f9dc48d95a7064a4d46aca1ab2",
+    "outputs/fm_head_adaptation_20261014/v1/heads.npz": "6b0cfce63a5afc2166784e3085d09f6444dcffcf02acd1c81637f8402eaa8e7f",
+    "outputs/fm_head_adaptation_20261014/v1/training_statistics.npz": "e27e1ec4ebfcb3cbe39b344c729e05e51477d0204d1dbfe4c29c4a1ae7da1551",
+    "outputs/fm_head_adaptation_20261014/v1/training_data_audit.json": "92b1edae3199c8d89282c2f17cee4b130cd8ce15f277011a7f76268bf698004f",
+    "outputs/fm_head_adaptation_20261014/v1/old_head_native_gates.json": "b1f52e678bd723cb54bc765004ffd5c9752cfa2642ba788428d164ca466184e5",
+    "outputs/fm_head_adaptation_20261014/v1/bank_manifest.json": "68c44e2ca4819a5d220e3b64037990c900d4bd71c8bdc6c6ca9c3865b63e69df",
+    "outputs/fm_head_adaptation_20261014/v1/summary.json": "f735595205de22a653ee8866f7ace87385b4b3305fed1856ba3e350d128d4e1a",
+    "outputs/fm_head_adaptation_20261014/v1/states.jsonl": "6725c3ebb05ab3419fd50b79439bdb02889dee430f5ee64af73e736a26d6d020",
+    "outputs/fm_head_adaptation_20261014/v1/independent_arithmetic_verification.json": "6445342d4e407da7da59709ba2025ace462726be26040fc460b44582bad5307f",
+    "outputs/fm_head_adaptation_20261014/v1/supplementary_contrasts_protocol.json": "a6f5552a15e73b950fa2e611c9d6dc3234e60320ed7c7b2c1a58596cd52c6bd5",
+    "outputs/fm_head_adaptation_20261014/v1/supplementary_soft_hard_contrasts.json": "4334560b2b32e130bb760bc84fec618416ab67f0a7cc79ae1c082b52cfa5b719"
+  },
+  "reproduction_scripts": [
+    "tmp/verify_fm_head_adaptation_20261014.py",
+    "tmp/summarize_fm_head_soft_contrasts_20261014.py"
+  ],
+  "validation": [
+    "65 focused tests passed (5.04 seconds)",
+    "py_compile passed for new tool and tests",
+    "Independent decoded-bank arithmetic:144 state-arm rows,2448 metric checks,918 group-summary/CI checks",
+    "Independent four fitted-head normal equations and anchored objectives verified",
+    "Original checkpoint/body/noise/source/data unchanged checks passed in frozen evaluator"
+  ]
+}
