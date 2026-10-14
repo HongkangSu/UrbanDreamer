@@ -1,0 +1,479 @@
+{
+  "status": "complete",
+  "experiment": "Equal-budget nonlinear residual adaptation of complete soft-prior FM and zero-mean FM",
+  "checkpoint_sha256": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+  "completed_pretrain_wm_updates": 49636,
+  "protocol": {
+    "arms": [
+      "zero_mean",
+      "weak_soft"
+    ],
+    "cache": "FP32 memmapsH256/Y64, minibatchcopies only, CPU/BLAS2; NOTESTfeatures",
+    "cached_target": "(encodedHYBRIDnext-start)-old_linear_velocity at x_t=(1-t)start+t target; oldbody no_grad pre-flow_head hook",
+    "caveats": [
+      "Onlysmallnewresidualtrained; notfulljointmodelconvergence.",
+      "Max80cap beforepatience=>budgetlimited, no convergenceclaim.",
+      "Testnotopenedforscoring/featuresuntilvalidationselection; oneCP/newheadseed, notpolicy/MARLbenefit."
+    ],
+    "checkpoint_sha256": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+    "device": "cuda:0",
+    "epochs": {
+      "improvement_epsilon": 1e-05,
+      "integrated_validation_every": 5,
+      "maximum": 80,
+      "minimum": 20,
+      "patience_checks": 3,
+      "stop": "BOTHarms3checkswithoutESimprovement, sameactualepochs/updates; independentlybestvalEScheckpoint"
+    },
+    "gate": "first2knownzero/weak+zeroresidual EXACTcachedK8beforeSGD; originalbody/noise/methodchecks",
+    "gpu_memory_fraction": 0.04,
+    "optimizer": {
+      "batch_rows": 32768,
+      "clip_norm": 1,
+      "lr": 0.001,
+      "name": "AdamW",
+      "weight_decay": 0.0001
+    },
+    "optional_h4_gate": "bestweak-bestzero ES AND bothoccupiedCRPS95CIupper<0, totalcountabsoluteerror pointdelta<=0; ifpasses first8FIXEDteststates H4C0autoregressive K8Euler100, no retuning",
+    "original_frozen": "codec/prior/actionencoder/referenceprojection/fullTransformer/originalLinearflowhead",
+    "precision": "FP32noamp/compile",
+    "prior": "weakstate-onlymatchedHYBRIDtau.1 versuszero_mean; sameoriginalnoise16",
+    "reference_hashes": {
+      "basis": "a34391d005d5b25160f923dae964d2d4b80d11f2017c52633810ad87e9cc72a2",
+      "cache_manifest": "65f1891b2e2f06579120cbfde6c996d19834c78b23feb4c84dd4b558b5e109a6",
+      "checkpoint": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+      "known_banks": "1b17d7b2928d5f6456d4bbe902e34c99d727a181f56cf2ad04f09fe27b1eeb58",
+      "known_cache": "5937f92c0b3d99592ea1695188db89c9422c319869b67dd2db047c9446f1de53",
+      "known_conditions": "3ccabb2cef301edae36a434edc8770190ec6c4ff69fc645ac35ea9adfdb318a7",
+      "scales": "c3c41f4ca3b2dfd34aa1fc13e76cafed16580cafc508308ef16eb9bb252fa52d",
+      "split": "707bb000a35acc4b47f1624b1d323d9c3a95a889ad87c231dd510cca574d7534",
+      "split_audit": "e7bee67aebe6eb2e1916775a8f92c22e7e775557959d9e6774a653f553e75c6e",
+      "weak_head": "9d2e128f9830b6167668cdb37de98cd43c4380ad535c3f55248cdcc6a17b2c11"
+    },
+    "references": "weaksource/ref=z+b; zerosource/ref=z; neitherreferenceisNone",
+    "residual": "Linear256128+SiLU+Linear12864,41152params; lastlayerzero; identicalinitseed",
+    "runtime": "cachefirst4groups timing+FULLfirstepoch continuingexactstate; no partialpilotSGD hiddenexposures",
+    "seed": 20261021,
+    "split_counts": {
+      "rollout_validation_groups": 4,
+      "rollout_validation_states": 8,
+      "test_groups": 16,
+      "test_states": 32,
+      "train_groups": 64,
+      "train_windows": 768,
+      "validation_feature_windows": 192,
+      "validation_groups": 16
+    },
+    "status": "prespecified_before_feature_cache_or_training",
+    "test": "oneblindH1 all32freshstates16groups K8Euler100 AFTERselection; originalzero/weakplusbestzero/weak4variants",
+    "times": "4paireduniformstrata eachwindow [j/4,(j+1)/4), stagekey train/validation, sameindependentnoiseperarm",
+    "validation": "epoch0 zeroresidual eligible; featureMSEall16freshgroups monitored; integratedES8fixedstates4groups K4Euler100 epoch0 and eachcheckafter20; minimum20 consumed regardlessselection"
+  },
+  "runtime_seconds": 1295.2619142532349,
+  "peak_gpu_allocated_mib": 358.9736328125,
+  "only_new_parameters_per_arm": 41152,
+  "consumed_epochs_per_arm": 80,
+  "consumed_updates_per_arm": 6400,
+  "selected_best_epochs": {
+    "weak_soft": 80,
+    "zero_mean": 35
+  },
+  "budget_limited": true,
+  "stop_reason": "maximum_epoch_cap",
+  "initial_zero_residual_was_selection_candidate": true,
+  "conclusions_zh": [
+    "匹配生产HYBRID-Ct预测目标的弱软滤波prior在新验证需求组上将潜在增量SSE降低27.4%；可预测背景及粗起点对齐收益得到支持。",
+    "相同非线性适配显著改善弱软prior加FM的完整预测：Energy Score从11.463降至9.516，改善约17%；总车辆数绝对误差从79.48降至24.39。",
+    "同预算无粗预测对照适配后Energy Score为8.213，总车辆数绝对误差13.52，仍显著优于软prior加FM；不能把适配收益归因于prior本身。",
+    "适配后软prior相对无粗预测对照的点误差、CRPS、Energy Score及总量误差配对区间均显示劣化；本轮未建立prior的额外完整生成收益。",
+    "软prior验证成绩在80轮上限仍有小幅改善，因此这是预算受限适配，不能声称所有结构已充分优化或完整联合训练收敛。",
+    "预先规定的四步自回归门槛未通过，未追加H4、超参数搜索或SUMO采样。"
+  ],
+  "source_alignment": {
+    "train": {
+      "prior_normalized_sse": 0.7099124045567415,
+      "skill_vs_zero_delta": 0.29008759544325846,
+      "paired_noisy_source_sse_ratio": 0.7111244654515164
+    },
+    "validation": {
+      "prior_normalized_sse": 0.7259841857620692,
+      "skill_vs_zero_delta": 0.27401581423793075,
+      "paired_noisy_source_sse_ratio": 0.7269898948554323
+    }
+  },
+  "arms": [
+    {
+      "arm": "adapter_soft",
+      "states": 32,
+      "metrics": {
+        "count_mae_all": 0.13574570752940215,
+        "speed_mae_all": 0.31155259578459354,
+        "count_mae_occupied": 0.7748255504793709,
+        "speed_mae_occupied": 1.221800445084503,
+        "energy_score": 9.51551838693296,
+        "count_crps_occupied": 0.6703482889137513,
+        "speed_crps_occupied": 1.0990942474632552,
+        "total_count_absolute_error": 24.38655309883373
+      }
+    },
+    {
+      "arm": "adapter_zero",
+      "states": 32,
+      "metrics": {
+        "count_mae_all": 0.10591498792753552,
+        "speed_mae_all": 0.27595956700131763,
+        "count_mae_occupied": 0.5774226539969693,
+        "speed_mae_occupied": 0.9415540449434285,
+        "energy_score": 8.21292353503793,
+        "count_crps_occupied": 0.4913350529505439,
+        "speed_crps_occupied": 0.8554459933235082,
+        "total_count_absolute_error": 13.518953892837317
+      }
+    },
+    {
+      "arm": "old_soft",
+      "states": 32,
+      "metrics": {
+        "count_mae_all": 0.14720038061950325,
+        "speed_mae_all": 0.34987376128336395,
+        "count_mae_occupied": 0.9488617908413508,
+        "speed_mae_occupied": 1.4808925184801982,
+        "energy_score": 11.462951706919402,
+        "count_crps_occupied": 0.8570210615808094,
+        "speed_crps_occupied": 1.3641675397479807,
+        "total_count_absolute_error": 79.47699337370202
+      }
+    },
+    {
+      "arm": "old_zero",
+      "states": 32,
+      "metrics": {
+        "count_mae_all": 0.10621689739149165,
+        "speed_mae_all": 0.2880467777111522,
+        "count_mae_occupied": 0.5874024197454486,
+        "speed_mae_occupied": 1.001814827132097,
+        "energy_score": 8.318352046681625,
+        "count_crps_occupied": 0.5061373366185455,
+        "speed_crps_occupied": 0.9208318497133825,
+        "total_count_absolute_error": 16.649632740550814
+      }
+    }
+  ],
+  "paired_contrasts": {
+    "prior_effect_after_equal_adapter": {
+      "count_mae_all": {
+        "ci_high": 0.03887624840976382,
+        "ci_low": 0.021776986361522574,
+        "demand_groups": 16,
+        "estimate": 0.02983071960186663
+      },
+      "speed_mae_all": {
+        "ci_high": 0.047618522353313944,
+        "ci_low": 0.025903970426546557,
+        "demand_groups": 16,
+        "estimate": 0.035593028783275915
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.23122235449715423,
+        "ci_low": 0.16732186905636925,
+        "demand_groups": 16,
+        "estimate": 0.1974028964824015
+      },
+      "speed_mae_occupied": {
+        "ci_high": 0.40306671809202876,
+        "ci_low": 0.17917325919871,
+        "demand_groups": 16,
+        "estimate": 0.28024640014107444
+      },
+      "energy_score": {
+        "ci_high": 1.7544435239708325,
+        "ci_low": 0.88616832248974,
+        "demand_groups": 16,
+        "estimate": 1.302594851895031
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.2135769437888056,
+        "ci_low": 0.1486755622126937,
+        "demand_groups": 16,
+        "estimate": 0.1790132359632074
+      },
+      "speed_crps_occupied": {
+        "ci_high": 0.35648857921113375,
+        "ci_low": 0.14996111787269154,
+        "demand_groups": 16,
+        "estimate": 0.24364825413974694
+      },
+      "total_count_absolute_error": {
+        "ci_high": 15.578585569457402,
+        "ci_low": 6.506973915752495,
+        "demand_groups": 16,
+        "estimate": 10.867599205996411
+      }
+    },
+    "prior_effect_before_adapter": {
+      "count_mae_all": {
+        "ci_high": 0.05560893449607609,
+        "ci_low": 0.02804160537216995,
+        "demand_groups": 16,
+        "estimate": 0.040983483228011604
+      },
+      "speed_mae_all": {
+        "ci_high": 0.07277643118395825,
+        "ci_low": 0.051122477215268185,
+        "demand_groups": 16,
+        "estimate": 0.06182698357221168
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.39899977586552265,
+        "ci_low": 0.3222526453253109,
+        "demand_groups": 16,
+        "estimate": 0.3614593710959022
+      },
+      "speed_mae_occupied": {
+        "ci_high": 0.6072042088487838,
+        "ci_low": 0.3570389022204555,
+        "demand_groups": 16,
+        "estimate": 0.4790776913481011
+      },
+      "energy_score": {
+        "ci_high": 3.941239758417811,
+        "ci_low": 2.4104477875788883,
+        "demand_groups": 16,
+        "estimate": 3.1445996602377777
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.3880123473647549,
+        "ci_low": 0.31151128189541893,
+        "demand_groups": 16,
+        "estimate": 0.35088372496226383
+      },
+      "speed_crps_occupied": {
+        "ci_high": 0.5697639419689803,
+        "ci_low": 0.32768584126043665,
+        "demand_groups": 16,
+        "estimate": 0.44333569003459805
+      },
+      "total_count_absolute_error": {
+        "ci_high": 84.36690050467865,
+        "ci_low": 44.51287711191113,
+        "demand_groups": 16,
+        "estimate": 62.8273606331512
+      }
+    },
+    "soft_adapter_effect": {
+      "count_mae_all": {
+        "ci_high": -0.005314884507659843,
+        "ci_low": -0.018032775583376424,
+        "demand_groups": 16,
+        "estimate": -0.011454673090101095
+      },
+      "speed_mae_all": {
+        "ci_high": -0.031165895417625843,
+        "ci_low": -0.04487179848878701,
+        "demand_groups": 16,
+        "estimate": -0.03832116549877037
+      },
+      "count_mae_occupied": {
+        "ci_high": -0.14679625026205836,
+        "ci_low": -0.2010701790803756,
+        "demand_groups": 16,
+        "estimate": -0.17403624036197993
+      },
+      "speed_mae_occupied": {
+        "ci_high": -0.2006960357780254,
+        "ci_low": -0.3180909210933268,
+        "demand_groups": 16,
+        "estimate": -0.2590920733956952
+      },
+      "energy_score": {
+        "ci_high": -1.3074417471238196,
+        "ci_low": -2.610880522613436,
+        "demand_groups": 16,
+        "estimate": -1.9474333199864409
+      },
+      "count_crps_occupied": {
+        "ci_high": -0.16181207039051143,
+        "ci_low": -0.21166746451306923,
+        "demand_groups": 16,
+        "estimate": -0.18667277266705806
+      },
+      "speed_crps_occupied": {
+        "ci_high": -0.20576408622873932,
+        "ci_low": -0.3255148909367096,
+        "demand_groups": 16,
+        "estimate": -0.2650732922847254
+      },
+      "total_count_absolute_error": {
+        "ci_high": -36.42353257585641,
+        "ci_low": -77.3888195148225,
+        "demand_groups": 16,
+        "estimate": -55.09044027486829
+      }
+    },
+    "zero_adapter_effect": {
+      "count_mae_all": {
+        "ci_high": 0.0008036677848400017,
+        "ci_low": -0.001339090769735053,
+        "demand_groups": 16,
+        "estimate": -0.0003019094639561187
+      },
+      "speed_mae_all": {
+        "ci_high": -0.008923259832197697,
+        "ci_low": -0.015565914360612703,
+        "demand_groups": 16,
+        "estimate": -0.012087210709834595
+      },
+      "count_mae_occupied": {
+        "ci_high": -0.0023819778021561045,
+        "ci_low": -0.017552919356117195,
+        "demand_groups": 16,
+        "estimate": -0.009979765748479271
+      },
+      "speed_mae_occupied": {
+        "ci_high": -0.031807841214607564,
+        "ci_low": -0.08842861396728399,
+        "demand_groups": 16,
+        "estimate": -0.060260782188668496
+      },
+      "energy_score": {
+        "ci_high": -0.03984855738867082,
+        "ci_low": -0.17582270378985043,
+        "demand_groups": 16,
+        "estimate": -0.10542851164369418
+      },
+      "count_crps_occupied": {
+        "ci_high": -0.00852355878172454,
+        "ci_low": -0.02101617139093259,
+        "demand_groups": 16,
+        "estimate": -0.014802283668001676
+      },
+      "speed_crps_occupied": {
+        "ci_high": -0.03994861957033397,
+        "ci_low": -0.09147472543382064,
+        "demand_groups": 16,
+        "estimate": -0.06538585638987432
+      },
+      "total_count_absolute_error": {
+        "ci_high": -0.29952261988196854,
+        "ci_low": -6.1971076562310365,
+        "demand_groups": 16,
+        "estimate": -3.1306788477134964
+      }
+    }
+  },
+  "H4_gate": {
+    "metrics": {
+      "count_crps_occupied": {
+        "ci_high": 0.2135769437888056,
+        "ci_low": 0.1486755622126937,
+        "demand_groups": 16,
+        "estimate": 0.1790132359632074
+      },
+      "energy_score": {
+        "ci_high": 1.7544435239708325,
+        "ci_low": 0.88616832248974,
+        "demand_groups": 16,
+        "estimate": 1.302594851895031
+      },
+      "speed_crps_occupied": {
+        "ci_high": 0.35648857921113375,
+        "ci_low": 0.14996111787269154,
+        "demand_groups": 16,
+        "estimate": 0.24364825413974694
+      },
+      "total_count_absolute_error": {
+        "ci_high": 15.578585569457402,
+        "ci_low": 6.506973915752495,
+        "demand_groups": 16,
+        "estimate": 10.867599205996411
+      }
+    },
+    "pass_gate": false,
+    "prespecified": true,
+    "tuning_after_test": false
+  },
+  "verification": {
+    "status": "pass",
+    "rows": 128,
+    "metric_checks": 2304,
+    "summary_interval_checks": 408,
+    "paired_interval_checks": 360,
+    "equal_consumed_epochs": 80,
+    "equal_consumed_updates": 6400,
+    "validation_only_best_selection_verified": true,
+    "expected_best": {
+      "weak_soft": {
+        "ES": 11.236593779830866,
+        "epoch": 80
+      },
+      "zero_mean": {
+        "ES": 8.811383318144852,
+        "epoch": 35
+      }
+    },
+    "budget_limited": true,
+    "h4_not_run": true,
+    "alignment": {
+      "train": {
+        "prior_normalized_sse": 0.7099124045567415,
+        "skill_vs_zero_delta": 0.29008759544325846,
+        "paired_noisy_source_sse_ratio": 0.7111244654515164
+      },
+      "validation": {
+        "prior_normalized_sse": 0.7259841857620692,
+        "skill_vs_zero_delta": 0.27401581423793075,
+        "paired_noisy_source_sse_ratio": 0.7269898948554323
+      }
+    }
+  },
+  "preservation": {
+    "original_body_unchanged": true,
+    "original_head_unchanged": true,
+    "original_noise_unchanged": true,
+    "source_unchanged": true,
+    "data_unchanged": true,
+    "blind_test_once": true
+  },
+  "limitations": [
+    "Frozen legacy FM backbone and prior; only a small nonlinear final residual is trained.",
+    "Weak-prior model selected epoch80 at budget cap without validation patience convergence; zero selected epoch35, both consumed80epochs.",
+    "One pretrained checkpoint and residual initialization seed; intervals resample16test demandgroups and do not cover training-seed variability.",
+    "Freshness means not previously selected in listed adapter/diagnostic studies; testgroups are in the original pretrained-validation corpus.",
+    "Source-alignment improvement is in frozen latent space and does not establish physical forecast, probability or policy gains.",
+    "Zero-mean removes predicted increment from BOTH source and reference while retaining current state, graph encoder and original rank16 source noise.",
+    "H4 gate mass condition is nonworsening point estimate, not a formal noninferiority interval; gate did not pass."
+  ],
+  "changed_files": [
+    "tools/train_nonlinear_fm_residual.py",
+    "tests/test_nonlinear_fm_residual.py",
+    "docs/nonlinear_prior_fm_20261014.json"
+  ],
+  "simplification": "One frozen feature-cache pass; train only41152parameter residuals. Reuse completed checkpoint/replay with no new dependency or backbone backward pass.",
+  "artifact_hashes": {
+    "outputs/nonlinear_prior_fm_20261014/v1/protocol.json": "ec764afee5d8fa2b0246588b58d12b862b0b1b28aa019706b331f6fe86c969c2",
+    "outputs/nonlinear_prior_fm_20261014/v1/split.json": "707bb000a35acc4b47f1624b1d323d9c3a95a889ad87c231dd510cca574d7534",
+    "outputs/nonlinear_prior_fm_20261014/v1/data_split_audit.json": "e7bee67aebe6eb2e1916775a8f92c22e7e775557959d9e6774a653f553e75c6e",
+    "outputs/nonlinear_prior_fm_20261014/v1/cache_manifest.json": "65f1891b2e2f06579120cbfde6c996d19834c78b23feb4c84dd4b558b5e109a6",
+    "outputs/nonlinear_prior_fm_20261014/v1/source_manifest.json": "59b4068a869191890fef967b4411fc76276426ec21c17711f9241f0291fdf973",
+    "outputs/nonlinear_prior_fm_20261014/v1/initial_gates.json": "00abebf9db080487097ce0831d17aab49fe64c6e200fb137e580fb8af8d4309e",
+    "outputs/nonlinear_prior_fm_20261014/v1/feature_manifest.json": "58f29edd2611ab5677ce225fcf2e67d0b9eef6a44fbae77e65591bb7035212c9",
+    "outputs/nonlinear_prior_fm_20261014/v1/alignment_stats.json": "198a28feec4bc5ae771bcbcdc074c09848b7e859fc9cd4ebc01d06cb4da1a1e0",
+    "outputs/nonlinear_prior_fm_20261014/v1/training_history.json": "b882e8e02b117bec6bd10f37b7b784dd69a8f448e0a4e86b39e2ebceb19460f9",
+    "outputs/nonlinear_prior_fm_20261014/v1/validation_selection.json": "1b574450615647ac729d23c422668cd4f1716103a32eabbd7cc64576fb1c16b3",
+    "outputs/nonlinear_prior_fm_20261014/v1/test/states.json": "3a703612837ae2f6a2d07c5393009511079affdd01d24862ea3dc35df861ba72",
+    "outputs/nonlinear_prior_fm_20261014/v1/test/bank_manifest.json": "b5ec3e2ad470fe5698ed661492ac7160909bfff5b6cd4b89945c7d32e6f536fe",
+    "outputs/nonlinear_prior_fm_20261014/v1/h4_gate.json": "5746f84e662dee1e88d3bc14a08ccc31f2277147bc603c4b793d30e6aa1f7eb4",
+    "outputs/nonlinear_prior_fm_20261014/v1/summary.json": "0d602073f4c5269a2ce6977c4df4be892cba77461e35e008b4d4a0bb7f41c373",
+    "outputs/nonlinear_prior_fm_20261014/v1/independent_verification.json": "6ab854c8169e10074611625ee8cb0427ced9bce056f461d36ccaa52099751721"
+  },
+  "independent_verifier": "tmp/verify_nonlinear_fm_residual_20261014.py",
+  "validation": [
+    "71focusedtests passed2.82seconds",
+    "py_compile passed",
+    "Initial4zero-residual forecasts exactly reproduced archivedbanks",
+    "Independent128rows,2304rawmetrics,408summaryintervals,360pairedintervals",
+    "Independent equal80epoch/6400update budget and validation-only best selection verified",
+    "Completedcheckpoint and242frozen source hashes unchanged; live tool matches frozen run",
+    "EightFP32memmapheaders andfinite sample rows verified"
+  ]
+}
