@@ -1,0 +1,467 @@
+{
+  "date": "2026-10-14",
+  "status": "completed_hard_mean_rank_complete_FM_intervention",
+  "conclusion": "Increasing hard prior-mean rank does not improve the completed frozen FM under these matched controls. State-only rank16 is closest to native; larger ranks worsen mean errors and probabilistic scores. This does not establish the optimum of jointly retrained rank variants.",
+  "primary_protocol": {
+    "checkpoint_sha256": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+    "requested_ranks": [
+      16,
+      32,
+      64,
+      128,
+      256
+    ],
+    "actual_ranks": {
+      "16": 16,
+      "32": 32,
+      "64": 64,
+      "128": 128,
+      "256": 256
+    },
+    "conditions": 32,
+    "demand_groups": 16,
+    "solver_steps": 100,
+    "samples": 8,
+    "noise_rank": 16,
+    "noise_basis_and_scale": "unchanged original checkpoint",
+    "target": "HYBRIDCt count/factual next-following intervalmean speed",
+    "inputs": "full observed traffic/full factual controls",
+    "state_head_fit": "five equal4160parameter heads;64train768windows; train-only fullysolved F64ridge; frozen full-input state front",
+    "main_population": "all32fixedconditions",
+    "auxiliary_population": "same first16conditions/8groups for allaux controls and their native/state comparisons"
+  },
+  "main_results": [
+    {
+      "arm": "native",
+      "states": 32,
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.7092333186257086,
+          "ci_low": 0.5919537638212502,
+          "demand_groups": 16,
+          "estimate": 0.6487913702406778
+        },
+        "speed_mae_occupied": {
+          "ci_high": 1.2002096620305343,
+          "ci_low": 0.8027642109368663,
+          "demand_groups": 16,
+          "estimate": 0.9884472535299724
+        },
+        "count_crps_occupied": {
+          "ci_high": 0.6166988559263635,
+          "ci_low": 0.5076356647743208,
+          "demand_groups": 16,
+          "estimate": 0.5599795059020128
+        },
+        "speed_crps_occupied": {
+          "ci_high": 1.1103520714996438,
+          "ci_low": 0.7292954972645936,
+          "demand_groups": 16,
+          "estimate": 0.9050197080484477
+        },
+        "energy_score": {
+          "ci_high": 11.054520858086791,
+          "ci_low": 8.403035879308852,
+          "demand_groups": 16,
+          "estimate": 9.618728763206423
+        }
+      }
+    },
+    {
+      "arm": "state_r128",
+      "states": 32,
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.8064586963054617,
+          "ci_low": 0.6572405120985363,
+          "demand_groups": 16,
+          "estimate": 0.7304834776548061
+        },
+        "speed_mae_occupied": {
+          "ci_high": 1.3248752126530374,
+          "ci_low": 0.9229243616975995,
+          "demand_groups": 16,
+          "estimate": 1.113146475948645
+        },
+        "count_crps_occupied": {
+          "ci_high": 0.7027838386967846,
+          "ci_low": 0.5675601530220806,
+          "demand_groups": 16,
+          "estimate": 0.6333207800233218
+        },
+        "speed_crps_occupied": {
+          "ci_high": 1.22104836441181,
+          "ci_low": 0.8319020868571511,
+          "demand_groups": 16,
+          "estimate": 1.0131994031217908
+        },
+        "energy_score": {
+          "ci_high": 11.959534419285452,
+          "ci_low": 8.982655217653745,
+          "demand_groups": 16,
+          "estimate": 10.315528100736174
+        }
+      }
+    },
+    {
+      "arm": "state_r16",
+      "states": 32,
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.7110142258047415,
+          "ci_low": 0.5957548429858128,
+          "demand_groups": 16,
+          "estimate": 0.6515655411773036
+        },
+        "speed_mae_occupied": {
+          "ci_high": 1.214660013159299,
+          "ci_low": 0.8195173167870287,
+          "demand_groups": 16,
+          "estimate": 1.004835478511233
+        },
+        "count_crps_occupied": {
+          "ci_high": 0.6114507522885401,
+          "ci_low": 0.5075689430732285,
+          "demand_groups": 16,
+          "estimate": 0.5579255262049088
+        },
+        "speed_crps_occupied": {
+          "ci_high": 1.1162487304602078,
+          "ci_low": 0.7403427404732275,
+          "demand_groups": 16,
+          "estimate": 0.9159023665355888
+        },
+        "energy_score": {
+          "ci_high": 10.981000434429431,
+          "ci_low": 8.352856793894691,
+          "demand_groups": 16,
+          "estimate": 9.558386849771352
+        }
+      }
+    },
+    {
+      "arm": "state_r256",
+      "states": 32,
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.8848114602904826,
+          "ci_low": 0.7203399393062772,
+          "demand_groups": 16,
+          "estimate": 0.8014882601410513
+        },
+        "speed_mae_occupied": {
+          "ci_high": 1.4039469149773174,
+          "ci_low": 0.9939727231588495,
+          "demand_groups": 16,
+          "estimate": 1.1914266672665967
+        },
+        "count_crps_occupied": {
+          "ci_high": 0.7755169400564346,
+          "ci_low": 0.6272472342753788,
+          "demand_groups": 16,
+          "estimate": 0.6991940885826964
+        },
+        "speed_crps_occupied": {
+          "ci_high": 1.2851695751538836,
+          "ci_low": 0.8915701359118583,
+          "demand_groups": 16,
+          "estimate": 1.0812211548489261
+        },
+        "energy_score": {
+          "ci_high": 12.44714095513284,
+          "ci_low": 9.411691595326989,
+          "demand_groups": 16,
+          "estimate": 10.802855093589034
+        }
+      }
+    },
+    {
+      "arm": "state_r32",
+      "states": 32,
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.7220992850031895,
+          "ci_low": 0.6018728994854117,
+          "demand_groups": 16,
+          "estimate": 0.6595716072649813
+        },
+        "speed_mae_occupied": {
+          "ci_high": 1.2242526463527346,
+          "ci_low": 0.8294622719580453,
+          "demand_groups": 16,
+          "estimate": 1.0134918782226463
+        },
+        "count_crps_occupied": {
+          "ci_high": 0.6223229051803005,
+          "ci_low": 0.5133791010043716,
+          "demand_groups": 16,
+          "estimate": 0.5658216484496805
+        },
+        "speed_crps_occupied": {
+          "ci_high": 1.126544256679804,
+          "ci_low": 0.7478103037064406,
+          "demand_groups": 16,
+          "estimate": 0.9230600495769781
+        },
+        "energy_score": {
+          "ci_high": 11.099092746496188,
+          "ci_low": 8.390336250983372,
+          "demand_groups": 16,
+          "estimate": 9.638855673555977
+        }
+      }
+    },
+    {
+      "arm": "state_r64",
+      "states": 32,
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.7351444848837573,
+          "ci_low": 0.6113990752863498,
+          "demand_groups": 16,
+          "estimate": 0.6714463576052236
+        },
+        "speed_mae_occupied": {
+          "ci_high": 1.2492907276396699,
+          "ci_low": 0.8397189461454726,
+          "demand_groups": 16,
+          "estimate": 1.0292427924986065
+        },
+        "count_crps_occupied": {
+          "ci_high": 0.636030810594273,
+          "ci_low": 0.5229083175104361,
+          "demand_groups": 16,
+          "estimate": 0.5771172801196807
+        },
+        "speed_crps_occupied": {
+          "ci_high": 1.1507391875590935,
+          "ci_low": 0.7573942062415627,
+          "demand_groups": 16,
+          "estimate": 0.939309093443661
+        },
+        "energy_score": {
+          "ci_high": 11.275189078254819,
+          "ci_low": 8.464931952917658,
+          "demand_groups": 16,
+          "estimate": 9.762333998673192
+        }
+      }
+    }
+  ],
+  "main_deltas_vs_native": [
+    {
+      "arm": "state_r128",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.11133437816084032,
+          "ci_low": 0.05801549363741343,
+          "demand_groups": 16,
+          "estimate": 0.08169210741412831
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.1738794259903749,
+          "ci_low": 0.08927899011067053,
+          "demand_groups": 16,
+          "estimate": 0.12469922241867236
+        },
+        "energy_score": {
+          "ci_high": 1.0121067451849117,
+          "ci_low": 0.4338638627485143,
+          "demand_groups": 16,
+          "estimate": 0.696799337529751
+        }
+      }
+    },
+    {
+      "arm": "state_r16",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.008519871652662405,
+          "ci_low": -0.004760415439116694,
+          "demand_groups": 16,
+          "estimate": 0.002774170936625806
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.050939765857074874,
+          "ci_low": -0.005177882608201348,
+          "demand_groups": 16,
+          "estimate": 0.016388224981260482
+        },
+        "energy_score": {
+          "ci_high": -0.003933833493537298,
+          "ci_low": -0.12429138068423717,
+          "demand_groups": 16,
+          "estimate": -0.0603419134350702
+        }
+      }
+    },
+    {
+      "arm": "state_r256",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.19530161042212377,
+          "ci_low": 0.12047041406100623,
+          "demand_groups": 16,
+          "estimate": 0.1526968899003735
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.2604168826211294,
+          "ci_low": 0.15071409132835736,
+          "demand_groups": 16,
+          "estimate": 0.20297941373662423
+        },
+        "energy_score": {
+          "ci_high": 1.563982118512155,
+          "ci_low": 0.793755700289474,
+          "demand_groups": 16,
+          "estimate": 1.1841263303826102
+        }
+      }
+    },
+    {
+      "arm": "state_r32",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.016721904793621005,
+          "ci_low": 0.0045641436914251035,
+          "demand_groups": 16,
+          "estimate": 0.0107802370243035
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.05336075381963775,
+          "ci_low": 0.006181551563876308,
+          "demand_groups": 16,
+          "estimate": 0.025044624692673854
+        },
+        "energy_score": {
+          "ci_high": 0.09873266531713422,
+          "ci_low": -0.07278946082000355,
+          "demand_groups": 16,
+          "estimate": 0.020126910349553273
+        }
+      }
+    },
+    {
+      "arm": "state_r64",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.03057556736365681,
+          "ci_low": 0.014699302856533087,
+          "demand_groups": 16,
+          "estimate": 0.022654987364545846
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.06216371127597608,
+          "ci_low": 0.022771024955652718,
+          "demand_groups": 16,
+          "estimate": 0.04079553896863406
+        },
+        "energy_score": {
+          "ci_high": 0.26840245903666277,
+          "ci_low": 0.014435305483576709,
+          "demand_groups": 16,
+          "estimate": 0.14360523546676826
+        }
+      }
+    }
+  ],
+  "auxiliary_point_results": [
+    {
+      "arm": "conditional_refit_r128",
+      "states": 16,
+      "count_mae_occupied": 0.6923290239328646,
+      "speed_mae_occupied": 0.9434681301358399,
+      "energy_score": 11.189010728258717
+    },
+    {
+      "arm": "conditional_refit_r16",
+      "states": 16,
+      "count_mae_occupied": 0.6142747651698139,
+      "speed_mae_occupied": 0.8533296385189918,
+      "energy_score": 10.383823158870422
+    },
+    {
+      "arm": "conditional_refit_r64",
+      "states": 16,
+      "count_mae_occupied": 0.6540809383607855,
+      "speed_mae_occupied": 0.8803559451757421,
+      "energy_score": 10.683016638877586
+    },
+    {
+      "arm": "native",
+      "states": 16,
+      "count_mae_occupied": 0.611276748584466,
+      "speed_mae_occupied": 0.8574480253490686,
+      "energy_score": 10.443199949591522
+    },
+    {
+      "arm": "original_r128",
+      "states": 16,
+      "count_mae_occupied": 0.6401823221208394,
+      "speed_mae_occupied": 0.931199762074349,
+      "energy_score": 10.737234503171774
+    },
+    {
+      "arm": "original_r64",
+      "states": 16,
+      "count_mae_occupied": 0.6253646380877896,
+      "speed_mae_occupied": 0.8734565419870096,
+      "energy_score": 10.57459019347407
+    }
+  ],
+  "interpretation": [
+    "No global low_frequency_rank or noise setting changed; the global configuration would also change noise, unlike this controlled mean-only test.",
+    "Old FM was trained with the native hard/action-conditioned prior16. Substitutions alter both its source and coarse reference, without adapting FM weights.",
+    "Conditional-refit and original-head projected64/128 controls also worsen complete frozen predictions on their matched subset.",
+    "State-only rank16 has near-native point errors and slight EnergyScore improvement; that is not a demonstrated routing benefit.",
+    "Sufficient joint training of each new prior and FM, with matched noise/data/budgets, is needed before architecture or optimal-rank conclusions."
+  ],
+  "verification": {
+    "tests_passed": 94,
+    "seconds": 13.76,
+    "root_bank_check": "all32bank hashes and272decoded samplemean occupied-metric rows; matched main/aux group estimates independently reconstructed",
+    "native_repeat_clone_and_previous100_reference": "bit-identical, zero drift",
+    "source_noise": "bit-identical atallmeanranks",
+    "head_fit": "normal-equation residuals1.2e-15to2.6e-14; independenttrainingSSE equations verified",
+    "matrix_selection": "prespecified main32/aux16; noscore trimming",
+    "initial_failure": "v1missing label-helper import before scores preserved; v2sameprotocol corrected import and addedlabelhelpertest"
+  },
+  "evidence": [
+    {
+      "path": "outputs/hard_rank_fm_20261014/v2/summary.json",
+      "sha256": "11a23f8d9bd47a5c353291f6ef7b11136cb6364dce77392890ac77e4cd985f52"
+    },
+    {
+      "path": "outputs/hard_rank_fm_20261014/v2/protocol.json",
+      "sha256": "db5844fe84ccc43648c6c16d4391a3839d0c901a966e4f13adcba033141430a6"
+    },
+    {
+      "path": "outputs/hard_rank_fm_20261014/v2/native_gate.json",
+      "sha256": "6e656a60cb12de1a50e8df64b33d78e0a07176736a648922073ff7c57d9bf631"
+    },
+    {
+      "path": "outputs/hard_rank_fm_20261014/v2/noise_proof.json",
+      "sha256": "cb09f0711a4c8ce135a5cf47973dbc8bde442c2c00a4fddac65d3dc2218ffabd"
+    },
+    {
+      "path": "outputs/hard_rank_fm_20261014/v2/head_fit_diagnostics.json",
+      "sha256": "5b40f3beda5db323dc8ab2524aa4633ea446168ebb9e55daa2623fb56e3c1cda"
+    },
+    {
+      "path": "outputs/hard_rank_fm_20261014/v2/within_state_rank_contrasts.json",
+      "sha256": "2debfb949c25241fe50401bb3d22cef0292369d59b1b000eca5e9b2ead64cd68"
+    },
+    {
+      "path": "outputs/hard_rank_fm_20261014/v2/independent_bank_verification.json",
+      "sha256": "7c192d496f51bbc5f01f802b347dfc68ea85dadd3b20f93a4d5175ab7aaffcb4"
+    },
+    {
+      "path": "outputs/hard_rank_fm_20261014/v2/independent_head_fit_verification.json",
+      "sha256": "0959a583923a4253882cdd72be3dd407abaa2d1bb7d6b31e7dc76de22596cfaf"
+    },
+    {
+      "path": "outputs/hard_rank_fm_20261014/v2/source_manifest.json",
+      "sha256": "0053f105d9bbdd5beb9f78ecf8998e60f89323678ff46d6b96441fec069dac44"
+    }
+  ]
+}
