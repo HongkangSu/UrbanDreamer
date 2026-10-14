@@ -1,0 +1,387 @@
+{
+  "date": "2026-10-14",
+  "status": "completed_complete_FM_inference_intervention",
+  "main_finding": "A state-only prior with better standalone increment fit does not improve the completed frozen FM when substituted. The target-aligned tau0.1 replacement worsens both occupied-road mean errors and probabilistic scores at the original100-step solver. This is not evidence about jointly retrained soft-prior models.",
+  "parameter_decision": {
+    "prior_only_default_strength": 0.1,
+    "default_change_withdrawn": true,
+    "restored_previous_strength": 10.0,
+    "candidate_strength": 0.1,
+    "reason": "Prior-alone validation was insufficient to choose a complete-FM setting. Restore prior default until a matched joint-training comparison;10 is not claimed optimal for newly trained models."
+  },
+  "primary_protocol": {
+    "checkpoint_sha256": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+    "conditions": 32,
+    "demand_groups": 16,
+    "samples_per_condition": 8,
+    "solver": "Euler100",
+    "inputs": "full observed initialstate/full factual recorded controls",
+    "target": "production-compatible hybridCt counts and following-boundary intervalmean speed",
+    "background_fit": "state-only pretrained frozen front; solved outputheads use same hybridCt target,64traininggroups768windows; no validation fitting",
+    "prediction": "mean of decoded physical samples for point errors; all8draws for probability scores",
+    "FM_body": "unchanged completed hard/action-prior pretraining model; no joint retraining",
+    "bootstrap": "2000 paired demand-group resamples"
+  },
+  "primary_results": [
+    {
+      "arm": "hybrid_state_soft0.1",
+      "states": 32,
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 1.2361880120419642,
+          "ci_low": 0.9636064497689542,
+          "demand_groups": 16,
+          "estimate": 1.0825140063631498
+        },
+        "speed_mae_occupied": {
+          "ci_high": 1.6950744246498641,
+          "ci_low": 1.265932667983651,
+          "demand_groups": 16,
+          "estimate": 1.4691558999396679
+        },
+        "count_crps_occupied": {
+          "ci_high": 1.1111805787580706,
+          "ci_low": 0.8605639003071454,
+          "demand_groups": 16,
+          "estimate": 0.9709817034218675
+        },
+        "speed_crps_occupied": {
+          "ci_high": 1.5295488990238368,
+          "ci_low": 1.13784359733883,
+          "demand_groups": 16,
+          "estimate": 1.3269516767808558
+        },
+        "energy_score": {
+          "ci_high": 15.823875267524953,
+          "ci_low": 11.394441320994009,
+          "demand_groups": 16,
+          "estimate": 13.471858096367768
+        }
+      }
+    },
+    {
+      "arm": "hybrid_state_soft10",
+      "states": 32,
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.7365551668861902,
+          "ci_low": 0.6095735233278193,
+          "demand_groups": 16,
+          "estimate": 0.6744911790994176
+        },
+        "speed_mae_occupied": {
+          "ci_high": 1.244185412790378,
+          "ci_low": 0.8577180261121272,
+          "demand_groups": 16,
+          "estimate": 1.0412726869968443
+        },
+        "count_crps_occupied": {
+          "ci_high": 0.6378782191598048,
+          "ci_low": 0.5219260364139539,
+          "demand_groups": 16,
+          "estimate": 0.5807233838592845
+        },
+        "speed_crps_occupied": {
+          "ci_high": 1.1465229287998264,
+          "ci_low": 0.7795584584674793,
+          "demand_groups": 16,
+          "estimate": 0.9518745209716066
+        },
+        "energy_score": {
+          "ci_high": 11.22772655916807,
+          "ci_low": 8.51781628881062,
+          "demand_groups": 16,
+          "estimate": 9.767396858030725
+        }
+      }
+    },
+    {
+      "arm": "native",
+      "states": 32,
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.7049542909738714,
+          "ci_low": 0.5888770664981489,
+          "demand_groups": 16,
+          "estimate": 0.6487913702406778
+        },
+        "speed_mae_occupied": {
+          "ci_high": 1.1975262973261007,
+          "ci_low": 0.8057816520520652,
+          "demand_groups": 16,
+          "estimate": 0.9884472535299724
+        },
+        "count_crps_occupied": {
+          "ci_high": 0.6123442056483424,
+          "ci_low": 0.5052696131132385,
+          "demand_groups": 16,
+          "estimate": 0.5599795059020128
+        },
+        "speed_crps_occupied": {
+          "ci_high": 1.1031742317357431,
+          "ci_low": 0.7312265197849975,
+          "demand_groups": 16,
+          "estimate": 0.9050197080484477
+        },
+        "energy_score": {
+          "ci_high": 11.009276071542553,
+          "ci_low": 8.443018492158629,
+          "demand_groups": 16,
+          "estimate": 9.618728763206423
+        }
+      }
+    },
+    {
+      "arm": "zero_mean",
+      "states": 32,
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.7138086059914461,
+          "ci_low": 0.5979751202604621,
+          "demand_groups": 16,
+          "estimate": 0.6581064412565558
+        },
+        "speed_mae_occupied": {
+          "ci_high": 1.2005518659020742,
+          "ci_low": 0.8157832410096706,
+          "demand_groups": 16,
+          "estimate": 0.997155977623284
+        },
+        "count_crps_occupied": {
+          "ci_high": 0.6149146968622289,
+          "ci_low": 0.5090982776435696,
+          "demand_groups": 16,
+          "estimate": 0.5627288078901493
+        },
+        "speed_crps_occupied": {
+          "ci_high": 1.1024438164866666,
+          "ci_low": 0.7390747956948265,
+          "demand_groups": 16,
+          "estimate": 0.9086738725594117
+        },
+        "energy_score": {
+          "ci_high": 10.905421771267298,
+          "ci_low": 8.426573870466152,
+          "demand_groups": 16,
+          "estimate": 9.555207108872303
+        }
+      }
+    }
+  ],
+  "paired_deltas_vs_native": [
+    {
+      "arm": "hybrid_state_soft0.1",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.5545235898291424,
+          "ci_low": 0.35452844655725163,
+          "demand_groups": 16,
+          "estimate": 0.43372263612247175
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.6278072749526482,
+          "ci_low": 0.3651214594625937,
+          "demand_groups": 16,
+          "estimate": 0.4807086464096953
+        },
+        "energy_score": {
+          "ci_high": 4.915447651883659,
+          "ci_low": 2.8067906081523706,
+          "demand_groups": 16,
+          "estimate": 3.8531293331613443
+        }
+      }
+    },
+    {
+      "arm": "hybrid_state_soft10",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.03384805623238639,
+          "ci_low": 0.016876132214289904,
+          "demand_groups": 16,
+          "estimate": 0.025699808858739792
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.07998214839485274,
+          "ci_low": 0.03163747531350382,
+          "demand_groups": 16,
+          "estimate": 0.05282543346687179
+        },
+        "energy_score": {
+          "ci_high": 0.26736352229602606,
+          "ci_low": 0.030730136685208086,
+          "demand_groups": 16,
+          "estimate": 0.14866809482430152
+        }
+      }
+    },
+    {
+      "arm": "zero_mean",
+      "metrics": {
+        "count_mae_occupied": {
+          "ci_high": 0.015202834195966838,
+          "ci_low": 0.0033353662303993283,
+          "demand_groups": 16,
+          "estimate": 0.009315071015877929
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.01905580540717664,
+          "ci_low": -0.002642545164973159,
+          "demand_groups": 16,
+          "estimate": 0.008708724093311538
+        },
+        "energy_score": {
+          "ci_high": 0.028116346368253588,
+          "ci_low": -0.14728467271069773,
+          "demand_groups": 16,
+          "estimate": -0.06352165433412016
+        }
+      }
+    }
+  ],
+  "auxiliary_results": {
+    "source": "v2",
+    "role": "Euler2/20 interventions; H4fixed-initial-cohort state-autoregressive diagnostic; raw-trained heads mismatched with hybrid target, explicitly separate from primary",
+    "H1_Euler20": [
+      {
+        "arm": "action_soft0.1",
+        "states": 32,
+        "count_mae_occupied": 0.912514952132295,
+        "speed_mae_occupied": 1.3051344834365126,
+        "energy_score": 11.927285909545073
+      },
+      {
+        "arm": "action_soft10",
+        "states": 32,
+        "count_mae_occupied": 0.722671991737174,
+        "speed_mae_occupied": 1.0201423897650488,
+        "energy_score": 10.09079450511978
+      },
+      {
+        "arm": "native",
+        "states": 32,
+        "count_mae_occupied": 0.7013353922492693,
+        "speed_mae_occupied": 1.003806531078876,
+        "energy_score": 10.02507705630601
+      },
+      {
+        "arm": "state_soft0",
+        "states": 32,
+        "count_mae_occupied": 1.1151276543202373,
+        "speed_mae_occupied": 1.4842171580456585,
+        "energy_score": 14.095805884664088
+      },
+      {
+        "arm": "state_soft0.1",
+        "states": 32,
+        "count_mae_occupied": 1.0682561569693017,
+        "speed_mae_occupied": 1.436370959001578,
+        "energy_score": 13.58570459544869
+      },
+      {
+        "arm": "state_soft10",
+        "states": 32,
+        "count_mae_occupied": 0.7134843913109132,
+        "speed_mae_occupied": 1.0475862798407378,
+        "energy_score": 10.043063907958775
+      },
+      {
+        "arm": "zero_mean",
+        "states": 32,
+        "count_mae_occupied": 0.7113908095046635,
+        "speed_mae_occupied": 1.0082065200150274,
+        "energy_score": 9.969801664089141
+      }
+    ],
+    "H4_Euler20_complete": [
+      {
+        "arm": "native",
+        "states": 32,
+        "count_mae_occupied": 0.8616232867757349,
+        "speed_mae_occupied": 1.1501005001001778,
+        "energy_score": 11.703675469131078
+      },
+      {
+        "arm": "state_soft0",
+        "states": 32,
+        "count_mae_occupied": 1.5412096145406982,
+        "speed_mae_occupied": 1.964777869554895,
+        "energy_score": 20.37567888379587
+      },
+      {
+        "arm": "state_soft0.1",
+        "states": 32,
+        "count_mae_occupied": 1.4813341640776276,
+        "speed_mae_occupied": 1.9144250594149532,
+        "energy_score": 19.687088186914096
+      },
+      {
+        "arm": "zero_mean",
+        "states": 32,
+        "count_mae_occupied": 0.8742908722438424,
+        "speed_mae_occupied": 1.1656892092630957,
+        "energy_score": 11.545157541985681
+      }
+    ]
+  },
+  "limitations": [
+    "One completed checkpoint and development replay; no policy reward or independent training-seed comparison.",
+    "FM weights were trained on the original hard/action-conditioned coarse source/reference. Both are changed by a substituted prior.",
+    "Negative substitution results do not prove a sufficiently jointly trained soft/state-only decomposition cannot work.",
+    "The background itself is a state-conditioned prediction, not causal zero-action evolution.",
+    "H4 includes recorded future controls and factual background speeds; it is not fully unknown-future or counterfactual evaluation."
+  ],
+  "numerical_verification": {
+    "initial_failed_v1": "Tiny nondeterministic CUDA repeat drift; no intervention rankings. Preserved failed run.",
+    "corrected_v2": "CUBLAS workspace+deterministic algorithms+TF32off gave exact condition,source,nativeclone and noise matches; no tolerance relaxation.",
+    "primary_profile": "H1-only online execution profile passed fixed oldnative100 parity thresholds before intervention scoring; H4 failedonlinegate and used originalprofile.",
+    "FM_body_and_noise_unchanged": true,
+    "root_bank_recheck": "All32bankhashes,128decoded-mean occupied-score rows, and16group pooled estimates independently checked.",
+    "tests_passed": 103,
+    "tests_seconds": 15.32
+  },
+  "changed_files": [
+    "tools/evaluate_soft_prior_fm.py",
+    "tests/test_soft_prior_fm.py",
+    "MethodConfig and18explicit profiles:undo prior-only0.1default",
+    "this evidence record"
+  ],
+  "evidence": [
+    {
+      "path": "outputs/soft_prior_fm_20261014/primary100_hybrid_v1/summary.json",
+      "sha256": "d0a79d5218334109cbfeca04b73e76cc7d832b0dd17bed54b381190539886c05"
+    },
+    {
+      "path": "outputs/soft_prior_fm_20261014/primary100_hybrid_v1/protocol.json",
+      "sha256": "5cf8e06efdb0d9a2761981913e3af6de01e7dbd804da7b79708e0672f74cd05a"
+    },
+    {
+      "path": "outputs/soft_prior_fm_20261014/primary100_hybrid_v1/states.jsonl",
+      "sha256": "472b5799ab939c370264933f123d9588d6f04ab794cd7a30d2b83b4a2aa94577"
+    },
+    {
+      "path": "outputs/soft_prior_fm_20261014/primary100_hybrid_v1/profile100_gate.json",
+      "sha256": "c522f1f04fbbaca14c07580b3451bfa7263965316b4bd053450e1d0e975677f9"
+    },
+    {
+      "path": "outputs/soft_prior_fm_20261014/primary100_hybrid_v1/native_noise_gates.json",
+      "sha256": "7573d10e247d24b3e73b46d9d26662ac7d823fcbe067367edc4fa088df307380"
+    },
+    {
+      "path": "outputs/soft_prior_fm_20261014/primary100_hybrid_v1/source_manifest.json",
+      "sha256": "f573695524ad8c323fd999e1d6fa93d985c7652dbf9c15908129702e98ff45f2"
+    },
+    {
+      "path": "outputs/soft_prior_fm_20261014/v2/summary.json",
+      "sha256": "1bcca683c78523a3ad0d90424415b3169bc7cb164f8839d8a67258d214fd765e"
+    },
+    {
+      "path": "outputs/soft_prior_fm_20261014/v2/numerical_diagnosis.json",
+      "sha256": "bd54a913caf2100d9dcf8343acdc517aaec4b4b24a7e893b11db1a4848bc57fb"
+    },
+    {
+      "path": "outputs/soft_prior_fm_20261014/matched_hybrid_head/summary.json",
+      "sha256": "30df1d7e6adb31d3e2d94ebf036555e9b807afe7f8a361b14354810f921c7669"
+    }
+  ]
+}

@@ -30,12 +30,12 @@ def test_archived_omitted_fields_keep_hard_action_conditioning(tmp_path):
 def test_explicit_soft_profile_defaults_to_state_only_output_filter(tmp_path):
     config = load_config(_write_config(tmp_path/'soft.toml', extra='\n[method]\nprior_filter="soft"\n'))
     assert config.method.prior_filter == 'soft'
-    assert config.method.prior_filter_strength == .1
+    assert config.method.prior_filter_strength == 10.
     assert config.method.prior_action_conditioned is False
     assert config.method.prior_filter_input is False
     assert fingerprint(config, replace(config.method, prior_filter_strength=20.)) != config.semantic_fingerprint
     assert MethodConfig().prior_filter == 'soft'
-    assert MethodConfig().prior_filter_strength == .1
+    assert MethodConfig().prior_filter_strength == 10.
 
 
 @pytest.mark.parametrize('entry', ['prior_filter="invalid"', 'prior_filter_strength=-1',

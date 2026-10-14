@@ -128,7 +128,7 @@ class MethodConfig:
     prior_noise_scale: float = 0.1
     prior_loss_weight: float = 0.1
     prior_filter: str = 'soft'
-    prior_filter_strength: float = 0.1
+    prior_filter_strength: float = 10.0
     prior_action_conditioned: bool = False
     prior_filter_input: bool = False
     fm_steps: int = 2
