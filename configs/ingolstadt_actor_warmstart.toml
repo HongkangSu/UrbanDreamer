@@ -61,7 +61,7 @@ imagination_time_budget_seconds = 0.0
 [method]
 # State-only background prior; FM retains action conditioning.
 prior_filter = "soft"
-prior_filter_strength = 10.0
+prior_filter_strength = 0.1
 prior_action_conditioned = false
 prior_filter_input = false
 low_frequency_rank = 16

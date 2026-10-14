@@ -1,0 +1,313 @@
+{
+  "date": "2026-10-14",
+  "status": "completed_background_head_tuning_and_confirmation",
+  "new_configuration": {
+    "prior_filter": "soft",
+    "prior_filter_strength": 0.1,
+    "prior_filter_input": false,
+    "prior_action_conditioned": false,
+    "previous_strength": 10.0,
+    "prior_loss_weight": 0.1,
+    "noise": "historical rank16 basis and scale unchanged",
+    "supervision": "existing filtered-target objective retained; full-target variant is diagnostic only"
+  },
+  "selection_rationale": "Use mild smoothing as a background-extraction compromise: retain most identity-head skill and improve occupied decoded errors relative to identity, without claiming an optimum or dominance over other strengths. Strong smoothing removes much predictable background.",
+  "checkpoint_sha256": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+  "screen": {
+    "train_groups": 64,
+    "train_windows": 768,
+    "validation_groups": 32,
+    "validation_windows": 384,
+    "taus": [
+      0.0,
+      0.01,
+      0.03,
+      0.1,
+      0.3,
+      1.0,
+      3.0,
+      10.0,
+      30.0,
+      100.0
+    ],
+    "latent_parameters_per_head": 4160,
+    "physical_parameters_per_head": 130,
+    "fit": "Train-only F64 ridge closed-form solutions; fixed pretrained state-only front",
+    "metrics": [
+      {
+        "candidate": "hard_r16__filtered",
+        "full_normalized_sse": 0.993724587741769,
+        "full_normalized_sse_ci95_low": 0.9930773189545802,
+        "full_normalized_sse_ci95_high": 0.9943105778474987,
+        "direct_joint_normalized_sse": 0.9921727284439978,
+        "count_mae": 0.2512514434982204,
+        "count_mae_occupied": 1.2707752639205112,
+        "speed_mae_occupied": 1.3705001079169548
+      },
+      {
+        "candidate": "soft_tau0.01__filtered",
+        "full_normalized_sse": 0.7346828280880902,
+        "full_normalized_sse_ci95_low": 0.7206847366355705,
+        "full_normalized_sse_ci95_high": 0.7466474412929587,
+        "direct_joint_normalized_sse": 0.7479999026952038,
+        "count_mae": 0.22674350609129873,
+        "count_mae_occupied": 1.551336188117403,
+        "speed_mae_occupied": 1.7219243845442618
+      },
+      {
+        "candidate": "soft_tau0.1__filtered",
+        "full_normalized_sse": 0.736700271782072,
+        "full_normalized_sse_ci95_low": 0.7238208492594882,
+        "full_normalized_sse_ci95_high": 0.7476642894243499,
+        "direct_joint_normalized_sse": 0.7487674924884393,
+        "count_mae": 0.22643681277307726,
+        "count_mae_occupied": 1.5210997342531865,
+        "speed_mae_occupied": 1.6869983255159147
+      },
+      {
+        "candidate": "soft_tau0__filtered",
+        "full_normalized_sse": 0.7347402027124725,
+        "full_normalized_sse_ci95_low": 0.7205980197361216,
+        "full_normalized_sse_ci95_high": 0.7468274995918314,
+        "direct_joint_normalized_sse": 0.7482287073416425,
+        "count_mae": 0.22683761399524374,
+        "count_mae_occupied": 1.5552060853095553,
+        "speed_mae_occupied": 1.7263201236217456
+      },
+      {
+        "candidate": "soft_tau10__filtered",
+        "full_normalized_sse": 0.9428855206647258,
+        "full_normalized_sse_ci95_low": 0.9398720340904835,
+        "full_normalized_sse_ci95_high": 0.9452099736074507,
+        "direct_joint_normalized_sse": 0.942798414470131,
+        "count_mae": 0.24692129816156,
+        "count_mae_occupied": 1.2853364423562816,
+        "speed_mae_occupied": 1.4019207196746808
+      },
+      {
+        "candidate": "soft_tau10__full",
+        "full_normalized_sse": 0.8407665734103951,
+        "full_normalized_sse_ci95_low": 0.8307849618436332,
+        "full_normalized_sse_ci95_high": 0.8496641372923867,
+        "direct_joint_normalized_sse": 0.8461011707795748,
+        "count_mae": 0.2439623241577157,
+        "count_mae_occupied": 1.4564596299556174,
+        "speed_mae_occupied": 1.6927423217087494
+      },
+      {
+        "candidate": "soft_tau1__filtered",
+        "full_normalized_sse": 0.7980382512910154,
+        "full_normalized_sse_ci95_low": 0.7896785024707077,
+        "full_normalized_sse_ci95_high": 0.804806225136812,
+        "direct_joint_normalized_sse": 0.8057717159066383,
+        "count_mae": 0.23249802447867163,
+        "count_mae_occupied": 1.3950115305421198,
+        "speed_mae_occupied": 1.5415805383736971
+      },
+      {
+        "candidate": "zero",
+        "full_normalized_sse": 1.0,
+        "full_normalized_sse_ci95_low": 1.0,
+        "full_normalized_sse_ci95_high": 1.0,
+        "direct_joint_normalized_sse": 1.0,
+        "count_mae": 0.2507617050394817,
+        "count_mae_occupied": 1.263046210636402,
+        "speed_mae_occupied": 1.3471337722190277
+      }
+    ]
+  },
+  "confirmation": {
+    "validation_groups": 64,
+    "validation_windows": 768,
+    "group_overlap_with_screen_and_training": false,
+    "refit": false,
+    "role": "Unused by this hyperparameter study, within original pretraining validation corpus; not pristine external test",
+    "metrics": [
+      {
+        "candidate": "hard_r16__filtered",
+        "full_normalized_sse": 0.9930927369907152,
+        "full_normalized_sse_ci95_low": 0.9925554385777282,
+        "full_normalized_sse_ci95_high": 0.9936125981419998,
+        "direct_joint_normalized_sse": 0.9918300500134046,
+        "count_mae": 0.21758337617921686,
+        "count_mae_occupied": 1.2789346978546718,
+        "speed_mae_occupied": 1.4749953385028671
+      },
+      {
+        "candidate": "soft_tau0.01__filtered",
+        "full_normalized_sse": 0.7182104183943817,
+        "full_normalized_sse_ci95_low": 0.7049341578097984,
+        "full_normalized_sse_ci95_high": 0.730621592501164,
+        "direct_joint_normalized_sse": 0.724646940209859,
+        "count_mae": 0.1874756077908431,
+        "count_mae_occupied": 1.5162959194448935,
+        "speed_mae_occupied": 1.7594656932069144
+      },
+      {
+        "candidate": "soft_tau0.1__filtered",
+        "full_normalized_sse": 0.7215609941908008,
+        "full_normalized_sse_ci95_low": 0.7093009865571372,
+        "full_normalized_sse_ci95_high": 0.7330981117637779,
+        "direct_joint_normalized_sse": 0.7281160588732108,
+        "count_mae": 0.1880329041883774,
+        "count_mae_occupied": 1.4910477183062876,
+        "speed_mae_occupied": 1.728685174167742
+      },
+      {
+        "candidate": "soft_tau0__filtered",
+        "full_normalized_sse": 0.7180964821096543,
+        "full_normalized_sse_ci95_low": 0.7046899389504468,
+        "full_normalized_sse_ci95_high": 0.7306404672985904,
+        "direct_joint_normalized_sse": 0.7245196561944738,
+        "count_mae": 0.18745196584686877,
+        "count_mae_occupied": 1.519520348801558,
+        "speed_mae_occupied": 1.7633488776452058
+      },
+      {
+        "candidate": "soft_tau10__filtered",
+        "full_normalized_sse": 0.939951433905853,
+        "full_normalized_sse_ci95_low": 0.9373784672585735,
+        "full_normalized_sse_ci95_high": 0.9423370985754177,
+        "direct_joint_normalized_sse": 0.9397947543182696,
+        "count_mae": 0.2131995709629044,
+        "count_mae_occupied": 1.2917368806422722,
+        "speed_mae_occupied": 1.498421317290008
+      },
+      {
+        "candidate": "soft_tau10__full",
+        "full_normalized_sse": 0.8290172654051836,
+        "full_normalized_sse_ci95_low": 0.819485650102516,
+        "full_normalized_sse_ci95_high": 0.8383066114484958,
+        "direct_joint_normalized_sse": 0.8300465072883889,
+        "count_mae": 0.20355490956812,
+        "count_mae_occupied": 1.4348908782757412,
+        "speed_mae_occupied": 1.7496603402479787
+      },
+      {
+        "candidate": "soft_tau1__filtered",
+        "full_normalized_sse": 0.7885993556244771,
+        "full_normalized_sse_ci95_low": 0.7807375600704093,
+        "full_normalized_sse_ci95_high": 0.7957843176458503,
+        "direct_joint_normalized_sse": 0.7949736102510152,
+        "count_mae": 0.19706338472097407,
+        "count_mae_occupied": 1.3862731300715598,
+        "speed_mae_occupied": 1.60748566273803
+      },
+      {
+        "candidate": "zero",
+        "full_normalized_sse": 1.0,
+        "full_normalized_sse_ci95_low": 1.0,
+        "full_normalized_sse_ci95_high": 1.0,
+        "direct_joint_normalized_sse": 1.0,
+        "count_mae": 0.2175017670925667,
+        "count_mae_occupied": 1.2748017769252356,
+        "speed_mae_occupied": 1.4475626362593035
+      }
+    ],
+    "selected_paired_contrasts": [
+      {
+        "candidate": "soft_tau0.1__filtered",
+        "candidate_minus_reference": -0.27843900580919934,
+        "ci95_high": -0.26690188823622213,
+        "ci95_low": -0.29069901344286264,
+        "metric": "full_normalized_sse",
+        "reference": "zero"
+      },
+      {
+        "candidate": "soft_tau0.1__filtered",
+        "candidate_minus_reference": -0.27188394112678904,
+        "ci95_high": -0.25665496372511504,
+        "ci95_low": -0.287834172434527,
+        "metric": "direct_joint_normalized_sse",
+        "reference": "zero"
+      },
+      {
+        "candidate": "soft_tau0.1__filtered",
+        "candidate_minus_reference": 0.0034645120811463907,
+        "ci95_high": 0.004706586624737025,
+        "ci95_low": 0.002257516955865377,
+        "metric": "full_normalized_sse",
+        "reference": "soft_tau0__filtered"
+      },
+      {
+        "candidate": "soft_tau0.1__filtered",
+        "candidate_minus_reference": 0.003596402678737153,
+        "ci95_high": 0.005538330533876798,
+        "ci95_low": 0.0016247564199676572,
+        "metric": "direct_joint_normalized_sse",
+        "reference": "soft_tau0__filtered"
+      },
+      {
+        "candidate": "soft_tau0.1__filtered",
+        "candidate_minus_reference": -0.21839043971505237,
+        "ci95_high": -0.2091996891095023,
+        "ci95_low": -0.22845649863369072,
+        "metric": "full_normalized_sse",
+        "reference": "soft_tau10__filtered"
+      },
+      {
+        "candidate": "soft_tau0.1__filtered",
+        "candidate_minus_reference": -0.21167869544505888,
+        "ci95_high": -0.19888976589209545,
+        "ci95_low": -0.22474814001265317,
+        "metric": "direct_joint_normalized_sse",
+        "reference": "soft_tau10__filtered"
+      }
+    ]
+  },
+  "conclusion": "Weak soft filtering can retain substantial state-predictable background. Tau10 suppresses most of that signal in this frozen-head probe. Tau0/very weak smoothing predict full increments slightly better than tau.1; stronger smoothing has better occupied-road decoded errors, so there is a tradeoff.",
+  "limitations": [
+    "Only output heads fitted: encoder, prior body, and decoder remain from completed hard/action-conditioned pretraining.",
+    "Raw-next diagnostic targets differ from production cohort-adjusted hybrid FM targets.",
+    "Occupied-road decoded count/speed errors remain worse than the zero-prior decoder baseline.",
+    "No new soft-prior FM joint training, multistep probabilistic evaluation, or downstream routing benefit established.",
+    "Single-city tuning evidence; changes to shared new-profile strength are provisional, not proof for every city.",
+    "State-only background is not an identified zero-action counterfactual."
+  ],
+  "implementation_changes": [
+    "MethodConfig strength default and18explicit soft profiles:10->.1",
+    "New frozen-runtime background sweep/confirmation tool and synthetic regression tests",
+    "Legacy constructors, archived configuration fingerprints, source-noise coordinates, and running frozen experiment profiles retained"
+  ],
+  "verification": {
+    "focused_tests_passed": 231,
+    "seconds": 63.9,
+    "archived_fingerprints_unchanged": true,
+    "independent_csv_scores": "8screen candidates ×4metrics;8fresh candidates ×4metrics;64fresh groups disjoint from original96",
+    "static": "Python compile and git whitespace checks passed"
+  },
+  "evidence": [
+    {
+      "path": "outputs/soft_background_20261014/v1/summary.json",
+      "sha256": "e6f0a9765749c16ba69c595366b0799065654db752d8f503579300d07992fb28"
+    },
+    {
+      "path": "outputs/soft_background_20261014/v1/protocol.json",
+      "sha256": "7089a56cc93210bc540005714215d0992b01c704f8e8624f6b3a1ec6c4befe2f"
+    },
+    {
+      "path": "outputs/soft_background_20261014/v1/native_reference_gate.json",
+      "sha256": "c53caa045e0e7c72721958e5c08eb06f8ca63efd5b5d48c128ab7e7c7a6d0c15"
+    },
+    {
+      "path": "outputs/soft_background_20261014/v1/source_manifest.json",
+      "sha256": "9ec2e76a7a0f9e71b4163117dc24755fbe9785c4084d80c76a0d8f5a3cd20bee"
+    },
+    {
+      "path": "outputs/soft_background_20261014/v1/fresh_validation_confirmation/summary.json",
+      "sha256": "5d2f2caefe10572f60c58be3af89a52ed74786838889aec98d45f3d2dd4385c1"
+    },
+    {
+      "path": "outputs/soft_background_20261014/v1/fresh_validation_confirmation/protocol.json",
+      "sha256": "adbd5db55c3cd4af3a6df653cba7b22508b93259ec66cf1af8915dc4019e1163"
+    },
+    {
+      "path": "outputs/soft_background_20261014/v1/fresh_validation_confirmation/demand_group_metrics.csv",
+      "sha256": "9e098e775dc51205f55b8e67e53f29e908799e555fb2e404bd4de7498592c966"
+    },
+    {
+      "path": "outputs/soft_background_20261014/v1/fresh_validation_confirmation/source_manifest.json",
+      "sha256": "bb085c71d27496340b31fdafa337d87344997f6835c2a51fe26baa315665a642"
+    }
+  ]
+}
