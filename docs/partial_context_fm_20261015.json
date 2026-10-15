@@ -1,0 +1,671 @@
+{
+  "status": "complete",
+  "experiment": "Equal-budget partial FM adaptation separating coarse source mean and reference state",
+  "checkpoint_sha256": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+  "completed_pretrain_wm_updates": 49636,
+  "prior": "Fixed state-only weak softtau.1 predictor fitted on HYBRIDCt labels; originalrank16source Gaussian noise paired",
+  "protocol": {
+    "arms": {
+      "B": {
+        "hint": "same frozen state-only b",
+        "reference_on": false,
+        "source_on": false
+      },
+      "C1": {
+        "hint": "same frozen state-only b",
+        "reference_on": false,
+        "source_on": true
+      },
+      "C2": {
+        "hint": "same frozen state-only b",
+        "reference_on": true,
+        "source_on": true
+      }
+    },
+    "cache": "only training Z/targetZ/background/action/edgecondition/time/noisecoefficients; no H cache",
+    "comparisons": "C1vsB sourceeffect atfixedrefZ; C2vsC1 referenceeffect atfixedcoarsesource; C2vsBjoint",
+    "device": "cuda:0",
+    "execution": "FP32 noAMP noTF32 noCompile eval-mode dropoutdisabled activationcheckpointing",
+    "freeze": "codec/prior/actionconditioning/first5Transformerblocks allfrozen; gradients retained THROUGH frozenprefix to reference_proj",
+    "gpu_memory_fraction": 0.08,
+    "limitations": [
+      "Onepretrainedbackbone and adaptationseed; validationplateau does notprove globaloptimum.",
+      "Cap without patience isbudgetlimited; only partialadaptation, not fulljointtraining.",
+      "ALLarms havebackgroundhint: tests coarse source/reference incremental value, not hint necessity or policy benefit."
+    ],
+    "loss": "fullvelocity CFM MSE target=encodedHYBRIDfuture-source, paired4stratifiedtime/noise draws; no oldresidualY",
+    "normalizers": "scalaruncenteredRMS fromsame64traininggroups; relative pooledzero+coarsesource; no validation/test fit",
+    "reference_hashes": {
+      "basis": "a34391d005d5b25160f923dae964d2d4b80d11f2017c52633810ad87e9cc72a2",
+      "cache_manifest": "563c72bac949130684c244f10062f7c157d57b1e1a1d7c9710f6fa47ea993e18",
+      "checkpoint": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+      "pilot": "0e3da70c295ec892c96c99c500005ccdadc96ee662a91963ce2c8cde09606e18",
+      "scale_reference": "c3c41f4ca3b2dfd34aa1fc13e76cafed16580cafc508308ef16eb9bb252fa52d",
+      "split": "b8e10259ca58c538bdb2b9a34a3b076541490f4d457b097c0afe11d892d90118",
+      "weak_head": "9d2e128f9830b6167668cdb37de98cd43c4380ad535c3f55248cdcc6a17b2c11"
+    },
+    "seed": 20261021,
+    "status": "prespecified_before_partial_fit_or_scores",
+    "test": "fresh32states16groups only afterselection; K8Euler100, pairedwhole-demandgroupbootstrap2000",
+    "trainable_parameters_per_arm": 1414528,
+    "training": {
+      "batch_whole_graphs": 2,
+      "best_epsilon": 1e-05,
+      "clip_norm": 1.0,
+      "equal_actual_consumed_budget": true,
+      "initial_epoch0_candidate": true,
+      "maximum_epochs": 4,
+      "meaningful_ES_reset_relative": 0.002,
+      "minimum_epochs": 3,
+      "new_residual_lr": 0.001,
+      "optimizer": "AdamW",
+      "original_module_lr": 0.0001,
+      "patience_checks": 3,
+      "validation_every_epochs": 1,
+      "weight_decay": 0.0001
+    },
+    "validation": "samefixed8states4groups K4Euler100 everycheck; independentlybestES, all3patience3 stops"
+  },
+  "interpretation": {
+    "source_choice": "C1 remains substantially worse than B after equal partial adaptation.",
+    "joint_choice": "C2 reduces the mismatch relative to C1 but remains worse than B in ES/countCRPS and totalcount error; speedCRPS difference CI includeszero.",
+    "budget": "C2 still improves at last validation; cap reached, cannot claim fullyoptimized or universally useless coarse sources.",
+    "coverage": "Empirical K8 nominal90 intervals under-cover on these states; finite ensemble quantiles also affect coverage. No calibrated-generative-superiority claim."
+  },
+  "selection": {
+    "actual_equal_epochs": 4,
+    "best": {
+      "B": {
+        "ES": 8.926929919516537,
+        "epoch": 1,
+        "patience": 3,
+        "reset_ES": 8.926929919516537,
+        "reset_epoch": 1
+      },
+      "C1": {
+        "ES": 12.257343295248072,
+        "epoch": 3,
+        "patience": 1,
+        "reset_ES": 12.257343295248072,
+        "reset_epoch": 3
+      },
+      "C2": {
+        "ES": 9.771510148641692,
+        "epoch": 4,
+        "patience": 0,
+        "reset_ES": 9.771510148641692,
+        "reset_epoch": 4
+      }
+    },
+    "budget_limited": true,
+    "status": "frozen_before_new_blindtest",
+    "stop_reason": "maximum_epoch_cap",
+    "updates_per_arm": 6144
+  },
+  "results": {
+    "B": {
+      "energy_score": {
+        "ci_high": 10.13025549951212,
+        "ci_low": 7.512544162074822,
+        "demand_groups": 16,
+        "estimate": 8.838768426266824
+      },
+      "energy_score_u": {
+        "ci_high": 9.685869958288954,
+        "ci_low": 7.19809858309341,
+        "demand_groups": 16,
+        "estimate": 8.455088952081963
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.5520072232966612,
+        "ci_low": 0.4655363910243181,
+        "demand_groups": 16,
+        "estimate": 0.5113161834352538
+      },
+      "speed_crps_occupied": {
+        "ci_high": 1.0456505657894213,
+        "ci_low": 0.7486228462007106,
+        "demand_groups": 16,
+        "estimate": 0.8905320785212577
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.654175652048979,
+        "ci_low": 0.5503713845634449,
+        "demand_groups": 16,
+        "estimate": 0.6051821250650338
+      },
+      "speed_mae_occupied": {
+        "ci_high": 1.1481440491464068,
+        "ci_low": 0.8293046274738909,
+        "demand_groups": 16,
+        "estimate": 0.9837685827448196
+      },
+      "count_coverage90_occupied": {
+        "ci_high": 0.43697547103341206,
+        "ci_low": 0.4037182502726267,
+        "demand_groups": 16,
+        "estimate": 0.4196060687964953
+      },
+      "speed_coverage90_occupied": {
+        "ci_high": 0.38241387787342707,
+        "ci_low": 0.35428809976216075,
+        "demand_groups": 16,
+        "estimate": 0.3682762336800687
+      },
+      "count_width90_occupied": {
+        "ci_high": 0.7467408282153203,
+        "ci_low": 0.6058808163438875,
+        "demand_groups": 16,
+        "estimate": 0.6768625536311728
+      },
+      "speed_width90_occupied": {
+        "ci_high": 0.6936021534768009,
+        "ci_low": 0.5241289338556934,
+        "demand_groups": 16,
+        "estimate": 0.6093985586919771
+      },
+      "total_count_absolute_error": {
+        "ci_high": 11.7225950068862,
+        "ci_low": 7.102119579333168,
+        "demand_groups": 16,
+        "estimate": 9.338744256070699
+      }
+    },
+    "C1": {
+      "energy_score": {
+        "ci_high": 18.475415811335957,
+        "ci_low": 10.586355818100449,
+        "demand_groups": 16,
+        "estimate": 14.042971871146582
+      },
+      "energy_score_u": {
+        "ci_high": 18.216478712658617,
+        "ci_low": 10.377263321078603,
+        "demand_groups": 16,
+        "estimate": 13.798704053776225
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.9546421080209325,
+        "ci_low": 0.7821877052628153,
+        "demand_groups": 16,
+        "estimate": 0.8642802520468381
+      },
+      "speed_crps_occupied": {
+        "ci_high": 1.2666510497234813,
+        "ci_low": 0.9348584866308125,
+        "demand_groups": 16,
+        "estimate": 1.0975077066082566
+      },
+      "count_mae_occupied": {
+        "ci_high": 1.0293162247227485,
+        "ci_low": 0.848978771017077,
+        "demand_groups": 16,
+        "estimate": 0.9340511161294826
+      },
+      "speed_mae_occupied": {
+        "ci_high": 1.362225938217185,
+        "ci_low": 1.0145638973765043,
+        "demand_groups": 16,
+        "estimate": 1.1838004158561344
+      },
+      "count_coverage90_occupied": {
+        "ci_high": 0.2026708029105372,
+        "ci_low": 0.17653526513469908,
+        "demand_groups": 16,
+        "estimate": 0.18938295806601183
+      },
+      "speed_coverage90_occupied": {
+        "ci_high": 0.35714132761104084,
+        "ci_low": 0.3245053586077177,
+        "demand_groups": 16,
+        "estimate": 0.3402650515586803
+      },
+      "count_width90_occupied": {
+        "ci_high": 0.4638657767612807,
+        "ci_low": 0.39856270031548063,
+        "demand_groups": 16,
+        "estimate": 0.4303815188044761
+      },
+      "speed_width90_occupied": {
+        "ci_high": 0.615693070312688,
+        "ci_low": 0.47347868412066424,
+        "demand_groups": 16,
+        "estimate": 0.5397083843837662
+      },
+      "total_count_absolute_error": {
+        "ci_high": 59.9958229679118,
+        "ci_low": 25.64050217675204,
+        "demand_groups": 16,
+        "estimate": 43.00628184668934
+      }
+    },
+    "C2": {
+      "energy_score": {
+        "ci_high": 11.020144004969286,
+        "ci_low": 8.204073965332698,
+        "demand_groups": 16,
+        "estimate": 9.618947125095652
+      },
+      "energy_score_u": {
+        "ci_high": 10.589657673762968,
+        "ci_low": 7.874945606689322,
+        "demand_groups": 16,
+        "estimate": 9.236471615189217
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.647881037316392,
+        "ci_low": 0.5456030529167363,
+        "demand_groups": 16,
+        "estimate": 0.5975186653376285
+      },
+      "speed_crps_occupied": {
+        "ci_high": 1.053474258846923,
+        "ci_low": 0.7727036477873043,
+        "demand_groups": 16,
+        "estimate": 0.9094564750608769
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.7494806392278345,
+        "ci_low": 0.6327956444304903,
+        "demand_groups": 16,
+        "estimate": 0.6926341927239366
+      },
+      "speed_mae_occupied": {
+        "ci_high": 1.152027189092774,
+        "ci_low": 0.8507628429137176,
+        "demand_groups": 16,
+        "estimate": 0.9993221228061435
+      },
+      "count_coverage90_occupied": {
+        "ci_high": 0.3641810761933329,
+        "ci_low": 0.3325450123013895,
+        "demand_groups": 16,
+        "estimate": 0.34826686720530564
+      },
+      "speed_coverage90_occupied": {
+        "ci_high": 0.36077935067901035,
+        "ci_low": 0.31474673044096263,
+        "demand_groups": 16,
+        "estimate": 0.33851244838479333
+      },
+      "count_width90_occupied": {
+        "ci_high": 0.7168944282977274,
+        "ci_low": 0.5975332414742274,
+        "demand_groups": 16,
+        "estimate": 0.6595193254717711
+      },
+      "speed_width90_occupied": {
+        "ci_high": 0.7500086098630309,
+        "ci_low": 0.5695169095542394,
+        "demand_groups": 16,
+        "estimate": 0.6563588696586895
+      },
+      "total_count_absolute_error": {
+        "ci_high": 20.65090318628248,
+        "ci_low": 9.445219490793969,
+        "demand_groups": 16,
+        "estimate": 14.78762917145171
+      }
+    }
+  },
+  "contrasts": {
+    "joint_effect": {
+      "energy_score": {
+        "ci_high": 1.0134288853828046,
+        "ci_low": 0.5510351332454628,
+        "demand_groups": 16,
+        "estimate": 0.780178698828827
+      },
+      "energy_score_u": {
+        "ci_high": 1.0082510078246516,
+        "ci_low": 0.5521184417218494,
+        "demand_groups": 16,
+        "estimate": 0.7813826631072525
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.10613648980866097,
+        "ci_low": 0.06818269372859978,
+        "demand_groups": 16,
+        "estimate": 0.08620248190237487
+      },
+      "speed_crps_occupied": {
+        "ci_high": 0.06307056059476222,
+        "ci_low": -0.0259558293439196,
+        "demand_groups": 16,
+        "estimate": 0.018924396539619012
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.10828671277567532,
+        "ci_low": 0.06807478454161099,
+        "demand_groups": 16,
+        "estimate": 0.08745206765890264
+      },
+      "speed_mae_occupied": {
+        "ci_high": 0.0625884978207169,
+        "ci_low": -0.029406243891154787,
+        "demand_groups": 16,
+        "estimate": 0.015553540061323961
+      },
+      "count_coverage90_occupied": {
+        "ci_high": -0.051505528175669356,
+        "ci_low": -0.09205668967688262,
+        "demand_groups": 16,
+        "estimate": -0.07133920159118967
+      },
+      "speed_coverage90_occupied": {
+        "ci_high": -0.005475780134812671,
+        "ci_low": -0.05393418394722109,
+        "demand_groups": 16,
+        "estimate": -0.02976378529527539
+      },
+      "count_width90_occupied": {
+        "ci_high": 0.0031069006586009005,
+        "ci_low": -0.036404270068577826,
+        "demand_groups": 16,
+        "estimate": -0.017343228159401577
+      },
+      "speed_width90_occupied": {
+        "ci_high": 0.09480028748753638,
+        "ci_low": 0.008085915060178953,
+        "demand_groups": 16,
+        "estimate": 0.0469603109667124
+      },
+      "total_count_absolute_error": {
+        "ci_high": 10.606488508153799,
+        "ci_low": 0.5886394688156049,
+        "demand_groups": 16,
+        "estimate": 5.4488849153810115
+      }
+    },
+    "reference_effect": {
+      "energy_score": {
+        "ci_high": -1.9800078931097291,
+        "ci_low": -8.538482825022674,
+        "demand_groups": 16,
+        "estimate": -4.42402474605093
+      },
+      "energy_score_u": {
+        "ci_high": -2.1008555005446192,
+        "ci_low": -8.675275700779562,
+        "demand_groups": 16,
+        "estimate": -4.562232438587009
+      },
+      "count_crps_occupied": {
+        "ci_high": -0.21656349665391925,
+        "ci_low": -0.3376745783074927,
+        "demand_groups": 16,
+        "estimate": -0.26676158670920963
+      },
+      "speed_crps_occupied": {
+        "ci_high": -0.12851361033389366,
+        "ci_low": -0.2655414528142165,
+        "demand_groups": 16,
+        "estimate": -0.18805123154737974
+      },
+      "count_mae_occupied": {
+        "ci_high": -0.19051354609460108,
+        "ci_low": -0.31209776645337495,
+        "demand_groups": 16,
+        "estimate": -0.241416923405546
+      },
+      "speed_mae_occupied": {
+        "ci_high": -0.12434510389881587,
+        "ci_low": -0.26519638635837,
+        "demand_groups": 16,
+        "estimate": -0.18447829304999094
+      },
+      "count_coverage90_occupied": {
+        "ci_high": 0.17840163578018758,
+        "ci_low": 0.1395775450704614,
+        "demand_groups": 16,
+        "estimate": 0.15888390913929382
+      },
+      "speed_coverage90_occupied": {
+        "ci_high": 0.024964754191648113,
+        "ci_low": -0.02877152492415946,
+        "demand_groups": 16,
+        "estimate": -0.0017526031738869796
+      },
+      "count_width90_occupied": {
+        "ci_high": 0.2751647146632163,
+        "ci_low": 0.18225783772010662,
+        "demand_groups": 16,
+        "estimate": 0.22913780666729505
+      },
+      "speed_width90_occupied": {
+        "ci_high": 0.18675930836853083,
+        "ci_low": 0.05014205977226955,
+        "demand_groups": 16,
+        "estimate": 0.11665048527492325
+      },
+      "total_count_absolute_error": {
+        "ci_high": -15.145434649071035,
+        "ci_low": -41.7579082170567,
+        "demand_groups": 16,
+        "estimate": -28.218652675237635
+      }
+    },
+    "source_effect": {
+      "energy_score": {
+        "ci_high": 9.368983772984548,
+        "ci_low": 2.7351395884244636,
+        "demand_groups": 16,
+        "estimate": 5.204203444879756
+      },
+      "energy_score_u": {
+        "ci_high": 9.50897862537309,
+        "ci_low": 2.849216214119857,
+        "demand_groups": 16,
+        "estimate": 5.343615101694262
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.4282439114115221,
+        "ci_low": 0.2975931411447927,
+        "demand_groups": 16,
+        "estimate": 0.35296406861158447
+      },
+      "speed_crps_occupied": {
+        "ci_high": 0.28708539637180136,
+        "ci_low": 0.1407666583499667,
+        "demand_groups": 16,
+        "estimate": 0.20697562808699876
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.40693597799654185,
+        "ci_low": 0.2736243490389644,
+        "demand_groups": 16,
+        "estimate": 0.32886899106444867
+      },
+      "speed_mae_occupied": {
+        "ci_high": 0.2850597723770944,
+        "ci_low": 0.12939358518987926,
+        "demand_groups": 16,
+        "estimate": 0.2000318331113149
+      },
+      "count_coverage90_occupied": {
+        "ci_high": -0.21410328728281386,
+        "ci_low": -0.2470719086159942,
+        "demand_groups": 16,
+        "estimate": -0.2302231107304835
+      },
+      "speed_coverage90_occupied": {
+        "ci_high": -0.011086412803712148,
+        "ci_low": -0.04337866140115248,
+        "demand_groups": 16,
+        "estimate": -0.028011182121388405
+      },
+      "count_width90_occupied": {
+        "ci_high": -0.18871034288172672,
+        "ci_low": -0.30212792060131266,
+        "demand_groups": 16,
+        "estimate": -0.24648103482669664
+      },
+      "speed_width90_occupied": {
+        "ci_high": -0.004861989244665357,
+        "ci_low": -0.1357012946881371,
+        "demand_groups": 16,
+        "estimate": -0.06969017430821084
+      },
+      "total_count_absolute_error": {
+        "ci_high": 50.91460038153784,
+        "ci_low": 16.141268430031662,
+        "demand_groups": 16,
+        "estimate": 33.66753759061865
+      }
+    }
+  },
+  "validation_curve": [
+    {
+      "epoch": 0,
+      "ES": {
+        "B": 8.983734262089612,
+        "C1": 44.06559349572235,
+        "C2": 13.170619513953602
+      }
+    },
+    {
+      "epoch": 1,
+      "ES": {
+        "B": 8.926929919516537,
+        "C1": 12.853291479872237,
+        "C2": 10.346298957701073
+      },
+      "train_CFM_MSE": {
+        "B": 0.0002173690456809633,
+        "C1": 0.002523347327136586,
+        "C2": 0.0003151881335933619
+      },
+      "epoch_seconds": 369.246773481369
+    },
+    {
+      "epoch": 2,
+      "ES": {
+        "B": 9.82421245150734,
+        "C1": 12.438704481816522,
+        "C2": 10.994908505242556
+      },
+      "train_CFM_MSE": {
+        "B": 0.00016513131278609686,
+        "C1": 0.001392849890085775,
+        "C2": 0.00022811923142522042
+      },
+      "epoch_seconds": 334.64531207084656
+    },
+    {
+      "epoch": 3,
+      "ES": {
+        "B": 9.951805057022568,
+        "C1": 12.257343295248072,
+        "C2": 10.286139321093135
+      },
+      "train_CFM_MSE": {
+        "B": 0.00015239510002847587,
+        "C1": 0.0011891943922724597,
+        "C2": 0.00021240887916225878
+      },
+      "epoch_seconds": 297.8238091468811
+    },
+    {
+      "epoch": 4,
+      "ES": {
+        "B": 9.250756391207187,
+        "C1": 12.851144591545445,
+        "C2": 9.771510148641692
+      },
+      "train_CFM_MSE": {
+        "B": 0.00015021183402434227,
+        "C1": 0.0009965000858187523,
+        "C2": 0.00019512334738536197
+      },
+      "epoch_seconds": 289.76721239089966
+    }
+  ],
+  "scope": [
+    "All three arms receive the same background hint; this tests incremental value of coarse source/reference choices after equal adaptation.",
+    "Separately adapted models; not a within-identical-weights source-only intervention.",
+    "Original pretrained backbone complete; partial adaptation is budget-limited if cap reached before patience.",
+    "One frozen pretrained checkpoint and adaptation seed, one city; no policy or cross-city benefit claim.",
+    "No SUMO interaction or complete joint-model retraining was performed."
+  ],
+  "resource_restart": {
+    "status": "resource_restart_before_first_epoch_complete",
+    "reason": "GPU1 shared by two other compute jobs; GPU0 idle. Stop only owned training, restart unchangedprotocol/initialization onGPU0.",
+    "pid": 977393,
+    "discarded_partial_training": true,
+    "new_test_scored": false,
+    "time_utc": "2026-10-15T13:53:25.809267+00:00"
+  },
+  "runtime": {
+    "elapsed_seconds": 1683.8120148181915,
+    "max_gpu_allocated_mib": 423.2255859375
+  },
+  "independent_verification": {
+    "status": "pass",
+    "independent_numpy_bank_scores": true,
+    "independent_group_bootstrap": true,
+    "validation_only_selection": true,
+    "equal_actual_epochs": 4,
+    "equal_actual_updates_per_arm": 6144,
+    "trainable_parameters_per_arm": 1414528,
+    "selected_state_scope_verified": true,
+    "reference_gradient_through_frozen_prefix_verified": true,
+    "original_data_manifest_not_overwritten": true,
+    "fresh_test_disjoint_direct_v2": true,
+    "checkpoint_sha256": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+    "integration_steps": 100,
+    "budget_limited": true,
+    "best": {
+      "B": {
+        "ES": 8.926929919516537,
+        "epoch": 1,
+        "reset_ES": 8.926929919516537,
+        "reset_epoch": 1,
+        "patience": 3
+      },
+      "C1": {
+        "ES": 12.257343295248072,
+        "epoch": 3,
+        "reset_ES": 12.257343295248072,
+        "reset_epoch": 3,
+        "patience": 1
+      },
+      "C2": {
+        "ES": 9.771510148641692,
+        "epoch": 4,
+        "reset_ES": 9.771510148641692,
+        "reset_epoch": 4,
+        "patience": 0
+      }
+    },
+    "test_rows": 96,
+    "test_states": 32,
+    "adaptation_effect_scope": "equal-budget independently adapted variants; not within-identical-weights causal intervention",
+    "cache": {
+      "window_rows": 768,
+      "augmented_graphs": 3072,
+      "shared_draws_reproduced": true,
+      "training_only_normalizers_recomputed": true,
+      "cache_files": 8
+    },
+    "verifier_sha256": "49bb249b7ccc021fa493b4e5c4c8e6dbc8ba9ca282496a807c02f0a3655e5f61",
+    "numerical_helper_sha256": "f03789e34ec036354f31deb4438bbd5d373e551948592a6eb386912b1cecbe77",
+    "bank_metric_checks": 12312,
+    "interval_checks": 702,
+    "files_hashed": 435
+  },
+  "validation": {
+    "focused_tests": "28 passed",
+    "compile": "passed",
+    "diff_check": "passed"
+  },
+  "artifacts": {
+    "root": "outputs/partial_context_fm_20261015/v2_gpu0",
+    "summary": "outputs/partial_context_fm_20261015/v2_gpu0/summary.json",
+    "pilot": "outputs/partial_context_fm_20261015/pilot_v1"
+  },
+  "h4_gate": {
+    "eligible": [],
+    "protocol_sha256": "d53fbf04d3321252d04794fe67f740be035ea2c721d4db35376fef63812ba60a",
+    "tuning_after_test": false
+  }
+}
