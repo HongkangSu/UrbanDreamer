@@ -1,0 +1,2239 @@
+{
+  "status": "complete_screening",
+  "experiment": "Equal-budget directly conditioned small FM residuals with a completed frozen backbone",
+  "checkpoint_sha256": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+  "completed_pretrain_wm_updates": 49636,
+  "protocol": {
+    "arms": [
+      "zero_direct",
+      "soft_direct",
+      "condition_only"
+    ],
+    "cache_compatibility": "firsttraininggroup/firstquarter bothfamilies H/Y allrows: rtol1e-4 atol1e-4 beforeSGD; failclosed",
+    "caches": "reuse all oldH/Y immutable; newcompactperwindow Z/b and parentrow-relative/time/windowindex; NOnewTransformerforwardcache",
+    "controls": "FULLcurrenttraffic/FULLfactualactionevents/HYBRIDCt endpoint; source noiseoriginalrank16 exactpaired draws",
+    "device": "cpu",
+    "freeze": "alloriginalCP/body/codec/prior/action/ref/Linearflowhead frozen; onlynewg receivesgradients",
+    "gpu_memory_fraction": 0.04,
+    "initial_gate": "same-backend original vs zero residual exact; archived bit identity additionally required onlyCUDA100",
+    "integration_steps": 4,
+    "limitations": [
+      "Onefrozenbackbone/headseed; notfulljointtraining orpolicybenefit.",
+      "maxcapbudgetlimited; no fullmodelconvergenceclaim."
+    ],
+    "network": "449->128SiLU->64,65856params,lastlayerzeros; H256/Z64/hint64/(GENERATEDXt-sourceMean)64/time1",
+    "normalizers": "scalar training-only uncenteredRMS: Z, weakb, pooledzero+softrelative; H unchanged; zero hint remainszero",
+    "optional_h4": "eachpriorarm eligible vszero ifES+bothoccupiedCRPS CIupper<0 andtotalcountpoint<=0; ifany qualifies fixedfirst8teststatesC0 H4Euler4K8",
+    "precision": "FP32noAMP/compile CPU/BLAS4",
+    "priors": "zero_direct zero source/ref and zero hint; soft_direct weak matchedHYBRIDtau.1 source/ref/hint; condition_only zero source/ref with sameweak hint",
+    "reference_hashes": {
+      "basis": "a34391d005d5b25160f923dae964d2d4b80d11f2017c52633810ad87e9cc72a2",
+      "cache_manifest": "e758d7f141c676b69720ad3a892163c2203ee3118ea4d84e7cb138fe58ba6a45",
+      "checkpoint": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+      "known_banks": "1b17d7b2928d5f6456d4bbe902e34c99d727a181f56cf2ad04f09fe27b1eeb58",
+      "known_cache": "5937f92c0b3d99592ea1695188db89c9422c319869b67dd2db047c9446f1de53",
+      "known_conditions": "3ccabb2cef301edae36a434edc8770190ec6c4ff69fc645ac35ea9adfdb318a7",
+      "old_soft_head": "af1e532d92d8d10946a166acecc135ca586f9f7d7ca8cb5a461857e7fb185d7c",
+      "old_zero_head": "2cdab3cf4af84aa06d43d8abe65ecbd3c7096aab34af2081e2804a2e82f934d5",
+      "parent_draws": "d4005b0c45f80ed8fb5e8dbe97b99f2267f5fd93ae1c23385a660408abd86c16",
+      "parent_features": "58f29edd2611ab5677ce225fcf2e67d0b9eef6a44fbae77e65591bb7035212c9",
+      "parent_source": "59b4068a869191890fef967b4411fc76276426ec21c17711f9241f0291fdf973",
+      "scales": "c3c41f4ca3b2dfd34aa1fc13e76cafed16580cafc508308ef16eb9bb252fa52d",
+      "split": "92657ba17f1606b9d86a8b1b580d65302d6a0ebbd761ae46f998e9ddbb1e657f",
+      "weak_head": "9d2e128f9830b6167668cdb37de98cd43c4380ad535c3f55248cdcc6a17b2c11"
+    },
+    "screening": true,
+    "seed": 20261021,
+    "status": "prespecified_before_fit",
+    "test": "32states16NEWblindgroups afterselection;3newarms+2oldH-onlybestheads descriptive references",
+    "training": {
+      "batch_rows": 32768,
+      "best_epsilon": 1e-05,
+      "clip_norm": 1,
+      "lr": 0.001,
+      "maximum_epochs": 120,
+      "meaningful_reset_relative": 0.002,
+      "minimum_epochs": 20,
+      "optimizer": "AdamW",
+      "patience_checks": 3,
+      "stop": "ALL3checkswithoutmeaningfulESimprovement; sameepoch/updatebudget",
+      "weight_decay": 0.0001
+    },
+    "validation": "epoch0 candidate and8samefixedstates4groupsK4Euler4 at20,25,...120; independentbestvalES"
+  },
+  "split_audit": {
+    "full_manifest_sha256": "34169f27525094b6103b5a0556f64c14c3e176d7985f19fd0d5543bc68c4c30e",
+    "full_manifest_identity": "5254f01c7863d3e8524d4cf118983fae1bfbe755832ece48380acbdd11eab443",
+    "parent_split_sha256": "707bb000a35acc4b47f1624b1d323d9c3a95a889ad87c231dd510cca574d7534",
+    "parent_features_sha256": "58f29edd2611ab5677ce225fcf2e67d0b9eef6a44fbae77e65591bb7035212c9",
+    "previously_used_groups": 192,
+    "fresh_test_pool": 631,
+    "test_groups": 16,
+    "parent_train_and_validation_unchanged": true,
+    "parent_test_not_reused": true,
+    "train_validation_test_disjoint": true,
+    "score_independent_selection": true,
+    "split_sha256": "92657ba17f1606b9d86a8b1b580d65302d6a0ebbd761ae46f998e9ddbb1e657f",
+    "subset_manifest_sha256": "e758d7f141c676b69720ad3a892163c2203ee3118ea4d84e7cb138fe58ba6a45"
+  },
+  "results": {
+    "H4_eligible": [],
+    "actual_equal_epochs": 95,
+    "best": {
+      "condition_only": {
+        "ES": 9.050092993974843,
+        "epoch": 80,
+        "patience": 3,
+        "reset_ES": 9.050092993974843,
+        "reset_epoch": 80
+      },
+      "soft_direct": {
+        "ES": 11.429476243727706,
+        "epoch": 95,
+        "patience": 8,
+        "reset_ES": 11.437156398673771,
+        "reset_epoch": 55
+      },
+      "zero_direct": {
+        "ES": 9.01937364138752,
+        "epoch": 70,
+        "patience": 5,
+        "reset_ES": 9.01937364138752,
+        "reset_epoch": 70
+      }
+    },
+    "budget_limited": false,
+    "data_unchanged": true,
+    "elapsed_seconds": 6119.363435745239,
+    "normalizers": {
+      "b": 0.10405564173056031,
+      "relative": 0.1121621511700398,
+      "z": 1.0035819754237116
+    },
+    "only_new_parameters_per_arm": 65856,
+    "original_model_digest": "2afc6f08247e18854aa47440ff5140b08d5989ca2d52391290c46b965481652a",
+    "original_model_unchanged": true,
+    "parent_features_unchanged": true,
+    "source_unchanged": true,
+    "status": "complete",
+    "stop_reason": "all_meaningful_ES_patience3",
+    "test": {
+      "arms": [
+        {
+          "arm": "condition_only",
+          "metrics": {
+            "count_coverage90_all": {
+              "ci_high": 0.04876263921453692,
+              "ci_low": 0.023771798065650645,
+              "demand_groups": 16,
+              "estimate": 0.03509671746776084
+            },
+            "count_coverage90_occupied": {
+              "ci_high": 0.3093225839017198,
+              "ci_low": 0.24689462177293664,
+              "demand_groups": 16,
+              "estimate": 0.2762758950947616
+            },
+            "count_crps_all": {
+              "ci_high": 0.13950064049129515,
+              "ci_low": 0.06135624055588705,
+              "demand_groups": 16,
+              "estimate": 0.0967509687499587
+            },
+            "count_crps_occupied": {
+              "ci_high": 0.6760022425747312,
+              "ci_low": 0.5637221131608942,
+              "demand_groups": 16,
+              "estimate": 0.6132949413068234
+            },
+            "count_mae_all": {
+              "ci_high": 0.1631174469580473,
+              "ci_low": 0.0704060070513986,
+              "demand_groups": 16,
+              "estimate": 0.1124583119836528
+            },
+            "count_mae_occupied": {
+              "ci_high": 0.7498044957818671,
+              "ci_low": 0.6337676178345661,
+              "demand_groups": 16,
+              "estimate": 0.6858690535411447
+            },
+            "count_mse_all": {
+              "ci_high": 0.23366697604409706,
+              "ci_low": 0.09480220893670213,
+              "demand_groups": 16,
+              "estimate": 0.1588112430853234
+            },
+            "count_mse_occupied": {
+              "ci_high": 1.3424772915159093,
+              "ci_low": 0.8103253014853283,
+              "demand_groups": 16,
+              "estimate": 1.0241944967262984
+            },
+            "count_rmse_all": {
+              "ci_high": 0.48339112118872957,
+              "ci_low": 0.30789967349236036,
+              "demand_groups": 16,
+              "estimate": 0.3985112835106723
+            },
+            "count_rmse_occupied": {
+              "ci_high": 1.158653223150011,
+              "ci_low": 0.9001807049061473,
+              "demand_groups": 16,
+              "estimate": 1.0120249486679163
+            },
+            "count_sample_variance_all": {
+              "ci_high": 0.020329715672799,
+              "ci_low": 0.0074333771050573046,
+              "demand_groups": 16,
+              "estimate": 0.013362133465786477
+            },
+            "count_sample_variance_occupied": {
+              "ci_high": 0.07318025426805232,
+              "ci_low": 0.05596789183359585,
+              "demand_groups": 16,
+              "estimate": 0.06486723257379769
+            },
+            "count_width90_all": {
+              "ci_high": 0.14106973093701913,
+              "ci_low": 0.055248696103565254,
+              "demand_groups": 16,
+              "estimate": 0.0946935017648039
+            },
+            "count_width90_occupied": {
+              "ci_high": 0.5139398253950468,
+              "ci_low": 0.4409123943725825,
+              "demand_groups": 16,
+              "estimate": 0.47699920802225493
+            },
+            "energy_score": {
+              "ci_high": 9.938629974040555,
+              "ci_low": 7.615819608387699,
+              "demand_groups": 16,
+              "estimate": 8.700321123239943
+            },
+            "energy_score_u": {
+              "ci_high": 9.668348539145983,
+              "ci_low": 7.419733569396973,
+              "demand_groups": 16,
+              "estimate": 8.472367954464765
+            },
+            "speed_coverage90_all": {
+              "ci_high": 0.23721882327080887,
+              "ci_low": 0.20508316236811253,
+              "demand_groups": 16,
+              "estimate": 0.22054513481828839
+            },
+            "speed_coverage90_occupied": {
+              "ci_high": 0.32364033309933554,
+              "ci_low": 0.27917634353904014,
+              "demand_groups": 16,
+              "estimate": 0.3006947026607474
+            },
+            "speed_crps_all": {
+              "ci_high": 0.2937847129480686,
+              "ci_low": 0.224023800089405,
+              "demand_groups": 16,
+              "estimate": 0.25569037225856583
+            },
+            "speed_crps_occupied": {
+              "ci_high": 1.075874344302658,
+              "ci_low": 0.771139069175418,
+              "demand_groups": 16,
+              "estimate": 0.9138427700789948
+            },
+            "speed_mae_all": {
+              "ci_high": 0.32598283447031384,
+              "ci_low": 0.24571510527192994,
+              "demand_groups": 16,
+              "estimate": 0.2823363279166895
+            },
+            "speed_mae_occupied": {
+              "ci_high": 1.1834829622186231,
+              "ci_low": 0.8552385348645297,
+              "demand_groups": 16,
+              "estimate": 1.0091019536981196
+            },
+            "speed_mse_all": {
+              "ci_high": 1.2897204094046186,
+              "ci_low": 0.9783397410130423,
+              "demand_groups": 16,
+              "estimate": 1.1286889641017097
+            },
+            "speed_mse_occupied": {
+              "ci_high": 6.503614645032544,
+              "ci_low": 3.7995028201023047,
+              "demand_groups": 16,
+              "estimate": 5.074969918781749
+            },
+            "speed_rmse_all": {
+              "ci_high": 1.135658579593629,
+              "ci_low": 0.9891105807810583,
+              "demand_groups": 16,
+              "estimate": 1.0623977428918558
+            },
+            "speed_rmse_occupied": {
+              "ci_high": 2.5502185484841378,
+              "ci_low": 1.949231340837281,
+              "demand_groups": 16,
+              "estimate": 2.252769388726185
+            },
+            "speed_sample_variance_all": {
+              "ci_high": 0.057645980836054676,
+              "ci_low": 0.035661481382846666,
+              "demand_groups": 16,
+              "estimate": 0.045661228984814714
+            },
+            "speed_sample_variance_occupied": {
+              "ci_high": 0.29459486749597064,
+              "ci_low": 0.17241111731837838,
+              "demand_groups": 16,
+              "estimate": 0.2274203187230018
+            },
+            "speed_width90_all": {
+              "ci_high": 0.19563110171318174,
+              "ci_low": 0.1288307642779399,
+              "demand_groups": 16,
+              "estimate": 0.15931718066413336
+            },
+            "speed_width90_occupied": {
+              "ci_high": 0.6600450462210565,
+              "ci_low": 0.5117445460730252,
+              "demand_groups": 16,
+              "estimate": 0.5857481199273061
+            },
+            "total_count_absolute_error": {
+              "ci_high": 32.86697414242819,
+              "ci_low": 19.212974879073887,
+              "demand_groups": 16,
+              "estimate": 25.60334902214631
+            },
+            "total_count_bias": {
+              "ci_high": -18.60729916011498,
+              "ci_low": -32.21902913559786,
+              "demand_groups": 16,
+              "estimate": -24.955544580085927
+            },
+            "total_count_over_cohort_fraction": {
+              "ci_high": 0.09375,
+              "ci_low": 0.0,
+              "demand_groups": 16,
+              "estimate": 0.03125
+            },
+            "total_count_sample_variance": {
+              "ci_high": 38.90672397376678,
+              "ci_low": 12.696111493841101,
+              "demand_groups": 16,
+              "estimate": 23.737488262619287
+            }
+          },
+          "states": 32
+        },
+        {
+          "arm": "old_soft",
+          "metrics": {
+            "count_coverage90_all": {
+              "ci_high": 0.04957044988276669,
+              "ci_low": 0.022383316236811255,
+              "demand_groups": 16,
+              "estimate": 0.03484026963657679
+            },
+            "count_coverage90_occupied": {
+              "ci_high": 0.27509397721081663,
+              "ci_low": 0.24497879597856234,
+              "demand_groups": 16,
+              "estimate": 0.26045764533382676
+            },
+            "count_crps_all": {
+              "ci_high": 0.1702693573965839,
+              "ci_low": 0.0795184709312921,
+              "demand_groups": 16,
+              "estimate": 0.12071589897355167
+            },
+            "count_crps_occupied": {
+              "ci_high": 0.8847578720910507,
+              "ci_low": 0.7268155600828696,
+              "demand_groups": 16,
+              "estimate": 0.794892702169032
+            },
+            "count_mae_all": {
+              "ci_high": 0.19692692315536084,
+              "ci_low": 0.09054085262188613,
+              "demand_groups": 16,
+              "estimate": 0.13904328872821364
+            },
+            "count_mae_occupied": {
+              "ci_high": 0.9722404760865231,
+              "ci_low": 0.8060503869089781,
+              "demand_groups": 16,
+              "estimate": 0.8781101419655253
+            },
+            "count_mse_all": {
+              "ci_high": 0.35036398783634426,
+              "ci_low": 0.15093055300462502,
+              "demand_groups": 16,
+              "estimate": 0.24370546516828917
+            },
+            "count_mse_occupied": {
+              "ci_high": 2.2113183488005568,
+              "ci_low": 1.3107456917032545,
+              "demand_groups": 16,
+              "estimate": 1.6746515323377493
+            },
+            "count_rmse_all": {
+              "ci_high": 0.5919155242400256,
+              "ci_low": 0.3884978159586293,
+              "demand_groups": 16,
+              "estimate": 0.49366533721569833
+            },
+            "count_rmse_occupied": {
+              "ci_high": 1.4870502173096094,
+              "ci_low": 1.1448780248145451,
+              "demand_groups": 16,
+              "estimate": 1.294083278748995
+            },
+            "count_sample_variance_all": {
+              "ci_high": 0.03161836056784224,
+              "ci_low": 0.010738150407610114,
+              "demand_groups": 16,
+              "estimate": 0.020248741851957984
+            },
+            "count_sample_variance_occupied": {
+              "ci_high": 0.11940063842687632,
+              "ci_low": 0.08121770004392714,
+              "demand_groups": 16,
+              "estimate": 0.09941369625303835
+            },
+            "count_width90_all": {
+              "ci_high": 0.16314636847125988,
+              "ci_low": 0.06927526204030121,
+              "demand_groups": 16,
+              "estimate": 0.11262659573223144
+            },
+            "count_width90_occupied": {
+              "ci_high": 0.6243437746295912,
+              "ci_low": 0.5228877716404848,
+              "demand_groups": 16,
+              "estimate": 0.5716172142247173
+            },
+            "energy_score": {
+              "ci_high": 11.603924136053914,
+              "ci_low": 8.820194991618092,
+              "demand_groups": 16,
+              "estimate": 10.153734744230787
+            },
+            "energy_score_u": {
+              "ci_high": 11.24293799752858,
+              "ci_low": 8.580258341559837,
+              "demand_groups": 16,
+              "estimate": 9.862002541611952
+            },
+            "speed_coverage90_all": {
+              "ci_high": 0.5473375219812427,
+              "ci_low": 0.4904354117819461,
+              "demand_groups": 16,
+              "estimate": 0.520369284876905
+            },
+            "speed_coverage90_occupied": {
+              "ci_high": 0.401484529509538,
+              "ci_low": 0.34387646115309867,
+              "demand_groups": 16,
+              "estimate": 0.3729451988548773
+            },
+            "speed_crps_all": {
+              "ci_high": 0.3215614315321513,
+              "ci_low": 0.24087264837739025,
+              "demand_groups": 16,
+              "estimate": 0.27822495925893814
+            },
+            "speed_crps_occupied": {
+              "ci_high": 1.3167732760127564,
+              "ci_low": 0.9720219831174965,
+              "demand_groups": 16,
+              "estimate": 1.1385057833279686
+            },
+            "speed_mae_all": {
+              "ci_high": 0.3687106258812939,
+              "ci_low": 0.2759576582090482,
+              "demand_groups": 16,
+              "estimate": 0.318749892241942
+            },
+            "speed_mae_occupied": {
+              "ci_high": 1.4491392017323281,
+              "ci_low": 1.0836973713588907,
+              "demand_groups": 16,
+              "estimate": 1.2636626263415422
+            },
+            "speed_mse_all": {
+              "ci_high": 1.586760082523048,
+              "ci_low": 1.1563396649132094,
+              "demand_groups": 16,
+              "estimate": 1.3610740576278222
+            },
+            "speed_mse_occupied": {
+              "ci_high": 9.036494983569407,
+              "ci_low": 5.594378687771491,
+              "demand_groups": 16,
+              "estimate": 7.253937786759364
+            },
+            "speed_rmse_all": {
+              "ci_high": 1.259666655319195,
+              "ci_low": 1.0753323509098056,
+              "demand_groups": 16,
+              "estimate": 1.166650786494323
+            },
+            "speed_rmse_occupied": {
+              "ci_high": 3.0060763436029707,
+              "ci_low": 2.3652438960435966,
+              "demand_groups": 16,
+              "estimate": 2.6933135329477262
+            },
+            "speed_sample_variance_all": {
+              "ci_high": 0.12173598860330169,
+              "ci_low": 0.06989658051631567,
+              "demand_groups": 16,
+              "estimate": 0.09364283673184316
+            },
+            "speed_sample_variance_occupied": {
+              "ci_high": 0.47958278845501534,
+              "ci_low": 0.32591262459406767,
+              "demand_groups": 16,
+              "estimate": 0.3961705913850674
+            },
+            "speed_width90_all": {
+              "ci_high": 0.3287608591483378,
+              "ci_low": 0.25388118098983425,
+              "demand_groups": 16,
+              "estimate": 0.2882708107942977
+            },
+            "speed_width90_occupied": {
+              "ci_high": 0.958269894148571,
+              "ci_low": 0.7073052685782237,
+              "demand_groups": 16,
+              "estimate": 0.8268297881157749
+            },
+            "total_count_absolute_error": {
+              "ci_high": 51.997758611216135,
+              "ci_low": 30.11895698497316,
+              "demand_groups": 16,
+              "estimate": 39.8584693266975
+            },
+            "total_count_bias": {
+              "ci_high": -30.118956984973163,
+              "ci_low": -51.997758611216135,
+              "demand_groups": 16,
+              "estimate": -39.8584693266975
+            },
+            "total_count_over_cohort_fraction": {
+              "ci_high": 0.03515625,
+              "ci_low": 0.0,
+              "demand_groups": 16,
+              "estimate": 0.01171875
+            },
+            "total_count_sample_variance": {
+              "ci_high": 59.92303752469715,
+              "ci_low": 20.16777843794305,
+              "demand_groups": 16,
+              "estimate": 37.467604163501846
+            }
+          },
+          "states": 32
+        },
+        {
+          "arm": "old_zero",
+          "metrics": {
+            "count_coverage90_all": {
+              "ci_high": 0.045394013774912055,
+              "ci_low": 0.021504982415005862,
+              "demand_groups": 16,
+              "estimate": 0.032422332942555684
+            },
+            "count_coverage90_occupied": {
+              "ci_high": 0.2843334292641261,
+              "ci_low": 0.22628447373098645,
+              "demand_groups": 16,
+              "estimate": 0.2512246884260032
+            },
+            "count_crps_all": {
+              "ci_high": 0.13950513139290713,
+              "ci_low": 0.06193309441168528,
+              "demand_groups": 16,
+              "estimate": 0.09723663723797904
+            },
+            "count_crps_occupied": {
+              "ci_high": 0.6914389596732229,
+              "ci_low": 0.5786734577308956,
+              "demand_groups": 16,
+              "estimate": 0.6287705614131394
+            },
+            "count_mae_all": {
+              "ci_high": 0.16107485789193784,
+              "ci_low": 0.0705103937371456,
+              "demand_groups": 16,
+              "estimate": 0.11170175620316408
+            },
+            "count_mae_occupied": {
+              "ci_high": 0.7648966589810727,
+              "ci_low": 0.6469755929871731,
+              "demand_groups": 16,
+              "estimate": 0.7001425468627454
+            },
+            "count_mse_all": {
+              "ci_high": 0.23385809130112686,
+              "ci_low": 0.09658154567637176,
+              "demand_groups": 16,
+              "estimate": 0.1601411847816408
+            },
+            "count_mse_occupied": {
+              "ci_high": 1.3951452721953477,
+              "ci_low": 0.8288930889628003,
+              "demand_groups": 16,
+              "estimate": 1.0549109773513923
+            },
+            "count_rmse_all": {
+              "ci_high": 0.4835887625877248,
+              "ci_low": 0.3107757160338815,
+              "demand_groups": 16,
+              "estimate": 0.4001764420622993
+            },
+            "count_rmse_occupied": {
+              "ci_high": 1.1811626781249684,
+              "ci_low": 0.9104356588813953,
+              "demand_groups": 16,
+              "estimate": 1.0270885927471847
+            },
+            "count_sample_variance_all": {
+              "ci_high": 0.01773296786642742,
+              "ci_low": 0.00659126254886369,
+              "demand_groups": 16,
+              "estimate": 0.011822479152615988
+            },
+            "count_sample_variance_occupied": {
+              "ci_high": 0.06997864483384025,
+              "ci_low": 0.053272729385719954,
+              "demand_groups": 16,
+              "estimate": 0.061707545818938794
+            },
+            "count_width90_all": {
+              "ci_high": 0.1279099755044693,
+              "ci_low": 0.05132685382284847,
+              "demand_groups": 16,
+              "estimate": 0.0867608421024546
+            },
+            "count_width90_occupied": {
+              "ci_high": 0.49975528557248766,
+              "ci_low": 0.4285993108270419,
+              "demand_groups": 16,
+              "estimate": 0.46379358177212393
+            },
+            "energy_score": {
+              "ci_high": 10.065839957740348,
+              "ci_low": 7.739816454349819,
+              "demand_groups": 16,
+              "estimate": 8.837259610608632
+            },
+            "energy_score_u": {
+              "ci_high": 9.819859002166774,
+              "ci_low": 7.552836599481261,
+              "demand_groups": 16,
+              "estimate": 8.621647129808421
+            },
+            "speed_coverage90_all": {
+              "ci_high": 0.5512895662368112,
+              "ci_low": 0.5000338877491207,
+              "demand_groups": 16,
+              "estimate": 0.5264507620164127
+            },
+            "speed_coverage90_occupied": {
+              "ci_high": 0.40685938437997715,
+              "ci_low": 0.35533621124523435,
+              "demand_groups": 16,
+              "estimate": 0.38153261935511096
+            },
+            "speed_crps_all": {
+              "ci_high": 0.291271876594452,
+              "ci_low": 0.22083369961346463,
+              "demand_groups": 16,
+              "estimate": 0.25334578632086424
+            },
+            "speed_crps_occupied": {
+              "ci_high": 1.1293607885504764,
+              "ci_low": 0.7877540812464957,
+              "demand_groups": 16,
+              "estimate": 0.9489807484756598
+            },
+            "speed_mae_all": {
+              "ci_high": 0.32564455690053395,
+              "ci_low": 0.24693823459283573,
+              "demand_groups": 16,
+              "estimate": 0.28321530656730326
+            },
+            "speed_mae_occupied": {
+              "ci_high": 1.235923353657531,
+              "ci_low": 0.8696004564124398,
+              "demand_groups": 16,
+              "estimate": 1.0412005757036156
+            },
+            "speed_mse_all": {
+              "ci_high": 1.327198844289306,
+              "ci_low": 0.9973071367490874,
+              "demand_groups": 16,
+              "estimate": 1.1586983435465106
+            },
+            "speed_mse_occupied": {
+              "ci_high": 7.18682500976491,
+              "ci_low": 4.003260571085713,
+              "demand_groups": 16,
+              "estimate": 5.506630222024226
+            },
+            "speed_rmse_all": {
+              "ci_high": 1.1520411643206616,
+              "ci_low": 0.9986526607129665,
+              "demand_groups": 16,
+              "estimate": 1.076428512975437
+            },
+            "speed_rmse_occupied": {
+              "ci_high": 2.6808254344072666,
+              "ci_low": 2.000814976724663,
+              "demand_groups": 16,
+              "estimate": 2.3466210222411767
+            },
+            "speed_sample_variance_all": {
+              "ci_high": 0.04957859555889146,
+              "ci_low": 0.03280938367594263,
+              "demand_groups": 16,
+              "estimate": 0.04035935247711262
+            },
+            "speed_sample_variance_occupied": {
+              "ci_high": 0.29357389456344835,
+              "ci_low": 0.16527658348290347,
+              "demand_groups": 16,
+              "estimate": 0.22031076260180799
+            },
+            "speed_width90_all": {
+              "ci_high": 0.23989857882012167,
+              "ci_low": 0.1997276710441572,
+              "demand_groups": 16,
+              "estimate": 0.21767778128508306
+            },
+            "speed_width90_occupied": {
+              "ci_high": 0.6667504923153613,
+              "ci_low": 0.5069416623949258,
+              "demand_groups": 16,
+              "estimate": 0.5864611282826732
+            },
+            "total_count_absolute_error": {
+              "ci_high": 39.548059463888094,
+              "ci_low": 20.822529627491967,
+              "demand_groups": 16,
+              "estimate": 29.422844626625867
+            },
+            "total_count_bias": {
+              "ci_high": -20.11773154388805,
+              "ci_low": -38.652465280463936,
+              "demand_groups": 16,
+              "estimate": -28.75853245697796
+            },
+            "total_count_over_cohort_fraction": {
+              "ci_high": 0.09375,
+              "ci_low": 0.0,
+              "demand_groups": 16,
+              "estimate": 0.03125
+            },
+            "total_count_sample_variance": {
+              "ci_high": 32.593928538873726,
+              "ci_low": 11.566574314723983,
+              "demand_groups": 16,
+              "estimate": 20.576863045503266
+            }
+          },
+          "states": 32
+        },
+        {
+          "arm": "soft_direct",
+          "metrics": {
+            "count_coverage90_all": {
+              "ci_high": 0.051517621629542744,
+              "ci_low": 0.023551985638921455,
+              "demand_groups": 16,
+              "estimate": 0.03630568581477139
+            },
+            "count_coverage90_occupied": {
+              "ci_high": 0.2988910173980499,
+              "ci_low": 0.24974386298403797,
+              "demand_groups": 16,
+              "estimate": 0.2737836501528828
+            },
+            "count_crps_all": {
+              "ci_high": 0.16751599636483022,
+              "ci_low": 0.07886619210655757,
+              "demand_groups": 16,
+              "estimate": 0.11911456514480732
+            },
+            "count_crps_occupied": {
+              "ci_high": 0.884508744849493,
+              "ci_low": 0.7197227258634338,
+              "demand_groups": 16,
+              "estimate": 0.7895268545189872
+            },
+            "count_mae_all": {
+              "ci_high": 0.19478670905353893,
+              "ci_low": 0.0902713264306322,
+              "demand_groups": 16,
+              "estimate": 0.13794221246445446
+            },
+            "count_mae_occupied": {
+              "ci_high": 0.9755490813642993,
+              "ci_low": 0.799414775920745,
+              "demand_groups": 16,
+              "estimate": 0.8746014430568168
+            },
+            "count_mse_all": {
+              "ci_high": 0.37058751674048807,
+              "ci_low": 0.15599952167711081,
+              "demand_groups": 16,
+              "estimate": 0.255391563941898
+            },
+            "count_mse_occupied": {
+              "ci_high": 2.4842943664344745,
+              "ci_low": 1.3249223539005945,
+              "demand_groups": 16,
+              "estimate": 1.7793201270479309
+            },
+            "count_rmse_all": {
+              "ci_high": 0.6087589972562936,
+              "ci_low": 0.3949677476416408,
+              "demand_groups": 16,
+              "estimate": 0.5053628042722357
+            },
+            "count_rmse_occupied": {
+              "ci_high": 1.5761644477764605,
+              "ci_low": 1.1510527155176666,
+              "demand_groups": 16,
+              "estimate": 1.3339115889173205
+            },
+            "count_sample_variance_all": {
+              "ci_high": 0.03488737990303068,
+              "ci_low": 0.012695807466046212,
+              "demand_groups": 16,
+              "estimate": 0.022848862037851497
+            },
+            "count_sample_variance_occupied": {
+              "ci_high": 0.13536309003721536,
+              "ci_low": 0.09625665395787922,
+              "demand_groups": 16,
+              "estimate": 0.11517904656651351
+            },
+            "count_width90_all": {
+              "ci_high": 0.17079503807182167,
+              "ci_low": 0.07268262987239328,
+              "demand_groups": 16,
+              "estimate": 0.11814975918283388
+            },
+            "count_width90_occupied": {
+              "ci_high": 0.6595756926840695,
+              "ci_low": 0.5514159457677137,
+              "demand_groups": 16,
+              "estimate": 0.6040290477450373
+            },
+            "energy_score": {
+              "ci_high": 11.66850822669505,
+              "ci_low": 8.746852156029162,
+              "demand_groups": 16,
+              "estimate": 10.140960318341193
+            },
+            "energy_score_u": {
+              "ci_high": 11.284209359031305,
+              "ci_low": 8.455045928940295,
+              "demand_groups": 16,
+              "estimate": 9.811247776557153
+            },
+            "speed_coverage90_all": {
+              "ci_high": 0.2799705084994138,
+              "ci_low": 0.2501813452520516,
+              "demand_groups": 16,
+              "estimate": 0.26509378663540445
+            },
+            "speed_coverage90_occupied": {
+              "ci_high": 0.3328540975866228,
+              "ci_low": 0.2818123064341035,
+              "demand_groups": 16,
+              "estimate": 0.3079297657014875
+            },
+            "speed_crps_all": {
+              "ci_high": 0.31375351649932,
+              "ci_low": 0.2353297090757741,
+              "demand_groups": 16,
+              "estimate": 0.27175537291968666
+            },
+            "speed_crps_occupied": {
+              "ci_high": 1.251246413885695,
+              "ci_low": 0.9253901018787303,
+              "demand_groups": 16,
+              "estimate": 1.081429181037418
+            },
+            "speed_mae_all": {
+              "ci_high": 0.36118616146794663,
+              "ci_low": 0.26738956033163797,
+              "demand_groups": 16,
+              "estimate": 0.3108558957615742
+            },
+            "speed_mae_occupied": {
+              "ci_high": 1.396863508998275,
+              "ci_low": 1.0419423843759754,
+              "demand_groups": 16,
+              "estimate": 1.215201809961889
+            },
+            "speed_mse_all": {
+              "ci_high": 1.5874817840699773,
+              "ci_low": 1.1476442389351158,
+              "demand_groups": 16,
+              "estimate": 1.360922716671451
+            },
+            "speed_mse_occupied": {
+              "ci_high": 8.647645706822235,
+              "ci_low": 5.368692011975878,
+              "demand_groups": 16,
+              "estimate": 6.914699206118199
+            },
+            "speed_rmse_all": {
+              "ci_high": 1.2599530880433514,
+              "ci_low": 1.0712815871352945,
+              "demand_groups": 16,
+              "estimate": 1.1665859233984657
+            },
+            "speed_rmse_occupied": {
+              "ci_high": 2.940687964885468,
+              "ci_low": 2.3170438088167167,
+              "demand_groups": 16,
+              "estimate": 2.629581564834641
+            },
+            "speed_sample_variance_all": {
+              "ci_high": 0.17132387280236547,
+              "ci_low": 0.10418660948830334,
+              "demand_groups": 16,
+              "estimate": 0.13499407434780789
+            },
+            "speed_sample_variance_occupied": {
+              "ci_high": 0.6950431459906237,
+              "ci_low": 0.4928905684590361,
+              "demand_groups": 16,
+              "estimate": 0.5947439601152301
+            },
+            "speed_width90_all": {
+              "ci_high": 0.30941438046611003,
+              "ci_low": 0.20496496558147717,
+              "demand_groups": 16,
+              "estimate": 0.2526728613182086
+            },
+            "speed_width90_occupied": {
+              "ci_high": 1.095719074821666,
+              "ci_low": 0.8100433136178748,
+              "demand_groups": 16,
+              "estimate": 0.947200558691711
+            },
+            "total_count_absolute_error": {
+              "ci_high": 56.12413523399834,
+              "ci_low": 31.765053257672307,
+              "demand_groups": 16,
+              "estimate": 42.79171483395777
+            },
+            "total_count_bias": {
+              "ci_high": -31.765053257672307,
+              "ci_low": -56.12413523399834,
+              "demand_groups": 16,
+              "estimate": -42.79171483395777
+            },
+            "total_count_over_cohort_fraction": {
+              "ci_high": 0.0,
+              "ci_low": 0.0,
+              "demand_groups": 16,
+              "estimate": 0.0
+            },
+            "total_count_sample_variance": {
+              "ci_high": 61.50257466322634,
+              "ci_low": 23.55313958501129,
+              "demand_groups": 16,
+              "estimate": 40.879874590318764
+            }
+          },
+          "states": 32
+        },
+        {
+          "arm": "zero_direct",
+          "metrics": {
+            "count_coverage90_all": {
+              "ci_high": 0.04634836606096128,
+              "ci_low": 0.02172387895662368,
+              "demand_groups": 16,
+              "estimate": 0.03311840562719812
+            },
+            "count_coverage90_occupied": {
+              "ci_high": 0.2779644314755327,
+              "ci_low": 0.23093951136061386,
+              "demand_groups": 16,
+              "estimate": 0.252852464164778
+            },
+            "count_crps_all": {
+              "ci_high": 0.13816923988696472,
+              "ci_low": 0.06150881597249879,
+              "demand_groups": 16,
+              "estimate": 0.09640207203294615
+            },
+            "count_crps_occupied": {
+              "ci_high": 0.6779628666231046,
+              "ci_low": 0.5692145572511415,
+              "demand_groups": 16,
+              "estimate": 0.6173569412026394
+            },
+            "count_mae_all": {
+              "ci_high": 0.16076347409816324,
+              "ci_low": 0.07051584121039928,
+              "demand_groups": 16,
+              "estimate": 0.11136879885905239
+            },
+            "count_mae_occupied": {
+              "ci_high": 0.751274514447863,
+              "ci_low": 0.6388272500299669,
+              "demand_groups": 16,
+              "estimate": 0.6892651208007824
+            },
+            "count_mse_all": {
+              "ci_high": 0.22963951396669574,
+              "ci_low": 0.09515294234017332,
+              "demand_groups": 16,
+              "estimate": 0.15710931039677228
+            },
+            "count_mse_occupied": {
+              "ci_high": 1.3473601858773838,
+              "ci_low": 0.8097834009823158,
+              "demand_groups": 16,
+              "estimate": 1.025717505152573
+            },
+            "count_rmse_all": {
+              "ci_high": 0.47920717228219334,
+              "ci_low": 0.308468705609132,
+              "demand_groups": 16,
+              "estimate": 0.39637016839915223
+            },
+            "count_rmse_occupied": {
+              "ci_high": 1.160758452856314,
+              "ci_low": 0.8998796591668887,
+              "demand_groups": 16,
+              "estimate": 1.0127771251132072
+            },
+            "count_sample_variance_all": {
+              "ci_high": 0.01905527796939734,
+              "ci_low": 0.00714215009925762,
+              "demand_groups": 16,
+              "estimate": 0.012681186039013713
+            },
+            "count_sample_variance_occupied": {
+              "ci_high": 0.07305846610800695,
+              "ci_low": 0.0553239168434687,
+              "demand_groups": 16,
+              "estimate": 0.06431037925141134
+            },
+            "count_width90_all": {
+              "ci_high": 0.13285649478744804,
+              "ci_low": 0.053417323984436924,
+              "demand_groups": 16,
+              "estimate": 0.09005398292624474
+            },
+            "count_width90_occupied": {
+              "ci_high": 0.5061437517456392,
+              "ci_low": 0.4337320573155093,
+              "demand_groups": 16,
+              "estimate": 0.4698345530508505
+            },
+            "energy_score": {
+              "ci_high": 9.96896140754712,
+              "ci_low": 7.7036189984294206,
+              "demand_groups": 16,
+              "estimate": 8.759794096358295
+            },
+            "energy_score_u": {
+              "ci_high": 9.699278834726151,
+              "ci_low": 7.5087371148930755,
+              "demand_groups": 16,
+              "estimate": 8.534939733272696
+            },
+            "speed_coverage90_all": {
+              "ci_high": 0.2389003883352872,
+              "ci_low": 0.20680594226260257,
+              "demand_groups": 16,
+              "estimate": 0.22259671746776086
+            },
+            "speed_coverage90_occupied": {
+              "ci_high": 0.3004645847225547,
+              "ci_low": 0.26270212242709284,
+              "demand_groups": 16,
+              "estimate": 0.28162327039319857
+            },
+            "speed_crps_all": {
+              "ci_high": 0.29323047093941823,
+              "ci_low": 0.22579888149810193,
+              "demand_groups": 16,
+              "estimate": 0.2567878037187614
+            },
+            "speed_crps_occupied": {
+              "ci_high": 1.120544911325579,
+              "ci_low": 0.7991003257859691,
+              "demand_groups": 16,
+              "estimate": 0.9506616819409887
+            },
+            "speed_mae_all": {
+              "ci_high": 0.3249610484231564,
+              "ci_low": 0.24704506273894478,
+              "demand_groups": 16,
+              "estimate": 0.2826928597247529
+            },
+            "speed_mae_occupied": {
+              "ci_high": 1.234996959902404,
+              "ci_low": 0.8824970719080096,
+              "demand_groups": 16,
+              "estimate": 1.047346347674773
+            },
+            "speed_mse_all": {
+              "ci_high": 1.3122565305357874,
+              "ci_low": 1.000657446979809,
+              "demand_groups": 16,
+              "estimate": 1.154980374405294
+            },
+            "speed_mse_occupied": {
+              "ci_high": 7.087708583799737,
+              "ci_low": 4.056905934027371,
+              "demand_groups": 16,
+              "estimate": 5.484250703747858
+            },
+            "speed_rmse_all": {
+              "ci_high": 1.1455376600251026,
+              "ci_low": 1.0003286694780915,
+              "demand_groups": 16,
+              "estimate": 1.07470013231845
+            },
+            "speed_rmse_occupied": {
+              "ci_high": 2.66227507665901,
+              "ci_low": 2.014176242047198,
+              "demand_groups": 16,
+              "estimate": 2.3418477114765293
+            },
+            "speed_sample_variance_all": {
+              "ci_high": 0.05954902517749552,
+              "ci_low": 0.036293460335703735,
+              "demand_groups": 16,
+              "estimate": 0.04696680067718245
+            },
+            "speed_sample_variance_occupied": {
+              "ci_high": 0.3559124339895516,
+              "ci_low": 0.18522144751825534,
+              "demand_groups": 16,
+              "estimate": 0.2560676939913733
+            },
+            "speed_width90_all": {
+              "ci_high": 0.18999799706149303,
+              "ci_low": 0.1260827986786942,
+              "demand_groups": 16,
+              "estimate": 0.15550759369090833
+            },
+            "speed_width90_occupied": {
+              "ci_high": 0.6806028514183875,
+              "ci_low": 0.5192599952977477,
+              "demand_groups": 16,
+              "estimate": 0.5979763520749227
+            },
+            "total_count_absolute_error": {
+              "ci_high": 35.99764836831385,
+              "ci_low": 19.337022615128063,
+              "demand_groups": 16,
+              "estimate": 27.062236913732328
+            },
+            "total_count_bias": {
+              "ci_high": -18.81483455549507,
+              "ci_low": -35.382386689979086,
+              "demand_groups": 16,
+              "estimate": -26.548495331293992
+            },
+            "total_count_over_cohort_fraction": {
+              "ci_high": 0.09375,
+              "ci_low": 0.0,
+              "demand_groups": 16,
+              "estimate": 0.03125
+            },
+            "total_count_sample_variance": {
+              "ci_high": 33.03485206676699,
+              "ci_low": 11.184741457676683,
+              "demand_groups": 16,
+              "estimate": 20.424931412049276
+            }
+          },
+          "states": 32
+        }
+      ]
+    },
+    "test_pairs": {
+      "direct_soft_vs_old": {
+        "count_coverage90_all": {
+          "ci_high": 0.002748571219226257,
+          "ci_low": 0.0002930832356389221,
+          "demand_groups": 16,
+          "estimate": 0.0014654161781946077
+        },
+        "count_coverage90_occupied": {
+          "ci_high": 0.028630000971802516,
+          "ci_low": 0.0016536617067330077,
+          "demand_groups": 16,
+          "estimate": 0.01332600481905608
+        },
+        "count_crps_all": {
+          "ci_high": -0.00034526911249781276,
+          "ci_low": -0.003021297263758435,
+          "demand_groups": 16,
+          "estimate": -0.0016013338287443595
+        },
+        "count_crps_occupied": {
+          "ci_high": 0.0023728259407413493,
+          "ci_low": -0.014258829564139546,
+          "demand_groups": 16,
+          "estimate": -0.005365847650044959
+        },
+        "count_mae_all": {
+          "ci_high": 3.8033166540928244e-05,
+          "ci_low": -0.002382494792562725,
+          "demand_groups": 16,
+          "estimate": -0.0011010762637591739
+        },
+        "count_mae_occupied": {
+          "ci_high": 0.005494986409871882,
+          "ci_low": -0.012889824581344822,
+          "demand_groups": 16,
+          "estimate": -0.0035086989087083492
+        },
+        "count_mse_all": {
+          "ci_high": 0.025917387045070364,
+          "ci_low": 0.001683875251342364,
+          "demand_groups": 16,
+          "estimate": 0.011686098773608843
+        },
+        "count_mse_occupied": {
+          "ci_high": 0.27821115419698056,
+          "ci_low": 0.0027416339589421833,
+          "demand_groups": 16,
+          "estimate": 0.10466859471018153
+        },
+        "count_sample_variance_all": {
+          "ci_high": 0.003459076055685043,
+          "ci_low": 0.0017796764821020631,
+          "demand_groups": 16,
+          "estimate": 0.0026001201858935176
+        },
+        "count_sample_variance_occupied": {
+          "ci_high": 0.0222371388799205,
+          "ci_low": 0.010230106011308077,
+          "demand_groups": 16,
+          "estimate": 0.015765350313475156
+        },
+        "count_width90_all": {
+          "ci_high": 0.007625441497943205,
+          "ci_low": 0.0038089558813094184,
+          "demand_groups": 16,
+          "estimate": 0.005523163450602433
+        },
+        "count_width90_occupied": {
+          "ci_high": 0.04019604436908204,
+          "ci_low": 0.025007925485461643,
+          "demand_groups": 16,
+          "estimate": 0.03241183352032001
+        },
+        "energy_score": {
+          "ci_high": 0.14717142429134997,
+          "ci_low": -0.146307384747235,
+          "demand_groups": 16,
+          "estimate": -0.012774425889592878
+        },
+        "energy_score_u": {
+          "ci_high": 0.11171566605777483,
+          "ci_low": -0.18778855990063398,
+          "demand_groups": 16,
+          "estimate": -0.05075476505479731
+        },
+        "speed_coverage90_all": {
+          "ci_high": -0.21566713071512314,
+          "ci_low": -0.2897521614888628,
+          "demand_groups": 16,
+          "estimate": -0.2552754982415006
+        },
+        "speed_coverage90_occupied": {
+          "ci_high": -0.04210137304956902,
+          "ci_low": -0.0871666341124729,
+          "demand_groups": 16,
+          "estimate": -0.06501543315338984
+        },
+        "speed_crps_all": {
+          "ci_high": -0.0038370137561053565,
+          "ci_low": -0.0089526913366843,
+          "demand_groups": 16,
+          "estimate": -0.006469586339251463
+        },
+        "speed_crps_occupied": {
+          "ci_high": -0.03567017018955734,
+          "ci_low": -0.07791128245894069,
+          "demand_groups": 16,
+          "estimate": -0.05707660229055059
+        },
+        "speed_mae_all": {
+          "ci_high": -0.005806791594348611,
+          "ci_low": -0.00989714527406102,
+          "demand_groups": 16,
+          "estimate": -0.007893996480367801
+        },
+        "speed_mae_occupied": {
+          "ci_high": -0.0252633826953442,
+          "ci_low": -0.07178384576143773,
+          "demand_groups": 16,
+          "estimate": -0.04846081637965306
+        },
+        "speed_mse_all": {
+          "ci_high": 0.028579232376077658,
+          "ci_low": -0.02822764650955183,
+          "demand_groups": 16,
+          "estimate": -0.00015134095637131875
+        },
+        "speed_mse_occupied": {
+          "ci_high": -0.09122028002758018,
+          "ci_low": -0.6362841203275015,
+          "demand_groups": 16,
+          "estimate": -0.33923858064116563
+        },
+        "speed_sample_variance_all": {
+          "ci_high": 0.051153023341792725,
+          "ci_low": 0.03303791353361471,
+          "demand_groups": 16,
+          "estimate": 0.04135123761596474
+        },
+        "speed_sample_variance_occupied": {
+          "ci_high": 0.2602811051248861,
+          "ci_low": 0.14230697257918812,
+          "demand_groups": 16,
+          "estimate": 0.1985733687301628
+        },
+        "speed_width90_all": {
+          "ci_high": -0.018948704232778796,
+          "ci_low": -0.049667361278359794,
+          "demand_groups": 16,
+          "estimate": -0.035597949476089116
+        },
+        "speed_width90_occupied": {
+          "ci_high": 0.16303154468939426,
+          "ci_low": 0.08424341853221372,
+          "demand_groups": 16,
+          "estimate": 0.12037077057593629
+        },
+        "total_count_absolute_error": {
+          "ci_high": 4.810890126831266,
+          "ci_low": 1.2521060653462206,
+          "demand_groups": 16,
+          "estimate": 2.9332455072602643
+        },
+        "total_count_bias": {
+          "ci_high": -1.2521060653462226,
+          "ci_low": -4.810890126831267,
+          "demand_groups": 16,
+          "estimate": -2.9332455072602643
+        },
+        "total_count_over_cohort_fraction": {
+          "ci_high": 0.0,
+          "ci_low": -0.03515625,
+          "demand_groups": 16,
+          "estimate": -0.01171875
+        },
+        "total_count_sample_variance": {
+          "ci_high": 9.409199234221122,
+          "ci_low": -3.7304611679253945,
+          "demand_groups": 16,
+          "estimate": 3.4122704268169164
+        }
+      },
+      "direct_zero_vs_old": {
+        "count_coverage90_all": {
+          "ci_high": 0.002711019929660023,
+          "ci_low": -0.0012822391559202803,
+          "demand_groups": 16,
+          "estimate": 0.0006960726846424383
+        },
+        "count_coverage90_occupied": {
+          "ci_high": 0.01631887673775525,
+          "ci_low": -0.01571895518460602,
+          "demand_groups": 16,
+          "estimate": 0.0016277757387748032
+        },
+        "count_crps_all": {
+          "ci_high": -0.00013900377547567514,
+          "ci_low": -0.001619478888111261,
+          "demand_groups": 16,
+          "estimate": -0.0008345652050328796
+        },
+        "count_crps_occupied": {
+          "ci_high": -0.006573399981939216,
+          "ci_low": -0.015672648699328495,
+          "demand_groups": 16,
+          "estimate": -0.011413620210500061
+        },
+        "count_mae_all": {
+          "ci_high": 0.00026580993196991133,
+          "ci_low": -0.0009903539455035442,
+          "demand_groups": 16,
+          "estimate": -0.00033295734411166607
+        },
+        "count_mae_occupied": {
+          "ci_high": -0.00653874963509844,
+          "ci_low": -0.01475673481149353,
+          "demand_groups": 16,
+          "estimate": -0.010877426061962962
+        },
+        "count_mse_all": {
+          "ci_high": 0.0008776440552516019,
+          "ci_low": -0.006940472435698223,
+          "demand_groups": 16,
+          "estimate": -0.0030318743848685333
+        },
+        "count_mse_occupied": {
+          "ci_high": -0.007506294944079138,
+          "ci_low": -0.05383249666518774,
+          "demand_groups": 16,
+          "estimate": -0.02919347219881921
+        },
+        "count_sample_variance_all": {
+          "ci_high": 0.0013689317271395882,
+          "ci_low": 0.0004122390002775593,
+          "demand_groups": 16,
+          "estimate": 0.0008587068863977242
+        },
+        "count_sample_variance_occupied": {
+          "ci_high": 0.004800050467648527,
+          "ci_low": 0.0006160352993648833,
+          "demand_groups": 16,
+          "estimate": 0.0026028334324725445
+        },
+        "count_width90_all": {
+          "ci_high": 0.0049685013482133,
+          "ci_low": 0.0018006669584553756,
+          "demand_groups": 16,
+          "estimate": 0.0032931408237901506
+        },
+        "count_width90_occupied": {
+          "ci_high": 0.011231494043385292,
+          "ci_low": 0.00012293894536280573,
+          "demand_groups": 16,
+          "estimate": 0.006040971278726506
+        },
+        "energy_score": {
+          "ci_high": 0.008878189572326214,
+          "ci_low": -0.15793964071868025,
+          "demand_groups": 16,
+          "estimate": -0.07746551425033596
+        },
+        "energy_score_u": {
+          "ci_high": 0.0023118671725699358,
+          "ci_low": -0.1692873475812135,
+          "demand_groups": 16,
+          "estimate": -0.08670739653572646
+        },
+        "speed_coverage90_all": {
+          "ci_high": -0.26211990767878085,
+          "ci_low": -0.3395030407385698,
+          "demand_groups": 16,
+          "estimate": -0.30385404454865184
+        },
+        "speed_coverage90_occupied": {
+          "ci_high": -0.08229943693372543,
+          "ci_low": -0.11899273276381374,
+          "demand_groups": 16,
+          "estimate": -0.09990934896191234
+        },
+        "speed_crps_all": {
+          "ci_high": 0.005616961441175244,
+          "ci_low": 0.0012360713959922117,
+          "demand_groups": 16,
+          "estimate": 0.003442017397897246
+        },
+        "speed_crps_occupied": {
+          "ci_high": 0.017055743983347544,
+          "ci_low": -0.013822089227565455,
+          "demand_groups": 16,
+          "estimate": 0.0016809334653288509
+        },
+        "speed_mae_all": {
+          "ci_high": 0.0012473590188774846,
+          "ci_low": -0.002142469960237975,
+          "demand_groups": 16,
+          "estimate": -0.0005224468425503968
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.019939729309102653,
+          "ci_low": -0.007861735277445603,
+          "demand_groups": 16,
+          "estimate": 0.006145771971157517
+        },
+        "speed_mse_all": {
+          "ci_high": 0.01687606657716558,
+          "ci_low": -0.027185200448456702,
+          "demand_groups": 16,
+          "estimate": -0.003717969141216408
+        },
+        "speed_mse_occupied": {
+          "ci_high": 0.1621610263707443,
+          "ci_low": -0.29035810458501693,
+          "demand_groups": 16,
+          "estimate": -0.022379518276368714
+        },
+        "speed_sample_variance_all": {
+          "ci_high": 0.010991309842547675,
+          "ci_low": 0.002195992109501917,
+          "demand_groups": 16,
+          "estimate": 0.0066074482000698315
+        },
+        "speed_sample_variance_occupied": {
+          "ci_high": 0.0719355997484644,
+          "ci_low": 0.004777185459768326,
+          "demand_groups": 16,
+          "estimate": 0.0357569313895653
+        },
+        "speed_width90_all": {
+          "ci_high": -0.048358558463739286,
+          "ci_low": -0.07402900055843817,
+          "demand_groups": 16,
+          "estimate": -0.06217018759417471
+        },
+        "speed_width90_occupied": {
+          "ci_high": 0.03779592213688196,
+          "ci_low": -0.014623805648573287,
+          "demand_groups": 16,
+          "estimate": 0.011515223792249509
+        },
+        "total_count_absolute_error": {
+          "ci_high": -1.3797711529924483,
+          "ci_low": -3.510899701240923,
+          "demand_groups": 16,
+          "estimate": -2.36060771289354
+        },
+        "total_count_bias": {
+          "ci_high": 3.37739864643318,
+          "ci_low": 1.1836157539806018,
+          "demand_groups": 16,
+          "estimate": 2.2100371256839684
+        },
+        "total_count_over_cohort_fraction": {
+          "ci_high": 0.0,
+          "ci_low": 0.0,
+          "demand_groups": 16,
+          "estimate": 0.0
+        },
+        "total_count_sample_variance": {
+          "ci_high": 1.4470935571603767,
+          "ci_low": -1.6139759333681825,
+          "demand_groups": 16,
+          "estimate": -0.15193163345398855
+        }
+      },
+      "hint_vs_zero": {
+        "count_coverage90_all": {
+          "ci_high": 0.003444643903868694,
+          "ci_low": 0.0005495310668229791,
+          "demand_groups": 16,
+          "estimate": 0.00197831184056272
+        },
+        "count_coverage90_occupied": {
+          "ci_high": 0.03951088746342139,
+          "ci_low": 0.007758651673253416,
+          "demand_groups": 16,
+          "estimate": 0.02342343092998358
+        },
+        "count_crps_all": {
+          "ci_high": 0.0013869036364422647,
+          "ci_low": -0.0005222287752541725,
+          "demand_groups": 16,
+          "estimate": 0.0003488967170125481
+        },
+        "count_crps_occupied": {
+          "ci_high": 0.0016588355792304028,
+          "ci_low": -0.009446652177803683,
+          "demand_groups": 16,
+          "estimate": -0.004061999895816022
+        },
+        "count_mae_all": {
+          "ci_high": 0.00253034787469222,
+          "ci_low": -0.00012149821704935697,
+          "demand_groups": 16,
+          "estimate": 0.0010895131246004056
+        },
+        "count_mae_occupied": {
+          "ci_high": 0.0033335039500856567,
+          "ci_low": -0.009824923236934574,
+          "demand_groups": 16,
+          "estimate": -0.0033960672596376976
+        },
+        "count_mse_all": {
+          "ci_high": 0.005587231909422597,
+          "ci_low": -0.0011449603038649885,
+          "demand_groups": 16,
+          "estimate": 0.0017019326885511026
+        },
+        "count_mse_occupied": {
+          "ci_high": 0.013505684727616546,
+          "ci_low": -0.01710409752044802,
+          "demand_groups": 16,
+          "estimate": -0.0015230084262747943
+        },
+        "count_sample_variance_all": {
+          "ci_high": 0.0012832124827721987,
+          "ci_low": 0.00020159251953519598,
+          "demand_groups": 16,
+          "estimate": 0.0006809474267727636
+        },
+        "count_sample_variance_occupied": {
+          "ci_high": 0.001846125302825199,
+          "ci_low": -0.0008109130901625982,
+          "demand_groups": 16,
+          "estimate": 0.0005568533223863432
+        },
+        "count_width90_all": {
+          "ci_high": 0.00817395486237261,
+          "ci_low": 0.0016893559710307443,
+          "demand_groups": 16,
+          "estimate": 0.00463951883855915
+        },
+        "count_width90_occupied": {
+          "ci_high": 0.012024730264856856,
+          "ci_low": 0.0025387307293475675,
+          "demand_groups": 16,
+          "estimate": 0.007164654971404472
+        },
+        "energy_score": {
+          "ci_high": -0.0011447618885861751,
+          "ci_low": -0.11201028036014707,
+          "demand_groups": 16,
+          "estimate": -0.059472973118352646
+        },
+        "energy_score_u": {
+          "ci_high": -0.006142957288894783,
+          "ci_low": -0.11392469339773403,
+          "demand_groups": 16,
+          "estimate": -0.0625717788079305
+        },
+        "speed_coverage90_all": {
+          "ci_high": 0.00032971864009377893,
+          "ci_low": -0.004176436107854633,
+          "demand_groups": 16,
+          "estimate": -0.0020515826494724547
+        },
+        "speed_coverage90_occupied": {
+          "ci_high": 0.035515044386465355,
+          "ci_low": 0.002606993280997607,
+          "demand_groups": 16,
+          "estimate": 0.019071432267548757
+        },
+        "speed_crps_all": {
+          "ci_high": 0.000621039490466252,
+          "ci_low": -0.0026777964976415626,
+          "demand_groups": 16,
+          "estimate": -0.0010974314601956683
+        },
+        "speed_crps_occupied": {
+          "ci_high": -0.021510793226686233,
+          "ci_low": -0.052362048091214385,
+          "demand_groups": 16,
+          "estimate": -0.03681891186199388
+        },
+        "speed_mae_all": {
+          "ci_high": 0.0014035994155160874,
+          "ci_low": -0.0020111280971019958,
+          "demand_groups": 16,
+          "estimate": -0.0003565318080634315
+        },
+        "speed_mae_occupied": {
+          "ci_high": -0.022930149111903178,
+          "ci_low": -0.054401181754305125,
+          "demand_groups": 16,
+          "estimate": -0.038244393976653565
+        },
+        "speed_mse_all": {
+          "ci_high": -0.01091893231855547,
+          "ci_low": -0.04293112032472075,
+          "demand_groups": 16,
+          "estimate": -0.026291410303584357
+        },
+        "speed_mse_occupied": {
+          "ci_high": -0.22521925955936256,
+          "ci_low": -0.6263585435297279,
+          "demand_groups": 16,
+          "estimate": -0.40928078496610926
+        },
+        "speed_sample_variance_all": {
+          "ci_high": 0.0005122735468719562,
+          "ci_low": -0.003456661666470336,
+          "demand_groups": 16,
+          "estimate": -0.0013055716923677325
+        },
+        "speed_sample_variance_occupied": {
+          "ci_high": -0.005479870452732744,
+          "ci_low": -0.06404595909063615,
+          "demand_groups": 16,
+          "estimate": -0.028647375268371477
+        },
+        "speed_width90_all": {
+          "ci_high": 0.0059836517063596925,
+          "ci_low": 0.0016819129534786283,
+          "demand_groups": 16,
+          "estimate": 0.0038095869732250086
+        },
+        "speed_width90_occupied": {
+          "ci_high": 0.0027097432295384817,
+          "ci_low": -0.03074334627210327,
+          "demand_groups": 16,
+          "estimate": -0.012228232147616647
+        },
+        "total_count_absolute_error": {
+          "ci_high": -0.05446028011169143,
+          "ci_low": -3.072307829416907,
+          "demand_groups": 16,
+          "estimate": -1.4588878915860208
+        },
+        "total_count_bias": {
+          "ci_high": 3.20636597673333,
+          "ci_low": 0.18812461037776929,
+          "demand_groups": 16,
+          "estimate": 1.5929507512080692
+        },
+        "total_count_over_cohort_fraction": {
+          "ci_high": 0.0,
+          "ci_low": 0.0,
+          "demand_groups": 16,
+          "estimate": 0.0
+        },
+        "total_count_sample_variance": {
+          "ci_high": 6.9347196562166955,
+          "ci_low": 0.7380986715708362,
+          "demand_groups": 16,
+          "estimate": 3.3125568505700143
+        }
+      },
+      "shift_vs_hint": {
+        "count_coverage90_all": {
+          "ci_high": 0.00417643610785463,
+          "ci_low": -0.001318874560375147,
+          "demand_groups": 16,
+          "estimate": 0.0012089683470105513
+        },
+        "count_coverage90_occupied": {
+          "ci_high": 0.01716155557242278,
+          "ci_low": -0.022335438025707748,
+          "demand_groups": 16,
+          "estimate": -0.0024922449418787957
+        },
+        "count_crps_all": {
+          "ci_high": 0.02863001288728287,
+          "ci_low": 0.016161216131487202,
+          "demand_groups": 16,
+          "estimate": 0.022363596394848608
+        },
+        "count_crps_occupied": {
+          "ci_high": 0.2210570565495266,
+          "ci_low": 0.13375948375644606,
+          "demand_groups": 16,
+          "estimate": 0.1762319132121637
+        },
+        "count_mae_all": {
+          "ci_high": 0.032637823297716556,
+          "ci_low": 0.018436264309761165,
+          "demand_groups": 16,
+          "estimate": 0.025483900480801656
+        },
+        "count_mae_occupied": {
+          "ci_high": 0.23861777134098605,
+          "ci_low": 0.14293510331381176,
+          "demand_groups": 16,
+          "estimate": 0.18873238951567217
+        },
+        "count_mse_all": {
+          "ci_high": 0.1403219920210276,
+          "ci_low": 0.05755192748938392,
+          "demand_groups": 16,
+          "estimate": 0.09658032085657461
+        },
+        "count_mse_occupied": {
+          "ci_high": 1.1540714133253207,
+          "ci_low": 0.4765174741984708,
+          "demand_groups": 16,
+          "estimate": 0.7551256303216325
+        },
+        "count_sample_variance_all": {
+          "ci_high": 0.014689663887769917,
+          "ci_low": 0.005220219500185154,
+          "demand_groups": 16,
+          "estimate": 0.009486728572065024
+        },
+        "count_sample_variance_occupied": {
+          "ci_high": 0.06445449705886733,
+          "ci_low": 0.03747883241199738,
+          "demand_groups": 16,
+          "estimate": 0.050311813992715816
+        },
+        "count_width90_all": {
+          "ci_high": 0.031737062288397386,
+          "ci_low": 0.01638313761188154,
+          "demand_groups": 16,
+          "estimate": 0.02345625741802998
+        },
+        "count_width90_occupied": {
+          "ci_high": 0.16384331439192662,
+          "ci_low": 0.09493446137889071,
+          "demand_groups": 16,
+          "estimate": 0.12702983972278237
+        },
+        "energy_score": {
+          "ci_high": 1.9493189045761,
+          "ci_low": 0.9624299208005349,
+          "demand_groups": 16,
+          "estimate": 1.4406391951012505
+        },
+        "energy_score_u": {
+          "ci_high": 1.8332585451729329,
+          "ci_low": 0.8749462871310184,
+          "demand_groups": 16,
+          "estimate": 1.3388798220923888
+        },
+        "speed_coverage90_all": {
+          "ci_high": 0.050923212192262604,
+          "ci_low": 0.03791581184056273,
+          "demand_groups": 16,
+          "estimate": 0.044548651817116064
+        },
+        "speed_coverage90_occupied": {
+          "ci_high": 0.030014291134531867,
+          "ci_low": -0.01565514183789306,
+          "demand_groups": 16,
+          "estimate": 0.007235063040740161
+        },
+        "speed_crps_all": {
+          "ci_high": 0.023790243378929227,
+          "ci_low": 0.00879818979245588,
+          "demand_groups": 16,
+          "estimate": 0.01606500066112087
+        },
+        "speed_crps_occupied": {
+          "ci_high": 0.23418615605856294,
+          "ci_low": 0.10900299140559527,
+          "demand_groups": 16,
+          "estimate": 0.16758641095842305
+        },
+        "speed_mae_all": {
+          "ci_high": 0.038506442316589624,
+          "ci_low": 0.01906290537701627,
+          "demand_groups": 16,
+          "estimate": 0.028519567844884762
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.27853058908540884,
+          "ci_low": 0.1433082272219343,
+          "demand_groups": 16,
+          "estimate": 0.20609985626376948
+        },
+        "speed_mse_all": {
+          "ci_high": 0.3315048079450223,
+          "ci_low": 0.1367646458938592,
+          "demand_groups": 16,
+          "estimate": 0.23223375256974105
+        },
+        "speed_mse_occupied": {
+          "ci_high": 2.67562733409537,
+          "ci_low": 1.0701993791382662,
+          "demand_groups": 16,
+          "estimate": 1.8397292873364506
+        },
+        "speed_sample_variance_all": {
+          "ci_high": 0.11524264888391808,
+          "ci_low": 0.06546531150625678,
+          "demand_groups": 16,
+          "estimate": 0.08933284536299319
+        },
+        "speed_sample_variance_occupied": {
+          "ci_high": 0.47356734571572606,
+          "ci_low": 0.26805252146883723,
+          "demand_groups": 16,
+          "estimate": 0.3673236413922283
+        },
+        "speed_width90_all": {
+          "ci_high": 0.11612883747681635,
+          "ci_low": 0.07194356715693209,
+          "demand_groups": 16,
+          "estimate": 0.09335568065407525
+        },
+        "speed_width90_occupied": {
+          "ci_high": 0.4878973607035743,
+          "ci_low": 0.258359882659858,
+          "demand_groups": 16,
+          "estimate": 0.361452438764405
+        },
+        "total_count_absolute_error": {
+          "ci_high": 23.677559829616936,
+          "ci_low": 11.426508498108353,
+          "demand_groups": 16,
+          "estimate": 17.188365811811458
+        },
+        "total_count_bias": {
+          "ci_high": -12.290472494771059,
+          "ci_low": -24.174653304192365,
+          "demand_groups": 16,
+          "estimate": -17.836170253871842
+        },
+        "total_count_over_cohort_fraction": {
+          "ci_high": 0.0,
+          "ci_low": -0.09375,
+          "demand_groups": 16,
+          "estimate": -0.03125
+        },
+        "total_count_sample_variance": {
+          "ci_high": 30.133843077698355,
+          "ci_low": 6.362139921100407,
+          "demand_groups": 16,
+          "estimate": 17.142386327699477
+        }
+      },
+      "soft_vs_zero": {
+        "count_coverage90_all": {
+          "ci_high": 0.0056052168815943736,
+          "ci_low": 0.0011723329425556866,
+          "demand_groups": 16,
+          "estimate": 0.0031872801875732714
+        },
+        "count_coverage90_occupied": {
+          "ci_high": 0.034333238471127556,
+          "ci_low": 0.007226602741513685,
+          "demand_groups": 16,
+          "estimate": 0.020931185988104787
+        },
+        "count_crps_all": {
+          "ci_high": 0.029681841861934115,
+          "ci_low": 0.016269404787527836,
+          "demand_groups": 16,
+          "estimate": 0.022712493111861156
+        },
+        "count_crps_occupied": {
+          "ci_high": 0.21582871870078368,
+          "ci_low": 0.132435918126368,
+          "demand_groups": 16,
+          "estimate": 0.17216991331634768
+        },
+        "count_mae_all": {
+          "ci_high": 0.034791668496718414,
+          "ci_low": 0.01883662179911164,
+          "demand_groups": 16,
+          "estimate": 0.026573413605402066
+        },
+        "count_mae_occupied": {
+          "ci_high": 0.23307117813257858,
+          "ci_low": 0.1426107907246521,
+          "demand_groups": 16,
+          "estimate": 0.18533632225603447
+        },
+        "count_mse_all": {
+          "ci_high": 0.14307911484367059,
+          "ci_low": 0.058390877890409816,
+          "demand_groups": 16,
+          "estimate": 0.09828225354512574
+        },
+        "count_mse_occupied": {
+          "ci_high": 1.151660589093751,
+          "ci_low": 0.4824784408958625,
+          "demand_groups": 16,
+          "estimate": 0.7536026218953578
+        },
+        "count_sample_variance_all": {
+          "ci_high": 0.015842968782134943,
+          "ci_low": 0.005553900071609019,
+          "demand_groups": 16,
+          "estimate": 0.010167675998837788
+        },
+        "count_sample_variance_occupied": {
+          "ci_high": 0.0649478899878611,
+          "ci_low": 0.03777948522910529,
+          "demand_groups": 16,
+          "estimate": 0.05086866731510216
+        },
+        "count_width90_all": {
+          "ci_high": 0.03918996199254552,
+          "ci_low": 0.01868366852092881,
+          "demand_groups": 16,
+          "estimate": 0.028095776256589128
+        },
+        "count_width90_occupied": {
+          "ci_high": 0.16903722167783483,
+          "ci_low": 0.10454142436201896,
+          "demand_groups": 16,
+          "estimate": 0.13419449469418684
+        },
+        "energy_score": {
+          "ci_high": 1.8983329692439541,
+          "ci_low": 0.887273925658384,
+          "demand_groups": 16,
+          "estimate": 1.3811662219828977
+        },
+        "energy_score_u": {
+          "ci_high": 1.7820766583542487,
+          "ci_low": 0.7934513212723634,
+          "demand_groups": 16,
+          "estimate": 1.2763080432844585
+        },
+        "speed_coverage90_all": {
+          "ci_high": 0.04986170134818288,
+          "ci_low": 0.03498681125439625,
+          "demand_groups": 16,
+          "estimate": 0.04249706916764361
+        },
+        "speed_coverage90_occupied": {
+          "ci_high": 0.05009386199259392,
+          "ci_low": 0.0027533623516955404,
+          "demand_groups": 16,
+          "estimate": 0.026306495308288918
+        },
+        "speed_crps_all": {
+          "ci_high": 0.02366450048020516,
+          "ci_low": 0.007021686559905896,
+          "demand_groups": 16,
+          "estimate": 0.0149675692009252
+        },
+        "speed_crps_occupied": {
+          "ci_high": 0.1953915444496353,
+          "ci_low": 0.06966034956240583,
+          "demand_groups": 16,
+          "estimate": 0.13076749909642915
+        },
+        "speed_mae_all": {
+          "ci_high": 0.03898387197611606,
+          "ci_low": 0.017904091529357513,
+          "demand_groups": 16,
+          "estimate": 0.028163036036821326
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.23833645699292383,
+          "ci_low": 0.10372626546132444,
+          "demand_groups": 16,
+          "estimate": 0.1678554622871159
+        },
+        "speed_mse_all": {
+          "ci_high": 0.30862346896175724,
+          "ci_low": 0.11027344421973834,
+          "demand_groups": 16,
+          "estimate": 0.2059423422661567
+        },
+        "speed_mse_occupied": {
+          "ci_high": 2.3170368999185613,
+          "ci_low": 0.6181341484666709,
+          "demand_groups": 16,
+          "estimate": 1.4304485023703415
+        },
+        "speed_sample_variance_all": {
+          "ci_high": 0.11415411991065097,
+          "ci_low": 0.06348433894732494,
+          "demand_groups": 16,
+          "estimate": 0.08802727367062546
+        },
+        "speed_sample_variance_occupied": {
+          "ci_high": 0.45433805438178604,
+          "ci_low": 0.21763284790834608,
+          "demand_groups": 16,
+          "estimate": 0.3386762661238568
+        },
+        "speed_width90_all": {
+          "ci_high": 0.12161250197030961,
+          "ci_low": 0.07443442674337314,
+          "demand_groups": 16,
+          "estimate": 0.09716526762730027
+        },
+        "speed_width90_occupied": {
+          "ci_high": 0.48053225273970757,
+          "ci_low": 0.2411753401628863,
+          "demand_groups": 16,
+          "estimate": 0.34922420661678844
+        },
+        "total_count_absolute_error": {
+          "ci_high": 20.970042359835553,
+          "ci_low": 10.983281335201077,
+          "demand_groups": 16,
+          "estimate": 15.729477920225436
+        },
+        "total_count_bias": {
+          "ci_high": -11.866033281021677,
+          "ci_low": -21.17192459379408,
+          "demand_groups": 16,
+          "estimate": -16.24321950266377
+        },
+        "total_count_over_cohort_fraction": {
+          "ci_high": 0.0,
+          "ci_low": -0.09375,
+          "demand_groups": 16,
+          "estimate": -0.03125
+        },
+        "total_count_sample_variance": {
+          "ci_high": 32.92445845862955,
+          "ci_low": 10.529200159069829,
+          "demand_groups": 16,
+          "estimate": 20.45494317826949
+        }
+      }
+    },
+    "updates_per_arm": 7600
+  },
+  "initial_gates": [
+    {
+      "archived_bit_identity_checked": false,
+      "arm": "zero_direct",
+      "condition": 0,
+      "device": "cpu",
+      "steps": 4,
+      "zero_head_exact_old": true
+    },
+    {
+      "archived_bit_identity_checked": false,
+      "arm": "soft_direct",
+      "condition": 0,
+      "device": "cpu",
+      "steps": 4,
+      "zero_head_exact_old": true
+    },
+    {
+      "archived_bit_identity_checked": false,
+      "arm": "condition_only",
+      "condition": 0,
+      "device": "cpu",
+      "steps": 4,
+      "zero_head_exact_old": true
+    },
+    {
+      "archived_bit_identity_checked": false,
+      "arm": "zero_direct",
+      "condition": 1,
+      "device": "cpu",
+      "steps": 4,
+      "zero_head_exact_old": true
+    },
+    {
+      "archived_bit_identity_checked": false,
+      "arm": "soft_direct",
+      "condition": 1,
+      "device": "cpu",
+      "steps": 4,
+      "zero_head_exact_old": true
+    },
+    {
+      "archived_bit_identity_checked": false,
+      "arm": "condition_only",
+      "condition": 1,
+      "device": "cpu",
+      "steps": 4,
+      "zero_head_exact_old": true
+    }
+  ],
+  "cache_compatibility": [
+    {
+      "atol": 0.0001,
+      "family": "zero_mean",
+      "field": "x",
+      "max_absolute_error": 2.5093555450439453e-05,
+      "rows": 10236,
+      "rtol": 0.0001
+    },
+    {
+      "atol": 0.0001,
+      "family": "zero_mean",
+      "field": "y",
+      "max_absolute_error": 2.7418136596679688e-06,
+      "rows": 10236,
+      "rtol": 0.0001
+    },
+    {
+      "atol": 0.0001,
+      "family": "weak_soft",
+      "field": "x",
+      "max_absolute_error": 2.7418136596679688e-05,
+      "rows": 10236,
+      "rtol": 0.0001
+    },
+    {
+      "atol": 0.0001,
+      "family": "weak_soft",
+      "field": "y",
+      "max_absolute_error": 3.1962990760803223e-06,
+      "rows": 10236,
+      "rtol": 0.0001
+    }
+  ],
+  "interpretation": {
+    "soft_shift": "Moving source AND reference to z+b remains worse than equal-budget zero source/ref mean z.",
+    "hint": "Keeping source/ref mean z and exposing b as an extra input gives a small positive signal in ES/speed CRPS; count CRPS CI crosses zero.",
+    "necessity": "Does not establish necessity of prior or benefit for routing policies.",
+    "optimization": "Small-head validation patience met at95epochs; not evidence that fulljointmodel is optimized.",
+    "scope": "Euler4 CPU screening only; no Euler100 equivalence. One headseed/frozen pretrainedbackbone, paired16 demandgroups/32states, K8.",
+    "h4": "Neitherpriorarm passes prespecifiedjoint ES+bothoccupiedCRPS+massgate; no H4 experiment."
+  },
+  "artifacts": {
+    "root": "outputs/direct_context_fm_20261014/v2_cpu4",
+    "summary": "outputs/direct_context_fm_20261014/v2_cpu4/summary.json",
+    "source": "outputs/direct_context_fm_20261014/v2_cpu4/source"
+  },
+  "validation": {
+    "tests": "18 passed: direct-context and nonlinear residual tests",
+    "compile": "passed",
+    "diff_check": "passed"
+  },
+  "independent_verification": {
+    "status": "pass",
+    "independent_numpy_bank_scores": true,
+    "independent_cluster_bootstrap": true,
+    "validation_only_checkpoint_selection": true,
+    "equal_actual_training_budgets": true,
+    "consumed_epochs": 95,
+    "consumed_updates_per_arm": 7600,
+    "best": {
+      "zero_direct": {
+        "ES": 9.01937364138752,
+        "epoch": 70,
+        "reset_ES": 9.01937364138752,
+        "reset_epoch": 70,
+        "patience": 5
+      },
+      "soft_direct": {
+        "ES": 11.429476243727706,
+        "epoch": 95,
+        "reset_ES": 11.437156398673771,
+        "reset_epoch": 55,
+        "patience": 8
+      },
+      "condition_only": {
+        "ES": 9.050092993974843,
+        "epoch": 80,
+        "reset_ES": 9.050092993974843,
+        "reset_epoch": 80,
+        "patience": 3
+      }
+    },
+    "device": "cpu",
+    "integration_steps": 4,
+    "screening": true,
+    "initial_noop_gates": 6,
+    "parent_cache_compatibility_checked": true,
+    "frozen_source_and_checkpoint_verified": true,
+    "selected_head_parameters": 65856,
+    "test_states": 32,
+    "test_groups": 16,
+    "test_rows": 160,
+    "old_head_references": "descriptive; different capacity and training budget",
+    "source_vs_hint_contrast": "source AND reference path change; not source-only",
+    "h4_eligible": [],
+    "verifier_sha256": "f03789e34ec036354f31deb4438bbd5d373e551948592a6eb386912b1cecbe77",
+    "bank_metric_checks": 32376,
+    "interval_checks": 2054,
+    "files_hashed": 544
+  }
+}
