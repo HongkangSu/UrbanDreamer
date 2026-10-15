@@ -1,0 +1,665 @@
+{
+  "status": "complete",
+  "experiment": "Unchanged direct-context heads evaluated at Euler4 and Euler100 on the same GPU",
+  "checkpoint_sha256": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+  "protocol": {
+    "arms": [
+      "zero_direct",
+      "soft_direct",
+      "condition_only"
+    ],
+    "bootstrap": "2000paired demandgroups, same seed as parent; not training-seed uncertainty",
+    "chunk": 4,
+    "comparisons": "soft_vs_zero; hint_vs_zero; shift_vs_hint at each NFE; samearm100minus4",
+    "cpu4": "rerun all GPU4 as backend control; CPU4 differences descriptive only",
+    "device": "cuda:1",
+    "gpu_memory_fraction": 0.04,
+    "limitations": [
+      "No retraining or NFE100 checkpoint reselection.",
+      "Soft source arm changes BOTH source and reference; not a source-only causal effect.",
+      "One frozen pretrained backbone and head training seed; no policy benefit claim."
+    ],
+    "noise": "same old rank16 graph Gaussian paired per-condition/per-draw seeds",
+    "precision": "FP32 noAMP noTF32 noCompile",
+    "reference_hashes": {
+      "basis": "a34391d005d5b25160f923dae964d2d4b80d11f2017c52633810ad87e9cc72a2",
+      "checkpoint": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+      "condition_only": "55d6dfc990795c8090a78e680f6ee49758b3ad93fb158de846f2d8a6742a52f8",
+      "cpu4_banks": "45587e946857a35bff3b9ab3047b85af19f4d00aea184e1259775a335cb5320e",
+      "normalizers": "3c3270c87681b58bf36cdc53553620c7af5d7362abfbcd6719051dbce8d3291d",
+      "parent_protocol": "1fa5f74e404564189513b5edc19b861807fea6ead676b926fa935a1ceb66db53",
+      "parent_source": "d82a11e2433af09804c6254e02890cbe98fd0e689ed06432df5071765c82e189",
+      "scale_reference": "c3c41f4ca3b2dfd34aa1fc13e76cafed16580cafc508308ef16eb9bb252fa52d",
+      "selection": "a6fdd71ffed8c8e72760714760d7b43ebf10721dc8b2a7ba81b857430e1828c9",
+      "soft_direct": "998f29d3fb1cf1b4bd72cf3618dbd5f8248514c0c86c81201fa063d7c9dae37b",
+      "split": "92657ba17f1606b9d86a8b1b580d65302d6a0ebbd761ae46f998e9ddbb1e657f",
+      "weak_head": "9d2e128f9830b6167668cdb37de98cd43c4380ad535c3f55248cdcc6a17b2c11",
+      "zero_direct": "a69969536b252ad2f9cdee8917614d1a8b2cd79547d68a8e5634dd8921fa9461"
+    },
+    "samples": 8,
+    "selected_epochs": {
+      "condition_only": 80,
+      "soft_direct": 95,
+      "zero_direct": 70
+    },
+    "selection": false,
+    "status": "prespecified_before_new_forecasts",
+    "steps": [
+      4,
+      100
+    ],
+    "target": "FULLfactualcontrol/currentstate HYBRIDCt count, raw next/following mean speed",
+    "test": "same32previouslyscoredstates/16groups; solver robustness diagnostic, NOT a fresh independent confirmation set",
+    "training": false,
+    "weights": "existing CPU4-validation-selected heads used unchanged for BOTH integration budgets"
+  },
+  "results": {
+    "condition_only_s100": {
+      "energy_score": {
+        "ci_high": 9.401138799365519,
+        "ci_low": 7.129991697753281,
+        "demand_groups": 16,
+        "estimate": 8.1894930688949
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.5964365380331178,
+        "ci_low": 0.47186720771744833,
+        "demand_groups": 16,
+        "estimate": 0.5266451139651046
+      },
+      "speed_crps_occupied": {
+        "ci_high": 1.0055453116386108,
+        "ci_low": 0.7387025532872695,
+        "demand_groups": 16,
+        "estimate": 0.8643198936195129
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.6918973656043109,
+        "ci_low": 0.5574926643669529,
+        "demand_groups": 16,
+        "estimate": 0.6175778479284816
+      },
+      "speed_mae_occupied": {
+        "ci_high": 1.1112910464693704,
+        "ci_low": 0.8240600012405528,
+        "demand_groups": 16,
+        "estimate": 0.9575113354663872
+      },
+      "total_count_absolute_error": {
+        "ci_high": 17.247232577351035,
+        "ci_low": 8.032713062170012,
+        "demand_groups": 16,
+        "estimate": 12.481967241773543
+      }
+    },
+    "condition_only_s4": {
+      "energy_score": {
+        "ci_high": 9.93862848455999,
+        "ci_low": 7.615816224957992,
+        "demand_groups": 16,
+        "estimate": 8.700319548335804
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.6760026057641794,
+        "ci_low": 0.5637220240093557,
+        "demand_groups": 16,
+        "estimate": 0.6132950188239807
+      },
+      "speed_crps_occupied": {
+        "ci_high": 1.075874488200411,
+        "ci_low": 0.7711393811960747,
+        "demand_groups": 16,
+        "estimate": 0.91384296939063
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.7498044202697289,
+        "ci_low": 0.6337676670297586,
+        "demand_groups": 16,
+        "estimate": 0.6858690917413753
+      },
+      "speed_mae_occupied": {
+        "ci_high": 1.1834830411973265,
+        "ci_low": 0.8552388024756424,
+        "demand_groups": 16,
+        "estimate": 1.009102064405916
+      },
+      "total_count_absolute_error": {
+        "ci_high": 32.866970434635476,
+        "ci_low": 19.212950730971006,
+        "demand_groups": 16,
+        "estimate": 25.603331956044798
+      }
+    },
+    "soft_direct_s100": {
+      "energy_score": {
+        "ci_high": 11.213895156465691,
+        "ci_low": 8.195191612247308,
+        "demand_groups": 16,
+        "estimate": 9.634002877921425
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.7904075165990797,
+        "ci_low": 0.6308738400850505,
+        "demand_groups": 16,
+        "estimate": 0.6992232571939746
+      },
+      "speed_crps_occupied": {
+        "ci_high": 1.2380987985286367,
+        "ci_low": 0.9177296616458573,
+        "demand_groups": 16,
+        "estimate": 1.073473242024917
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.9042754693781974,
+        "ci_low": 0.7296730361036177,
+        "demand_groups": 16,
+        "estimate": 0.8047446589346722
+      },
+      "speed_mae_occupied": {
+        "ci_high": 1.3813174996367428,
+        "ci_low": 1.0311026141103525,
+        "demand_groups": 16,
+        "estimate": 1.2032091212747487
+      },
+      "total_count_absolute_error": {
+        "ci_high": 32.5045112718277,
+        "ci_low": 16.05837278082228,
+        "demand_groups": 16,
+        "estimate": 23.682952264188877
+      }
+    },
+    "soft_direct_s4": {
+      "energy_score": {
+        "ci_high": 11.668512959354597,
+        "ci_low": 8.746854338850275,
+        "demand_groups": 16,
+        "estimate": 10.14096365617492
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.8845088366975626,
+        "ci_low": 0.719722638448836,
+        "demand_groups": 16,
+        "estimate": 0.7895269310781774
+      },
+      "speed_crps_occupied": {
+        "ci_high": 1.2512476317869967,
+        "ci_low": 0.9253908024285383,
+        "demand_groups": 16,
+        "estimate": 1.081430069486796
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.9755492760287604,
+        "ci_low": 0.7994148642012054,
+        "demand_groups": 16,
+        "estimate": 0.8746015694420801
+      },
+      "speed_mae_occupied": {
+        "ci_high": 1.39686497704361,
+        "ci_low": 1.0419433805949365,
+        "demand_groups": 16,
+        "estimate": 1.2152027625387622
+      },
+      "total_count_absolute_error": {
+        "ci_high": 56.12410332513602,
+        "ci_low": 31.765028462408495,
+        "demand_groups": 16,
+        "estimate": 42.79170485012002
+      }
+    },
+    "zero_direct_s100": {
+      "energy_score": {
+        "ci_high": 9.466726123800912,
+        "ci_low": 7.215167481634325,
+        "demand_groups": 16,
+        "estimate": 8.259512179115962
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.6042651012275801,
+        "ci_low": 0.47653845965221775,
+        "demand_groups": 16,
+        "estimate": 0.5333687006112595
+      },
+      "speed_crps_occupied": {
+        "ci_high": 1.051641537133174,
+        "ci_low": 0.7558344404788475,
+        "demand_groups": 16,
+        "estimate": 0.8966524417353499
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.7000642164860764,
+        "ci_low": 0.563111767006057,
+        "demand_groups": 16,
+        "estimate": 0.6253599053237523
+      },
+      "speed_mae_occupied": {
+        "ci_high": 1.1760263608002264,
+        "ci_low": 0.843297586004105,
+        "demand_groups": 16,
+        "estimate": 0.9981069781777993
+      },
+      "total_count_absolute_error": {
+        "ci_high": 19.332953320465858,
+        "ci_low": 9.345487068587687,
+        "demand_groups": 16,
+        "estimate": 14.154760660558521
+      }
+    },
+    "zero_direct_s4": {
+      "energy_score": {
+        "ci_high": 9.968959983150286,
+        "ci_low": 7.703616692763452,
+        "demand_groups": 16,
+        "estimate": 8.759792222367441
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.6779630388523011,
+        "ci_low": 0.5692145319700953,
+        "demand_groups": 16,
+        "estimate": 0.6173569155277498
+      },
+      "speed_crps_occupied": {
+        "ci_high": 1.1205449789219646,
+        "ci_low": 0.7991004975539169,
+        "demand_groups": 16,
+        "estimate": 0.9506617149607788
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.7512747845564904,
+        "ci_low": 0.6388271830261658,
+        "demand_groups": 16,
+        "estimate": 0.6892651376995688
+      },
+      "speed_mae_occupied": {
+        "ci_high": 1.2349967229235048,
+        "ci_low": 0.8824973753359051,
+        "demand_groups": 16,
+        "estimate": 1.047346393237283
+      },
+      "total_count_absolute_error": {
+        "ci_high": 35.99761350373638,
+        "ci_low": 19.336982575982915,
+        "demand_groups": 16,
+        "estimate": 27.06221823812603
+      }
+    }
+  },
+  "contrasts": {
+    "condition_only_100minus4": {
+      "energy_score": {
+        "ci_high": -0.40939541235437393,
+        "ci_low": -0.6001850576676072,
+        "demand_groups": 16,
+        "estimate": -0.5108264794409048
+      },
+      "count_crps_occupied": {
+        "ci_high": -0.07468420865726542,
+        "ci_low": -0.09813553437361391,
+        "demand_groups": 16,
+        "estimate": -0.08664990485887618
+      },
+      "speed_crps_occupied": {
+        "ci_high": -0.015161252356984,
+        "ci_low": -0.0823518650991037,
+        "demand_groups": 16,
+        "estimate": -0.049523075771117066
+      },
+      "count_mae_occupied": {
+        "ci_high": -0.05372962251774331,
+        "ci_low": -0.0821831654872355,
+        "demand_groups": 16,
+        "estimate": -0.06829124381289375
+      },
+      "speed_mae_occupied": {
+        "ci_high": -0.014586980414678676,
+        "ci_low": -0.08954662376654898,
+        "demand_groups": 16,
+        "estimate": -0.0515907289395289
+      },
+      "total_count_absolute_error": {
+        "ci_high": -9.819692478810676,
+        "ci_low": -16.84867139885345,
+        "demand_groups": 16,
+        "estimate": -13.121364714271254
+      }
+    },
+    "hint_vs_zero_s100": {
+      "energy_score": {
+        "ci_high": 0.03436022270880124,
+        "ci_low": -0.16424733581899423,
+        "demand_groups": 16,
+        "estimate": -0.07001911022106361
+      },
+      "count_crps_occupied": {
+        "ci_high": -0.0011615828625104003,
+        "ci_low": -0.01217574617710477,
+        "demand_groups": 16,
+        "estimate": -0.006723586646154847
+      },
+      "speed_crps_occupied": {
+        "ci_high": -0.015974510454293607,
+        "ci_low": -0.05065815987811747,
+        "demand_groups": 16,
+        "estimate": -0.03233254811583701
+      },
+      "count_mae_occupied": {
+        "ci_high": -0.001860606659828861,
+        "ci_low": -0.013804564239991593,
+        "demand_groups": 16,
+        "estimate": -0.007782057395270629
+      },
+      "speed_mae_occupied": {
+        "ci_high": -0.017816255952260857,
+        "ci_low": -0.07066610940738165,
+        "demand_groups": 16,
+        "estimate": -0.04059564271141213
+      },
+      "total_count_absolute_error": {
+        "ci_high": -0.9260388731267628,
+        "ci_low": -2.4436458294169507,
+        "demand_groups": 16,
+        "estimate": -1.6727934187849782
+      }
+    },
+    "hint_vs_zero_s4": {
+      "energy_score": {
+        "ci_high": -0.001144796409186583,
+        "ci_low": -0.11200971146148615,
+        "demand_groups": 16,
+        "estimate": -0.059472674031637585
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.0016589548856188044,
+        "ci_low": -0.009446537839511748,
+        "demand_groups": 16,
+        "estimate": -0.004061896703768995
+      },
+      "speed_crps_occupied": {
+        "ci_high": -0.02151066846518068,
+        "ci_low": -0.0523620832721174,
+        "demand_groups": 16,
+        "estimate": -0.03681874557014866
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.0033335324792010596,
+        "ci_low": -0.009824894008782246,
+        "demand_groups": 16,
+        "estimate": -0.0033960459581933774
+      },
+      "speed_mae_occupied": {
+        "ci_high": -0.02293017573287223,
+        "ci_low": -0.05440106070253222,
+        "demand_groups": 16,
+        "estimate": -0.03824432883136698
+      },
+      "total_count_absolute_error": {
+        "ci_high": -0.054460408697285044,
+        "ci_low": -3.0723101865799154,
+        "demand_groups": 16,
+        "estimate": -1.4588862820812345
+      }
+    },
+    "shift_vs_hint_s100": {
+      "energy_score": {
+        "ci_high": 2.015416193551857,
+        "ci_low": 0.9373527819032554,
+        "demand_groups": 16,
+        "estimate": 1.444509809026525
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.20815673592551012,
+        "ci_low": 0.1405284026547196,
+        "demand_groups": 16,
+        "estimate": 0.17257814322887
+      },
+      "speed_crps_occupied": {
+        "ci_high": 0.2781525863686095,
+        "ci_low": 0.15176836125933452,
+        "demand_groups": 16,
+        "estimate": 0.20915334840540406
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.22852342148267057,
+        "ci_low": 0.1501154744646976,
+        "demand_groups": 16,
+        "estimate": 0.1871668110061906
+      },
+      "speed_mae_occupied": {
+        "ci_high": 0.3183623948607162,
+        "ci_low": 0.18129426638663695,
+        "demand_groups": 16,
+        "estimate": 0.2456977858083614
+      },
+      "total_count_absolute_error": {
+        "ci_high": 17.71920304381428,
+        "ci_low": 4.865584340929316,
+        "demand_groups": 16,
+        "estimate": 11.200985022415335
+      }
+    },
+    "shift_vs_hint_s4": {
+      "energy_score": {
+        "ci_high": 1.9493215331755924,
+        "ci_low": 0.9624356006504049,
+        "demand_groups": 16,
+        "estimate": 1.4406441078391161
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.22105695877520593,
+        "ci_low": 0.13375982388917254,
+        "demand_groups": 16,
+        "estimate": 0.17623191225419657
+      },
+      "speed_crps_occupied": {
+        "ci_high": 0.23418707328939964,
+        "ci_low": 0.10900354260101247,
+        "demand_groups": 16,
+        "estimate": 0.167587100096166
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.2386176393752908,
+        "ci_low": 0.14293542784687027,
+        "demand_groups": 16,
+        "estimate": 0.1887324777007047
+      },
+      "speed_mae_occupied": {
+        "ci_high": 0.2785317063150867,
+        "ci_low": 0.14330876779052762,
+        "demand_groups": 16,
+        "estimate": 0.20610069813284637
+      },
+      "total_count_absolute_error": {
+        "ci_high": 23.677563705903417,
+        "ci_low": 11.426551167209215,
+        "demand_groups": 16,
+        "estimate": 17.188372894075222
+      }
+    },
+    "soft_direct_100minus4": {
+      "energy_score": {
+        "ci_high": -0.37926342205719105,
+        "ci_low": -0.6166848323777713,
+        "demand_groups": 16,
+        "estimate": -0.506960778253496
+      },
+      "count_crps_occupied": {
+        "ci_high": -0.07508072665031226,
+        "ci_low": -0.10485142264674353,
+        "demand_groups": 16,
+        "estimate": -0.09030367388420274
+      },
+      "speed_crps_occupied": {
+        "ci_high": 0.022244617222021645,
+        "ci_low": -0.038130147669695004,
+        "demand_groups": 16,
+        "estimate": -0.007956827461878986
+      },
+      "count_mae_occupied": {
+        "ci_high": -0.05487728304344178,
+        "ci_low": -0.08361224364295845,
+        "demand_groups": 16,
+        "estimate": -0.06985691050740787
+      },
+      "speed_mae_occupied": {
+        "ci_high": 0.012873229959509116,
+        "ci_low": -0.03821117080561159,
+        "demand_groups": 16,
+        "estimate": -0.011993641264013866
+      },
+      "total_count_absolute_error": {
+        "ci_high": -15.131577854166064,
+        "ci_low": -23.52628328177143,
+        "demand_groups": 16,
+        "estimate": -19.108752585931143
+      }
+    },
+    "soft_vs_zero_s100": {
+      "energy_score": {
+        "ci_high": 1.9164786181696365,
+        "ci_low": 0.8490970821822779,
+        "demand_groups": 16,
+        "estimate": 1.3744906988054613
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.19875787368603895,
+        "ci_low": 0.1350377812758156,
+        "demand_groups": 16,
+        "estimate": 0.16585455658271514
+      },
+      "speed_crps_occupied": {
+        "ci_high": 0.2440493540497854,
+        "ci_low": 0.1200399286147843,
+        "demand_groups": 16,
+        "estimate": 0.17682080028956706
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.21786316100035846,
+        "ci_low": 0.1442931368114822,
+        "demand_groups": 16,
+        "estimate": 0.17938475361091996
+      },
+      "speed_mae_occupied": {
+        "ci_high": 0.27806583470942453,
+        "ci_low": 0.14207731479187977,
+        "demand_groups": 16,
+        "estimate": 0.20510214309694927
+      },
+      "total_count_absolute_error": {
+        "ci_high": 15.647704355390813,
+        "ci_low": 3.563321831639357,
+        "demand_groups": 16,
+        "estimate": 9.528191603630358
+      }
+    },
+    "soft_vs_zero_s4": {
+      "energy_score": {
+        "ci_high": 1.8983370884733484,
+        "ci_low": 0.8872785353891441,
+        "demand_groups": 16,
+        "estimate": 1.3811714338074785
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.21582895874350763,
+        "ci_low": 0.1324360720538219,
+        "demand_groups": 16,
+        "estimate": 0.17217001555042757
+      },
+      "speed_crps_occupied": {
+        "ci_high": 0.19539254420499177,
+        "ci_low": 0.06966115697919671,
+        "demand_groups": 16,
+        "estimate": 0.13076835452601737
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.23307106560279892,
+        "ci_low": 0.14261115016844783,
+        "demand_groups": 16,
+        "estimate": 0.18533643174251133
+      },
+      "speed_mae_occupied": {
+        "ci_high": 0.23833757450784832,
+        "ci_low": 0.10372682378206868,
+        "demand_groups": 16,
+        "estimate": 0.1678563693014794
+      },
+      "total_count_absolute_error": {
+        "ci_high": 20.970003146444714,
+        "ci_low": 10.983290080535088,
+        "demand_groups": 16,
+        "estimate": 15.72948661199399
+      }
+    },
+    "zero_direct_100minus4": {
+      "energy_score": {
+        "ci_high": -0.4002812684688296,
+        "ci_low": -0.5939205917029475,
+        "demand_groups": 16,
+        "estimate": -0.5002800432514788
+      },
+      "count_crps_occupied": {
+        "ci_high": -0.07063111217308488,
+        "ci_low": -0.09667160817817778,
+        "demand_groups": 16,
+        "estimate": -0.08398821491649032
+      },
+      "speed_crps_occupied": {
+        "ci_high": -0.024741264064792552,
+        "ci_low": -0.08223651667151687,
+        "demand_groups": 16,
+        "estimate": -0.054009273225428714
+      },
+      "count_mae_occupied": {
+        "ci_high": -0.047276522805154333,
+        "ci_low": -0.0790511319774652,
+        "demand_groups": 16,
+        "estimate": -0.0639052323758165
+      },
+      "speed_mae_occupied": {
+        "ci_high": -0.02023068874194141,
+        "ci_low": -0.07702412726934821,
+        "demand_groups": 16,
+        "estimate": -0.04923941505948376
+      },
+      "total_count_absolute_error": {
+        "ci_high": -8.86730278820022,
+        "ci_low": -17.549736635281395,
+        "demand_groups": 16,
+        "estimate": -12.90745757756751
+      }
+    }
+  },
+  "interpretation": {
+    "source": "Soft prior as source AND reference remains worse at Euler100; coarse-start gap is not primarily an Euler4 artifact.",
+    "hint": "Both occupied CRPS improve at Euler100; energy-score CI includes zero. Modest feature-use signal, not established overall superiority.",
+    "scope": "Selected on Euler4 validation previously; no retraining or reselection for Euler100. Same previously scored test states; numerical robustness only.",
+    "next": "Fresh-test equal-budget partial FM adaptation separates source-only and joint source/reference effects."
+  },
+  "runtime": {
+    "elapsed_seconds": 241.9153962135315,
+    "max_gpu_allocated_mib": 174.576171875
+  },
+  "independent_verification": {
+    "status": "pass",
+    "fixed_selected_heads": true,
+    "same_test_noise_conditions": true,
+    "independent_numpy_metrics_and_CI": true,
+    "test_rows": 192,
+    "test_groups": 16,
+    "integration_steps": [
+      4,
+      100
+    ],
+    "no_training_or_reselection": true,
+    "verifier_sha256": "593f358d7a24fefe2e763d760199e55c2d7c06570fb787020626fd44981293f1",
+    "bank_metric_checks": 10944,
+    "interval_checks": 474,
+    "files_hashed": 355
+  },
+  "validation": {
+    "tests": "16 passed: direct context and prior-source-reference",
+    "compile": "passed"
+  },
+  "artifacts": {
+    "root": "outputs/direct_context_fm_20261015/steps100_v1",
+    "summary": "outputs/direct_context_fm_20261015/steps100_v1/summary.json"
+  }
+}
