@@ -1,0 +1,1812 @@
+{
+  "status": "complete_validation_plateau",
+  "experiment": "C2 continuation from epoch4 to validation plateau with complete AdamW restoration",
+  "checkpoint_sha256": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+  "completed_pretrain_updates": 49636,
+  "protocol": {
+    "caveats": [
+      "Validationplateau ofthispartialparameterfamily, notglobaloptimum orfulljointconvergence.",
+      "Onecheckpoint/adaptationseed; no policy benefit claim."
+    ],
+    "controller": {
+      "best_epsilon": 1e-05,
+      "lr_factor": 0.3,
+      "lr_reductions": 2,
+      "maximum_global_epoch": 80,
+      "meaningful_relative_improvement": 0.002,
+      "patience": 5
+    },
+    "device": "cuda:0",
+    "fairness": "C2extended has greater optimization budget; references unchanged, NOTequal-budget superiorityproof",
+    "gpu_memory_fraction": 0.08,
+    "precision": "FP32noAMP/noTF32/noCompile;evalmode,gradientthroughfrozenprefix",
+    "reference_hashes": {
+      "basis": "a34391d005d5b25160f923dae964d2d4b80d11f2017c52633810ad87e9cc72a2",
+      "checkpoint": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+      "data_manifest": "dba8a5de2387ce71cafc4d22614471045cd2228ccfffcb81ce71ba1973aa4657",
+      "normalizers": "6476ed6c9bc09be117807cdc9de083b948c0f697b17b78e314b4c5ff89f9411d",
+      "parent_cache": "76395670546096b94ea96882d09990bb3d47a38c6f0e5c859a94999458f6c31c",
+      "parent_protocol": "f3fab09b1793e15792ca7b6d9386dd7eb39ef7b3d6356b1b1294b547c97027b7",
+      "parent_selection": "1d4b39666171b8b3b78b08423e19c99f2b2e483a31269f15a26ee9429af5b1e0",
+      "reference_B": "8206155513a9a8d0c3e7b35d8e611e56f3e5df6679333b0ebce0d18fbb171ff0",
+      "reference_C2": "6211aa50233492967cf902917fb4b39dd58755d5d35d0da459586d3e0d480246",
+      "resume": "6211aa50233492967cf902917fb4b39dd58755d5d35d0da459586d3e0d480246",
+      "scales": "c3c41f4ca3b2dfd34aa1fc13e76cafed16580cafc508308ef16eb9bb252fa52d",
+      "split": "e24ccfff6c58ab17ff05ef874c471192b28c3cb29e74f84030a4d42e79b73128",
+      "weak_head": "9d2e128f9830b6167668cdb37de98cd43c4380ad535c3f55248cdcc6a17b2c11"
+    },
+    "resume_epoch": 4,
+    "resume_forward_gate": {
+      "atol": 1e-05,
+      "conditions": 2,
+      "rtol": 1e-05
+    },
+    "resume_updates": 6144,
+    "seed": 20261021,
+    "status": "prespecified_before_continuation",
+    "stopping": "fivecheckswithoutmeaningfulimprovement AFTERtworeductions; cap isbudgetlimited and leavesnewtestclosed",
+    "test": "new32states16groups onlyafterplateau;K8Euler100;B_parent,C2_epoch4,C2_converged",
+    "trainable_parameters": 1414528,
+    "training": "same3072cachedwholegraphviews,B2,originalglobalepochshuffle;fullvelocityCFM",
+    "validation": "same8states4groups,K4Euler100 everyepoch; parentepoch4candidateeligible",
+    "variant": "C2 source/refZ+b, same frozen backgroundhint"
+  },
+  "comparison_semantics": {
+    "B_parent": "sourceZ+epsilon,referenceZ,backgroundb suppliedtoDirectResidual head",
+    "C2": "sourceZ+b+epsilon,referenceZ+b,samebackgroundhint",
+    "noise": "sigma*U16*Gaussian;currentstatecenteredgraphGaussian,NOTstandardzero-meanisotropicGaussian",
+    "zero_mean_legacy_name": "zero prior increment,NOTzero fullsource mean",
+    "what_is_tested": "Incremental source/reference use after bothmodelsreceivebackground; notpriorpresencevsabsence"
+  },
+  "interpretation": {
+    "continued_training": "EnergyScore improves versusepoch4C2, butdidnotestablishoverallwinagainstfixedB.",
+    "joint_score": "ExtendedminusB ES+.29235 CI[-.01452,.62603],notclearlydifferent.",
+    "count_and_mass": "OccupiedcountCRPS remainsworse andtotalcountabsoluteerror increases; nooverallroutinggainclaim.",
+    "speed": "SpeedsCRPS pointimproves butextendedvsB CIcrosseszero.",
+    "convergence": "Validationplateauatglobalepoch25aftertwoLRcuts;selectedbestepoch10;partialadaptationonly"
+  },
+  "selection": {
+    "budget_limited": false,
+    "continued_updates": 32256,
+    "controller": {
+      "anchor_ES": 9.068881830555245,
+      "anchor_epoch": 20,
+      "best_ES": 9.068881830555245,
+      "best_epoch": 10,
+      "converged": true,
+      "lrs": [
+        9e-06,
+        8.999999999999999e-05
+      ],
+      "patience": 5,
+      "reductions": 2
+    },
+    "last_epoch": 25,
+    "reason": "validation_plateau_at_min_lr",
+    "status": "frozen_before_new_blindtest",
+    "total_updates": 38400
+  },
+  "optimization": {
+    "resume_epoch": 4,
+    "last_global_epoch": 25,
+    "last_total_adaptation_updates": 38400,
+    "best_global_epoch": 10,
+    "best_updates": 15360,
+    "learning_rate_reductions": [
+      {
+        "epoch": 15,
+        "next_lrs": [
+          3e-05,
+          0.0003
+        ]
+      },
+      {
+        "epoch": 20,
+        "next_lrs": [
+          9e-06,
+          8.999999999999999e-05
+        ]
+      }
+    ]
+  },
+  "results": {
+    "B_parent": {
+      "energy_score": {
+        "ci_high": 9.620250791679297,
+        "ci_low": 7.874563714220448,
+        "demand_groups": 16,
+        "estimate": 8.705961600738952
+      },
+      "energy_score_u": {
+        "ci_high": 9.225234457279198,
+        "ci_low": 7.577722097103254,
+        "demand_groups": 16,
+        "estimate": 8.363763400732388
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.5297082546577649,
+        "ci_low": 0.4577279717584537,
+        "demand_groups": 16,
+        "estimate": 0.49346574130722554
+      },
+      "speed_crps_occupied": {
+        "ci_high": 1.0251913337932717,
+        "ci_low": 0.705523215343332,
+        "demand_groups": 16,
+        "estimate": 0.8524959010304201
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.6250736498725253,
+        "ci_low": 0.5409021898022122,
+        "demand_groups": 16,
+        "estimate": 0.5829082778218877
+      },
+      "speed_mae_occupied": {
+        "ci_high": 1.116483680234584,
+        "ci_low": 0.7877056601126274,
+        "demand_groups": 16,
+        "estimate": 0.9389837419011847
+      },
+      "count_coverage90_occupied": {
+        "ci_high": 0.447229610222823,
+        "ci_low": 0.3979148067233653,
+        "demand_groups": 16,
+        "estimate": 0.4220965220211963
+      },
+      "speed_coverage90_occupied": {
+        "ci_high": 0.3675805958715958,
+        "ci_low": 0.3199282871070684,
+        "demand_groups": 16,
+        "estimate": 0.34435112135716295
+      },
+      "count_width90_occupied": {
+        "ci_high": 0.6704601775947432,
+        "ci_low": 0.5756225370516687,
+        "demand_groups": 16,
+        "estimate": 0.6212556267781395
+      },
+      "speed_width90_occupied": {
+        "ci_high": 0.5932102779799576,
+        "ci_low": 0.506225713372116,
+        "demand_groups": 16,
+        "estimate": 0.5489770547594863
+      },
+      "total_count_absolute_error": {
+        "ci_high": 12.177910027317257,
+        "ci_low": 7.705392505689982,
+        "demand_groups": 16,
+        "estimate": 9.988347158199952
+      },
+      "total_count_bias": {
+        "ci_high": -5.596199138495912,
+        "ci_low": -11.003572328569604,
+        "demand_groups": 16,
+        "estimate": -8.237826443353512
+      }
+    },
+    "C2_converged": {
+      "energy_score": {
+        "ci_high": 9.937577635339208,
+        "ci_low": 8.122997281566558,
+        "demand_groups": 16,
+        "estimate": 8.998312908902859
+      },
+      "energy_score_u": {
+        "ci_high": 9.544704165297865,
+        "ci_low": 7.807563629406433,
+        "demand_groups": 16,
+        "estimate": 8.641674890130986
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.6097552095596178,
+        "ci_low": 0.5224754004228059,
+        "demand_groups": 16,
+        "estimate": 0.5642500236796328
+      },
+      "speed_crps_occupied": {
+        "ci_high": 0.9872797402602449,
+        "ci_low": 0.6997577465497729,
+        "demand_groups": 16,
+        "estimate": 0.8312031980879611
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.7115514392505606,
+        "ci_low": 0.6108077218506386,
+        "demand_groups": 16,
+        "estimate": 0.6585771393237404
+      },
+      "speed_mae_occupied": {
+        "ci_high": 1.0916744372166043,
+        "ci_low": 0.7875833150835546,
+        "demand_groups": 16,
+        "estimate": 0.9270811611496885
+      },
+      "count_coverage90_occupied": {
+        "ci_high": 0.3955958884126136,
+        "ci_low": 0.3480895968448616,
+        "demand_groups": 16,
+        "estimate": 0.37167092498442034
+      },
+      "speed_coverage90_occupied": {
+        "ci_high": 0.34516669951513956,
+        "ci_low": 0.30097330564078606,
+        "demand_groups": 16,
+        "estimate": 0.3247010301943003
+      },
+      "count_width90_occupied": {
+        "ci_high": 0.6989081513256928,
+        "ci_low": 0.6133529668416626,
+        "demand_groups": 16,
+        "estimate": 0.65381063807436
+      },
+      "speed_width90_occupied": {
+        "ci_high": 0.7219877022684803,
+        "ci_low": 0.5855924431326366,
+        "demand_groups": 16,
+        "estimate": 0.6548105115267494
+      },
+      "total_count_absolute_error": {
+        "ci_high": 25.260993391020282,
+        "ci_low": 17.082868085228206,
+        "demand_groups": 16,
+        "estimate": 21.031070466267384
+      },
+      "total_count_bias": {
+        "ci_high": -16.876736696154172,
+        "ci_low": -25.23961658438547,
+        "demand_groups": 16,
+        "estimate": -20.90898012863407
+      }
+    },
+    "C2_epoch4": {
+      "energy_score": {
+        "ci_high": 10.285972175351782,
+        "ci_low": 8.501627912239902,
+        "demand_groups": 16,
+        "estimate": 9.367715666906468
+      },
+      "energy_score_u": {
+        "ci_high": 9.894682170682142,
+        "ci_low": 8.201560838155293,
+        "demand_groups": 16,
+        "estimate": 9.021154773102957
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.6267035508654447,
+        "ci_low": 0.5309598908441734,
+        "demand_groups": 16,
+        "estimate": 0.5752406210874497
+      },
+      "speed_crps_occupied": {
+        "ci_high": 1.022106731452819,
+        "ci_low": 0.7198597348000402,
+        "demand_groups": 16,
+        "estimate": 0.8568248267004865
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.7256300510535454,
+        "ci_low": 0.6172472190846753,
+        "demand_groups": 16,
+        "estimate": 0.6672294916385372
+      },
+      "speed_mae_occupied": {
+        "ci_high": 1.1182327474277785,
+        "ci_low": 0.8055023748957887,
+        "demand_groups": 16,
+        "estimate": 0.9464322396929998
+      },
+      "count_coverage90_occupied": {
+        "ci_high": 0.37960542045900886,
+        "ci_low": 0.33917928735318814,
+        "demand_groups": 16,
+        "estimate": 0.3595521741534565
+      },
+      "speed_coverage90_occupied": {
+        "ci_high": 0.35759137376341815,
+        "ci_low": 0.3184368782831322,
+        "demand_groups": 16,
+        "estimate": 0.33917772637784815
+      },
+      "count_width90_occupied": {
+        "ci_high": 0.6749543425748845,
+        "ci_low": 0.5956334744240981,
+        "demand_groups": 16,
+        "estimate": 0.6329095725999854
+      },
+      "speed_width90_occupied": {
+        "ci_high": 0.6644348918426994,
+        "ci_low": 0.5495906554025441,
+        "demand_groups": 16,
+        "estimate": 0.6085519157360766
+      },
+      "total_count_absolute_error": {
+        "ci_high": 13.645337792028565,
+        "ci_low": 9.24559573251806,
+        "demand_groups": 16,
+        "estimate": 11.319913518453063
+      },
+      "total_count_bias": {
+        "ci_high": -5.915795328986729,
+        "ci_low": -12.276160026823296,
+        "demand_groups": 16,
+        "estimate": -9.105566975706388
+      }
+    }
+  },
+  "contrasts": {
+    "epoch4_vs_B": {
+      "energy_score": {
+        "ci_high": 1.0088897001168498,
+        "ci_low": 0.32069040096027496,
+        "demand_groups": 16,
+        "estimate": 0.6617540661675155
+      },
+      "energy_score_u": {
+        "ci_high": 1.0100370557612304,
+        "ci_low": 0.31279970424556636,
+        "demand_groups": 16,
+        "estimate": 0.6573913723705698
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.10814031116954212,
+        "ci_low": 0.06003444597327151,
+        "demand_groups": 16,
+        "estimate": 0.08177487978022405
+      },
+      "speed_crps_occupied": {
+        "ci_high": 0.042912447446623675,
+        "ci_low": -0.03723832564940158,
+        "demand_groups": 16,
+        "estimate": 0.004328925670066448
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.11270750817828948,
+        "ci_low": 0.06103544064610336,
+        "demand_groups": 16,
+        "estimate": 0.08432121381664955
+      },
+      "speed_mae_occupied": {
+        "ci_high": 0.04525632491512793,
+        "ci_low": -0.031754662033164543,
+        "demand_groups": 16,
+        "estimate": 0.007448497791815034
+      },
+      "count_coverage90_occupied": {
+        "ci_high": -0.037219788501351984,
+        "ci_low": -0.0909376520145293,
+        "demand_groups": 16,
+        "estimate": -0.0625443478677398
+      },
+      "speed_coverage90_occupied": {
+        "ci_high": 0.0163443160299142,
+        "ci_low": -0.02422163391133197,
+        "demand_groups": 16,
+        "estimate": -0.005173394979314796
+      },
+      "count_width90_occupied": {
+        "ci_high": 0.0301471035170195,
+        "ci_low": -0.007090337397465437,
+        "demand_groups": 16,
+        "estimate": 0.011653945821846005
+      },
+      "speed_width90_occupied": {
+        "ci_high": 0.09379452835068472,
+        "ci_low": 0.022881279730513005,
+        "demand_groups": 16,
+        "estimate": 0.05957486097659022
+      },
+      "total_count_absolute_error": {
+        "ci_high": 3.967272010107284,
+        "ci_low": -1.2171867649827612,
+        "demand_groups": 16,
+        "estimate": 1.3315663602531096
+      },
+      "total_count_bias": {
+        "ci_high": 2.7912002161266956,
+        "ci_low": -4.840917508805377,
+        "demand_groups": 16,
+        "estimate": -0.867740532352876
+      }
+    },
+    "extended_vs_B": {
+      "energy_score": {
+        "ci_high": 0.6260325035424112,
+        "ci_low": -0.014520753333178399,
+        "demand_groups": 16,
+        "estimate": 0.2923513081639063
+      },
+      "energy_score_u": {
+        "ci_high": 0.610461940171182,
+        "ci_low": -0.02875323976620658,
+        "demand_groups": 16,
+        "estimate": 0.2779114893985979
+      },
+      "count_crps_occupied": {
+        "ci_high": 0.08848615340521282,
+        "ci_low": 0.05371284642785215,
+        "demand_groups": 16,
+        "estimate": 0.07078428237240723
+      },
+      "speed_crps_occupied": {
+        "ci_high": 0.008885298780534172,
+        "ci_low": -0.05223671214916223,
+        "demand_groups": 16,
+        "estimate": -0.02129270294245909
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.09527257146352579,
+        "ci_low": 0.05630853270989242,
+        "demand_groups": 16,
+        "estimate": 0.0756688615018527
+      },
+      "speed_mae_occupied": {
+        "ci_high": 0.01632611555028777,
+        "ci_low": -0.04086389077937687,
+        "demand_groups": 16,
+        "estimate": -0.011902580751496278
+      },
+      "count_coverage90_occupied": {
+        "ci_high": -0.021981149124424223,
+        "ci_low": -0.08086500921516682,
+        "demand_groups": 16,
+        "estimate": -0.05042559703677599
+      },
+      "speed_coverage90_occupied": {
+        "ci_high": 0.004995039899824898,
+        "ci_low": -0.04156854785014289,
+        "demand_groups": 16,
+        "estimate": -0.019650091162862583
+      },
+      "count_width90_occupied": {
+        "ci_high": 0.05463262245219391,
+        "ci_low": 0.010852999949959077,
+        "demand_groups": 16,
+        "estimate": 0.032555011296220564
+      },
+      "speed_width90_occupied": {
+        "ci_high": 0.149330322138853,
+        "ci_low": 0.0665489467451647,
+        "demand_groups": 16,
+        "estimate": 0.10583345676726301
+      },
+      "total_count_absolute_error": {
+        "ci_high": 15.14738592291819,
+        "ci_low": 7.06917348302706,
+        "demand_groups": 16,
+        "estimate": 11.04272330806743
+      },
+      "total_count_bias": {
+        "ci_high": -8.028582436521514,
+        "ci_low": -17.64415703569457,
+        "demand_groups": 16,
+        "estimate": -12.671153685280558
+      }
+    },
+    "extended_vs_epoch4": {
+      "energy_score": {
+        "ci_high": -0.25107559730357376,
+        "ci_low": -0.506122809438438,
+        "demand_groups": 16,
+        "estimate": -0.3694027580036092
+      },
+      "energy_score_u": {
+        "ci_high": -0.25789526424234405,
+        "ci_low": -0.5186852862403607,
+        "demand_groups": 16,
+        "estimate": -0.3794798829719719
+      },
+      "count_crps_occupied": {
+        "ci_high": -0.00013662978995943124,
+        "ci_low": -0.023598880334293408,
+        "demand_groups": 16,
+        "estimate": -0.010990597407816806
+      },
+      "speed_crps_occupied": {
+        "ci_high": -0.0002248787363322368,
+        "ci_low": -0.049269446569165175,
+        "demand_groups": 16,
+        "estimate": -0.025621628612525538
+      },
+      "count_mae_occupied": {
+        "ci_high": 0.00388066571006286,
+        "ci_low": -0.021851723984881083,
+        "demand_groups": 16,
+        "estimate": -0.008652352314796847
+      },
+      "speed_mae_occupied": {
+        "ci_high": 0.003708303539797926,
+        "ci_low": -0.039389891315803297,
+        "demand_groups": 16,
+        "estimate": -0.019351078543311313
+      },
+      "count_coverage90_occupied": {
+        "ci_high": 0.0273966786284706,
+        "ci_low": -0.002077126885884227,
+        "demand_groups": 16,
+        "estimate": 0.012118750830963818
+      },
+      "speed_coverage90_occupied": {
+        "ci_high": 0.007348250727188093,
+        "ci_low": -0.03708347161228773,
+        "demand_groups": 16,
+        "estimate": -0.014476696183547785
+      },
+      "count_width90_occupied": {
+        "ci_high": 0.03414251672462204,
+        "ci_low": 0.007727979852860166,
+        "demand_groups": 16,
+        "estimate": 0.02090106547437456
+      },
+      "speed_width90_occupied": {
+        "ci_high": 0.07893582569874802,
+        "ci_low": 0.015369775210570914,
+        "demand_groups": 16,
+        "estimate": 0.046258595790672784
+      },
+      "total_count_absolute_error": {
+        "ci_high": 12.176111854395684,
+        "ci_low": 7.238947904311227,
+        "demand_groups": 16,
+        "estimate": 9.71115694781432
+      },
+      "total_count_bias": {
+        "ci_high": -9.894866122534534,
+        "ci_low": -13.5989945226005,
+        "demand_groups": 16,
+        "estimate": -11.803413152927682
+      }
+    }
+  },
+  "scope": [
+    "Validation plateau of the same1,414,528-parameter partial adaptation family, not global optimality or full backbone joint convergence.",
+    "Only C2 trained longer; B and epoch4C2 remain fixed references. Training budgets are unequal.",
+    "Same training64groups/768windows/fourtime-noise views. No additional SUMO transitions.",
+    "New test16groups/32states used only after plateau and checkpoint selection. One backbone/adaptationseed.",
+    "No regression, policy or out-of-distribution-demand benefit established by this comparison."
+  ],
+  "resume_gates": {
+    "checkpoint_weights_bitexact": true,
+    "epoch": 4,
+    "forward": [
+      {
+        "bit_exact": true,
+        "condition_index": 0,
+        "max_abs": 0.0
+      },
+      {
+        "bit_exact": true,
+        "condition_index": 1,
+        "max_abs": 0.0
+      }
+    ],
+    "optimizer_state_bitexact": true,
+    "optimizer_steps": 6144,
+    "optimizer_tensors": 22,
+    "step_tensors_cpu": true
+  },
+  "independent_verification": {
+    "status": "pass",
+    "validation_plateau": true,
+    "safety_cap_not_convergence": false,
+    "resume_epoch": 4,
+    "last_epoch": 25,
+    "total_updates": 38400,
+    "optimizer_resume_full_state_and_cpu_scalars": true,
+    "validation_only_controller_recomputed": true,
+    "lr_reductions": 2,
+    "lrs": [
+      9e-06,
+      8.999999999999999e-05
+    ],
+    "selected_best_epoch": 10,
+    "selected_best_ES": 9.068881830555245,
+    "selected_state_scope_verified": true,
+    "source_checkpoint_parent_cache_norms_verified": true,
+    "fresh_test_groups_disjoint": true,
+    "optimizer_order_seed_by_global_epoch": {
+      "5": 2887201414,
+      "6": 2953337019,
+      "7": 1868375801,
+      "8": 2143540505,
+      "9": 1650167540,
+      "10": 607335763,
+      "11": 740931546,
+      "12": 205170447,
+      "13": 1588257383,
+      "14": 4222849228,
+      "15": 1150568602,
+      "16": 674675982,
+      "17": 342662930,
+      "18": 3737124290,
+      "19": 921906880,
+      "20": 839071748,
+      "21": 3624904429,
+      "22": 3183973328,
+      "23": 3669642239,
+      "24": 2553375905,
+      "25": 554396715
+    },
+    "cache": {
+      "window_rows": 768,
+      "augmented_graphs": 3072,
+      "shared_draws_reproduced": true,
+      "training_only_normalizers_recomputed": true,
+      "cache_files": 8
+    },
+    "training_budgets_equal": false,
+    "reference_scope": "fixed parent B and epoch4 C2; continued C2 consumes more optimization",
+    "verifier_sha256": "3704091d9202e5a0feaf0eab6c859c51d3a55781ff96d3607c26c265b20b39ef",
+    "test_rows": 96,
+    "test_states": 32,
+    "test_groups": 16,
+    "new_test_metrics_verified": true,
+    "bank_metric_checks": 15162,
+    "interval_checks": 906,
+    "files_hashed": 574
+  },
+  "validation": {
+    "focused_tests": "16passed (continuation optimizer/controller plus existing partial and checkpoint scope)",
+    "compile": "passed",
+    "source": "frozen snapshot; parent cache and norms unchanged"
+  },
+  "runtime": {
+    "elapsed_seconds": 2843.304012298584,
+    "max_gpu_allocated_mib": 222.556640625
+  },
+  "artifacts": {
+    "root": "outputs/c2_convergence_20261015/v1",
+    "summary": "outputs/c2_convergence_20261015/v1/summary.json",
+    "curve": "outputs/c2_convergence_20261015/v1/convergence_curve.png",
+    "convergence_curve.png_sha256": "646d64bdd3c2e94a8cbf83e3916c813a91df02ff282b5f223c5c4e33172a853c",
+    "convergence_curve.pdf_sha256": "9435ab2a9554791c86992f7b57e0ae6dfb4dfaf64e5c99175d506cbf25227362"
+  },
+  "fair_crps_diagnostic": {
+    "status": "complete_diagnostic",
+    "formula": "mean|X-y| - sum(i!=j)|Xi-Xj|/(2K(K-1));K8",
+    "used_for_selection": false,
+    "training": false,
+    "summary": {
+      "B_parent": {
+        "count_crps_u_all": {
+          "estimate": 0.09287588985437159,
+          "ci_low": 0.0663371855020721,
+          "ci_high": 0.12235188747062237,
+          "demand_groups": 16
+        },
+        "count_crps_u_occupied": {
+          "estimate": 0.4756305928881398,
+          "ci_low": 0.4405979892384683,
+          "ci_high": 0.5111145814084636,
+          "demand_groups": 16
+        },
+        "speed_crps_u_all": {
+          "estimate": 0.24938544753226713,
+          "ci_low": 0.22331496069683002,
+          "ci_high": 0.27895069089237995,
+          "demand_groups": 16
+        },
+        "speed_crps_u_occupied": {
+          "estimate": 0.8368595311579743,
+          "ci_low": 0.6900200070879839,
+          "ci_high": 1.008690487621259,
+          "demand_groups": 16
+        }
+      },
+      "C2_epoch4": {
+        "count_crps_u_all": {
+          "estimate": 0.10364937054955642,
+          "ci_low": 0.0763122235513585,
+          "ci_high": 0.13377091462937818,
+          "demand_groups": 16
+        },
+        "count_crps_u_occupied": {
+          "estimate": 0.5570619956397205,
+          "ci_low": 0.5137365394099438,
+          "ci_high": 0.6077330715181806,
+          "demand_groups": 16
+        },
+        "speed_crps_u_all": {
+          "estimate": 0.2543757329641524,
+          "ci_low": 0.22923213982627774,
+          "ci_high": 0.2811011118074188,
+          "demand_groups": 16
+        },
+        "speed_crps_u_occupied": {
+          "estimate": 0.8394152089617385,
+          "ci_low": 0.7034966204520786,
+          "ci_high": 1.005229106853909,
+          "demand_groups": 16
+        }
+      },
+      "C2_converged": {
+        "count_crps_u_all": {
+          "estimate": 0.09800096098919411,
+          "ci_low": 0.07153734966661109,
+          "ci_high": 0.1272497836594196,
+          "demand_groups": 16
+        },
+        "count_crps_u_occupied": {
+          "estimate": 0.5454519317669599,
+          "ci_low": 0.5040580991408647,
+          "ci_high": 0.5903783467432492,
+          "demand_groups": 16
+        },
+        "speed_crps_u_all": {
+          "estimate": 0.24959206094810935,
+          "ci_low": 0.22479981466920523,
+          "ci_high": 0.2772190683411387,
+          "demand_groups": 16
+        },
+        "speed_crps_u_occupied": {
+          "estimate": 0.8124607838108191,
+          "ci_low": 0.6825601987182734,
+          "ci_high": 0.9667182051876971,
+          "demand_groups": 16
+        }
+      }
+    },
+    "pairs": {
+      "extended_vs_B": {
+        "count_crps_u_all": {
+          "estimate": 0.005125071134822522,
+          "ci_low": 0.0036471202087203394,
+          "ci_high": 0.006653064568049835,
+          "demand_groups": 16
+        },
+        "count_crps_u_occupied": {
+          "estimate": 0.06982133887882008,
+          "ci_low": 0.05299680441844154,
+          "ci_high": 0.08749673625529385,
+          "demand_groups": 16
+        },
+        "speed_crps_u_all": {
+          "estimate": 0.00020661341584218926,
+          "ci_low": -0.004695279354930006,
+          "ci_high": 0.004905960524444866,
+          "demand_groups": 16
+        },
+        "speed_crps_u_occupied": {
+          "estimate": -0.024398747347155206,
+          "ci_low": -0.05539181681994624,
+          "ci_high": 0.00600744860341586,
+          "demand_groups": 16
+        }
+      },
+      "extended_vs_epoch4": {
+        "count_crps_u_all": {
+          "estimate": -0.005648409560362321,
+          "ci_low": -0.007232445594666342,
+          "ci_high": -0.00407166321014118,
+          "demand_groups": 16
+        },
+        "count_crps_u_occupied": {
+          "estimate": -0.011610063872760574,
+          "ci_low": -0.024437868368252347,
+          "ci_high": -0.0006068571947368077,
+          "demand_groups": 16
+        },
+        "speed_crps_u_all": {
+          "estimate": -0.004783672016043067,
+          "ci_low": -0.008288866966668529,
+          "ci_high": -0.0015547127520586874,
+          "demand_groups": 16
+        },
+        "speed_crps_u_occupied": {
+          "estimate": -0.026954425150919475,
+          "ci_low": -0.05079349183311328,
+          "ci_high": -0.0013563921832248941,
+          "demand_groups": 16
+        }
+      }
+    },
+    "rows": [
+      {
+        "condition_index": 0,
+        "demand_group": "d0ca9fcb4f6f113b4ddedf9f998191dd4a4ca2ce3d89c5fe2b7a653b0163e329",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_003520.npz::3520",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.054070370270299394,
+        "count_crps_u_occupied": 0.567324364878966,
+        "speed_crps_u_all": 0.2569694570115195,
+        "speed_crps_u_occupied": 1.5037696310742334
+      },
+      {
+        "condition_index": 0,
+        "demand_group": "d0ca9fcb4f6f113b4ddedf9f998191dd4a4ca2ce3d89c5fe2b7a653b0163e329",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_003520.npz::3520",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.0567172665085267,
+        "count_crps_u_occupied": 0.6043621215413901,
+        "speed_crps_u_all": 0.253838682186911,
+        "speed_crps_u_occupied": 1.3987971924374374
+      },
+      {
+        "condition_index": 0,
+        "demand_group": "d0ca9fcb4f6f113b4ddedf9f998191dd4a4ca2ce3d89c5fe2b7a653b0163e329",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_003520.npz::3520",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.057009060717333145,
+        "count_crps_u_occupied": 0.6069090198701128,
+        "speed_crps_u_all": 0.247062771595307,
+        "speed_crps_u_occupied": 1.332955126332127
+      },
+      {
+        "condition_index": 1,
+        "demand_group": "d0ca9fcb4f6f113b4ddedf9f998191dd4a4ca2ce3d89c5fe2b7a653b0163e329",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_003520.npz::3520",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.04644777570995683,
+        "count_crps_u_occupied": 0.523263945215011,
+        "speed_crps_u_all": 0.21938269489914744,
+        "speed_crps_u_occupied": 0.77935494166432
+      },
+      {
+        "condition_index": 1,
+        "demand_group": "d0ca9fcb4f6f113b4ddedf9f998191dd4a4ca2ce3d89c5fe2b7a653b0163e329",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_003520.npz::3520",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.051418884058009304,
+        "count_crps_u_occupied": 0.607007721992427,
+        "speed_crps_u_all": 0.2231013432040304,
+        "speed_crps_u_occupied": 0.7817915302108635
+      },
+      {
+        "condition_index": 1,
+        "demand_group": "d0ca9fcb4f6f113b4ddedf9f998191dd4a4ca2ce3d89c5fe2b7a653b0163e329",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_003520.npz::3520",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.05168822225335829,
+        "count_crps_u_occupied": 0.6187509186849749,
+        "speed_crps_u_all": 0.23322150031589137,
+        "speed_crps_u_occupied": 0.9272339646885921
+      },
+      {
+        "condition_index": 2,
+        "demand_group": "306a7887bd3d4decca5cbc769f3c2441d86dc28eafeaff1062a61eca6b5d5eb6",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_003464.npz::3464",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.1002879884958506,
+        "count_crps_u_occupied": 0.4927467207526025,
+        "speed_crps_u_all": 0.28385496236214836,
+        "speed_crps_u_occupied": 0.6620649751989469
+      },
+      {
+        "condition_index": 2,
+        "demand_group": "306a7887bd3d4decca5cbc769f3c2441d86dc28eafeaff1062a61eca6b5d5eb6",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_003464.npz::3464",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.10647435571860522,
+        "count_crps_u_occupied": 0.533734450392155,
+        "speed_crps_u_all": 0.29807398426064946,
+        "speed_crps_u_occupied": 0.7457677621382061
+      },
+      {
+        "condition_index": 2,
+        "demand_group": "306a7887bd3d4decca5cbc769f3c2441d86dc28eafeaff1062a61eca6b5d5eb6",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_003464.npz::3464",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.09897917265460271,
+        "count_crps_u_occupied": 0.5008671666103073,
+        "speed_crps_u_all": 0.28264560451360804,
+        "speed_crps_u_occupied": 0.6558497186561618
+      },
+      {
+        "condition_index": 3,
+        "demand_group": "306a7887bd3d4decca5cbc769f3c2441d86dc28eafeaff1062a61eca6b5d5eb6",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_003464.npz::3464",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.07099104315403244,
+        "count_crps_u_occupied": 0.40825587731857965,
+        "speed_crps_u_all": 0.1980658705645601,
+        "speed_crps_u_occupied": 0.48986438351227474
+      },
+      {
+        "condition_index": 3,
+        "demand_group": "306a7887bd3d4decca5cbc769f3c2441d86dc28eafeaff1062a61eca6b5d5eb6",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_003464.npz::3464",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.07901733986307,
+        "count_crps_u_occupied": 0.4491474118441408,
+        "speed_crps_u_all": 0.2177636707683561,
+        "speed_crps_u_occupied": 0.5468723869226016
+      },
+      {
+        "condition_index": 3,
+        "demand_group": "306a7887bd3d4decca5cbc769f3c2441d86dc28eafeaff1062a61eca6b5d5eb6",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_003464.npz::3464",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.07617654253057553,
+        "count_crps_u_occupied": 0.4610396743952969,
+        "speed_crps_u_all": 0.19227130692611286,
+        "speed_crps_u_occupied": 0.48042969466721425
+      },
+      {
+        "condition_index": 4,
+        "demand_group": "4df9cd35a03a11b20d6befcf412419ad81a6c7f3b046a8a660332ac9feb3bb02",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_003638.npz::3638",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.06955944503471366,
+        "count_crps_u_occupied": 0.5506865599431473,
+        "speed_crps_u_all": 0.2104717510816485,
+        "speed_crps_u_occupied": 0.47111026324398286
+      },
+      {
+        "condition_index": 4,
+        "demand_group": "4df9cd35a03a11b20d6befcf412419ad81a6c7f3b046a8a660332ac9feb3bb02",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_003638.npz::3638",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.08265611919741579,
+        "count_crps_u_occupied": 0.7133585669377632,
+        "speed_crps_u_all": 0.21350182466498424,
+        "speed_crps_u_occupied": 0.5519756374780886
+      },
+      {
+        "condition_index": 4,
+        "demand_group": "4df9cd35a03a11b20d6befcf412419ad81a6c7f3b046a8a660332ac9feb3bb02",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_003638.npz::3638",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.07730213458355358,
+        "count_crps_u_occupied": 0.6970835602091026,
+        "speed_crps_u_all": 0.21099569438157312,
+        "speed_crps_u_occupied": 0.55432492435045
+      },
+      {
+        "condition_index": 5,
+        "demand_group": "4df9cd35a03a11b20d6befcf412419ad81a6c7f3b046a8a660332ac9feb3bb02",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_003638.npz::3638",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.05674541071467492,
+        "count_crps_u_occupied": 0.5946257656935758,
+        "speed_crps_u_all": 0.1846457077154406,
+        "speed_crps_u_occupied": 0.6107637844304603
+      },
+      {
+        "condition_index": 5,
+        "demand_group": "4df9cd35a03a11b20d6befcf412419ad81a6c7f3b046a8a660332ac9feb3bb02",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_003638.npz::3638",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.06335240805263653,
+        "count_crps_u_occupied": 0.6536558071448563,
+        "speed_crps_u_all": 0.197036454425989,
+        "speed_crps_u_occupied": 0.6332102499481267
+      },
+      {
+        "condition_index": 5,
+        "demand_group": "4df9cd35a03a11b20d6befcf412419ad81a6c7f3b046a8a660332ac9feb3bb02",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_003638.npz::3638",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.059234189407814906,
+        "count_crps_u_occupied": 0.6199646586612276,
+        "speed_crps_u_all": 0.1991213896425525,
+        "speed_crps_u_occupied": 0.6378701044750937
+      },
+      {
+        "condition_index": 6,
+        "demand_group": "28a0c7cce72ed1e538a34276cf91081a958b98af5e6f5b75189924b88c6427e8",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_001352.npz::1352",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.15097205074723843,
+        "count_crps_u_occupied": 0.5057571253319313,
+        "speed_crps_u_all": 0.33245499009802115,
+        "speed_crps_u_occupied": 0.7538082394640869
+      },
+      {
+        "condition_index": 6,
+        "demand_group": "28a0c7cce72ed1e538a34276cf91081a958b98af5e6f5b75189924b88c6427e8",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_001352.npz::1352",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.1612978813086647,
+        "count_crps_u_occupied": 0.5554294971782726,
+        "speed_crps_u_all": 0.3303170627635955,
+        "speed_crps_u_occupied": 0.7626168191570727
+      },
+      {
+        "condition_index": 6,
+        "demand_group": "28a0c7cce72ed1e538a34276cf91081a958b98af5e6f5b75189924b88c6427e8",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_001352.npz::1352",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.1545145342262292,
+        "count_crps_u_occupied": 0.5489685338532648,
+        "speed_crps_u_all": 0.3221093883459975,
+        "speed_crps_u_occupied": 0.7400914436331839
+      },
+      {
+        "condition_index": 7,
+        "demand_group": "28a0c7cce72ed1e538a34276cf91081a958b98af5e6f5b75189924b88c6427e8",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_001352.npz::1352",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.10276704057514191,
+        "count_crps_u_occupied": 0.5920142233836793,
+        "speed_crps_u_all": 0.26143112563497084,
+        "speed_crps_u_occupied": 0.8294129218471282
+      },
+      {
+        "condition_index": 7,
+        "demand_group": "28a0c7cce72ed1e538a34276cf91081a958b98af5e6f5b75189924b88c6427e8",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_001352.npz::1352",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.11427989275127201,
+        "count_crps_u_occupied": 0.6734710861855276,
+        "speed_crps_u_all": 0.2759789372779513,
+        "speed_crps_u_occupied": 0.8928757289549641
+      },
+      {
+        "condition_index": 7,
+        "demand_group": "28a0c7cce72ed1e538a34276cf91081a958b98af5e6f5b75189924b88c6427e8",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_001352.npz::1352",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.11570314498118323,
+        "count_crps_u_occupied": 0.6903758906845509,
+        "speed_crps_u_all": 0.26461119981963965,
+        "speed_crps_u_occupied": 0.8323011001133159
+      },
+      {
+        "condition_index": 8,
+        "demand_group": "d8e08fae025f4e1f7500603cd2f3b4675709727d30aaecfa0165dc6a0c3d307d",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_000120.npz::120",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.1647710139424781,
+        "count_crps_u_occupied": 0.47451034402632014,
+        "speed_crps_u_all": 0.3398928384029412,
+        "speed_crps_u_occupied": 0.4813687972036837
+      },
+      {
+        "condition_index": 8,
+        "demand_group": "d8e08fae025f4e1f7500603cd2f3b4675709727d30aaecfa0165dc6a0c3d307d",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_000120.npz::120",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.16825765140735952,
+        "count_crps_u_occupied": 0.49832960498704115,
+        "speed_crps_u_all": 0.322855584227326,
+        "speed_crps_u_occupied": 0.47556225105875205
+      },
+      {
+        "condition_index": 8,
+        "demand_group": "d8e08fae025f4e1f7500603cd2f3b4675709727d30aaecfa0165dc6a0c3d307d",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_000120.npz::120",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.1628473582149071,
+        "count_crps_u_occupied": 0.5013459737794739,
+        "speed_crps_u_all": 0.3314448304859922,
+        "speed_crps_u_occupied": 0.4812300168495866
+      },
+      {
+        "condition_index": 9,
+        "demand_group": "d8e08fae025f4e1f7500603cd2f3b4675709727d30aaecfa0165dc6a0c3d307d",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_000120.npz::120",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.14975314881805918,
+        "count_crps_u_occupied": 0.4336822335134301,
+        "speed_crps_u_all": 0.2792167866216036,
+        "speed_crps_u_occupied": 0.6659503809522537
+      },
+      {
+        "condition_index": 9,
+        "demand_group": "d8e08fae025f4e1f7500603cd2f3b4675709727d30aaecfa0165dc6a0c3d307d",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_000120.npz::120",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.16542514579383064,
+        "count_crps_u_occupied": 0.48086287438662884,
+        "speed_crps_u_all": 0.2858826773432387,
+        "speed_crps_u_occupied": 0.6803286231008294
+      },
+      {
+        "condition_index": 9,
+        "demand_group": "d8e08fae025f4e1f7500603cd2f3b4675709727d30aaecfa0165dc6a0c3d307d",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_000120.npz::120",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.15388363226734056,
+        "count_crps_u_occupied": 0.4751089049980602,
+        "speed_crps_u_all": 0.2572592183488375,
+        "speed_crps_u_occupied": 0.6402922659725339
+      },
+      {
+        "condition_index": 10,
+        "demand_group": "62fa6fe9e32ec72e0744819cdec7986f1134bb4d2b871c6ad3c45dd0db61b3eb",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/mappo/episodes/train/episode_002212.npz::2212",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.19782369944962888,
+        "count_crps_u_occupied": 0.5080355204560432,
+        "speed_crps_u_all": 0.3372849182549722,
+        "speed_crps_u_occupied": 0.4889616131635722
+      },
+      {
+        "condition_index": 10,
+        "demand_group": "62fa6fe9e32ec72e0744819cdec7986f1134bb4d2b871c6ad3c45dd0db61b3eb",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/mappo/episodes/train/episode_002212.npz::2212",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.20096363670178016,
+        "count_crps_u_occupied": 0.5449949931892893,
+        "speed_crps_u_all": 0.2998393650351208,
+        "speed_crps_u_occupied": 0.47889509952061804
+      },
+      {
+        "condition_index": 10,
+        "demand_group": "62fa6fe9e32ec72e0744819cdec7986f1134bb4d2b871c6ad3c45dd0db61b3eb",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/mappo/episodes/train/episode_002212.npz::2212",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.20145042188137688,
+        "count_crps_u_occupied": 0.5596241572488541,
+        "speed_crps_u_all": 0.3316670759222133,
+        "speed_crps_u_occupied": 0.4972401879560641
+      },
+      {
+        "condition_index": 11,
+        "demand_group": "62fa6fe9e32ec72e0744819cdec7986f1134bb4d2b871c6ad3c45dd0db61b3eb",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/mappo/episodes/train/episode_002212.npz::2212",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.27516779022707705,
+        "count_crps_u_occupied": 0.5663234894112944,
+        "speed_crps_u_all": 0.435545784364159,
+        "speed_crps_u_occupied": 0.718750983346469
+      },
+      {
+        "condition_index": 11,
+        "demand_group": "62fa6fe9e32ec72e0744819cdec7986f1134bb4d2b871c6ad3c45dd0db61b3eb",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/mappo/episodes/train/episode_002212.npz::2212",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.30211625168911355,
+        "count_crps_u_occupied": 0.6685734464457961,
+        "speed_crps_u_all": 0.44026615988332374,
+        "speed_crps_u_occupied": 0.7477918512985234
+      },
+      {
+        "condition_index": 11,
+        "demand_group": "62fa6fe9e32ec72e0744819cdec7986f1134bb4d2b871c6ad3c45dd0db61b3eb",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/mappo/episodes/train/episode_002212.npz::2212",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.28400823794682056,
+        "count_crps_u_occupied": 0.6410258594693306,
+        "speed_crps_u_all": 0.42577484412046035,
+        "speed_crps_u_occupied": 0.7118371102999397
+      },
+      {
+        "condition_index": 12,
+        "demand_group": "e342d6cf02cf183a3e5d8afa817790f59f98ce3aabbadc98fb55b8084a8ae02b",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac/episodes/train/episode_000249.npz::249",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.08743154372156474,
+        "count_crps_u_occupied": 0.5229383196616062,
+        "speed_crps_u_all": 0.2887040180834349,
+        "speed_crps_u_occupied": 0.6387820593532055
+      },
+      {
+        "condition_index": 12,
+        "demand_group": "e342d6cf02cf183a3e5d8afa817790f59f98ce3aabbadc98fb55b8084a8ae02b",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac/episodes/train/episode_000249.npz::249",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.09558358231004675,
+        "count_crps_u_occupied": 0.5441330079890225,
+        "speed_crps_u_all": 0.2801360630485964,
+        "speed_crps_u_occupied": 0.6516426625889018
+      },
+      {
+        "condition_index": 12,
+        "demand_group": "e342d6cf02cf183a3e5d8afa817790f59f98ce3aabbadc98fb55b8084a8ae02b",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac/episodes/train/episode_000249.npz::249",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.0930140807238597,
+        "count_crps_u_occupied": 0.5569830796337039,
+        "speed_crps_u_all": 0.28037544485013743,
+        "speed_crps_u_occupied": 0.6155276943667694
+      },
+      {
+        "condition_index": 13,
+        "demand_group": "e342d6cf02cf183a3e5d8afa817790f59f98ce3aabbadc98fb55b8084a8ae02b",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac/episodes/train/episode_000249.npz::249",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.03235187447442781,
+        "count_crps_u_occupied": 0.3612669242417113,
+        "speed_crps_u_all": 0.21029027575994133,
+        "speed_crps_u_occupied": 1.147396984539991
+      },
+      {
+        "condition_index": 13,
+        "demand_group": "e342d6cf02cf183a3e5d8afa817790f59f98ce3aabbadc98fb55b8084a8ae02b",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac/episodes/train/episode_000249.npz::249",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.03632828038940023,
+        "count_crps_u_occupied": 0.4193159438588126,
+        "speed_crps_u_all": 0.1925265085438132,
+        "speed_crps_u_occupied": 0.9146411750824042
+      },
+      {
+        "condition_index": 13,
+        "demand_group": "e342d6cf02cf183a3e5d8afa817790f59f98ce3aabbadc98fb55b8084a8ae02b",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac/episodes/train/episode_000249.npz::249",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.030302589861297944,
+        "count_crps_u_occupied": 0.3728636905364513,
+        "speed_crps_u_all": 0.18132648904895368,
+        "speed_crps_u_occupied": 0.8985809731587723
+      },
+      {
+        "condition_index": 14,
+        "demand_group": "83cdb070aa2c1e54ebade9bab746ab3118e3d0c5583394f24b84693fbbf13382",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/mappo/episodes/train/episode_001006.npz::1006",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.2004126009906782,
+        "count_crps_u_occupied": 0.5013366951038485,
+        "speed_crps_u_all": 0.2816380958419572,
+        "speed_crps_u_occupied": 0.41323168178069364
+      },
+      {
+        "condition_index": 14,
+        "demand_group": "83cdb070aa2c1e54ebade9bab746ab3118e3d0c5583394f24b84693fbbf13382",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/mappo/episodes/train/episode_001006.npz::1006",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.2081516219560055,
+        "count_crps_u_occupied": 0.539594651193825,
+        "speed_crps_u_all": 0.2712229860001644,
+        "speed_crps_u_occupied": 0.39961666277179686
+      },
+      {
+        "condition_index": 14,
+        "demand_group": "83cdb070aa2c1e54ebade9bab746ab3118e3d0c5583394f24b84693fbbf13382",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/mappo/episodes/train/episode_001006.npz::1006",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.20326803277210415,
+        "count_crps_u_occupied": 0.5417306434331587,
+        "speed_crps_u_all": 0.27585950851929564,
+        "speed_crps_u_occupied": 0.4094229816878885
+      },
+      {
+        "condition_index": 15,
+        "demand_group": "83cdb070aa2c1e54ebade9bab746ab3118e3d0c5583394f24b84693fbbf13382",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/mappo/episodes/train/episode_001006.npz::1006",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.2308014888779045,
+        "count_crps_u_occupied": 0.5165233324902968,
+        "speed_crps_u_all": 0.4071013532289457,
+        "speed_crps_u_occupied": 0.7812261012087677
+      },
+      {
+        "condition_index": 15,
+        "demand_group": "83cdb070aa2c1e54ebade9bab746ab3118e3d0c5583394f24b84693fbbf13382",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/mappo/episodes/train/episode_001006.npz::1006",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.2533078073756867,
+        "count_crps_u_occupied": 0.5894336857804044,
+        "speed_crps_u_all": 0.4299122938412747,
+        "speed_crps_u_occupied": 0.8070118438808717
+      },
+      {
+        "condition_index": 15,
+        "demand_group": "83cdb070aa2c1e54ebade9bab746ab3118e3d0c5583394f24b84693fbbf13382",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/mappo/episodes/train/episode_001006.npz::1006",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.23235259348396334,
+        "count_crps_u_occupied": 0.5472467952455673,
+        "speed_crps_u_all": 0.42350173992159573,
+        "speed_crps_u_occupied": 0.7734672710888448
+      },
+      {
+        "condition_index": 16,
+        "demand_group": "2a2ae02f229afb424a44867400c08739319edcd8f549d3f64f71d1a0a18e797a",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer/episodes/train/episode_001009.npz::1009",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.1382418971905215,
+        "count_crps_u_occupied": 0.44467625265813576,
+        "speed_crps_u_all": 0.2594345056969224,
+        "speed_crps_u_occupied": 0.4127850120193234
+      },
+      {
+        "condition_index": 16,
+        "demand_group": "2a2ae02f229afb424a44867400c08739319edcd8f549d3f64f71d1a0a18e797a",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer/episodes/train/episode_001009.npz::1009",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.14833151522312588,
+        "count_crps_u_occupied": 0.5011962585274057,
+        "speed_crps_u_all": 0.24446934644894633,
+        "speed_crps_u_occupied": 0.3944165360036434
+      },
+      {
+        "condition_index": 16,
+        "demand_group": "2a2ae02f229afb424a44867400c08739319edcd8f549d3f64f71d1a0a18e797a",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer/episodes/train/episode_001009.npz::1009",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.13926485297079214,
+        "count_crps_u_occupied": 0.49079353162637995,
+        "speed_crps_u_all": 0.2575836179831323,
+        "speed_crps_u_occupied": 0.4205278272503147
+      },
+      {
+        "condition_index": 17,
+        "demand_group": "2a2ae02f229afb424a44867400c08739319edcd8f549d3f64f71d1a0a18e797a",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer/episodes/train/episode_001009.npz::1009",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.0634083194750628,
+        "count_crps_u_occupied": 0.44208392628895804,
+        "speed_crps_u_all": 0.20375292805268216,
+        "speed_crps_u_occupied": 1.016759216100798
+      },
+      {
+        "condition_index": 17,
+        "demand_group": "2a2ae02f229afb424a44867400c08739319edcd8f549d3f64f71d1a0a18e797a",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer/episodes/train/episode_001009.npz::1009",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.07517759623769432,
+        "count_crps_u_occupied": 0.4980828048468984,
+        "speed_crps_u_all": 0.22599979084165395,
+        "speed_crps_u_occupied": 1.0619160793305906
+      },
+      {
+        "condition_index": 17,
+        "demand_group": "2a2ae02f229afb424a44867400c08739319edcd8f549d3f64f71d1a0a18e797a",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer/episodes/train/episode_001009.npz::1009",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.06337204674591929,
+        "count_crps_u_occupied": 0.4532536016788174,
+        "speed_crps_u_all": 0.20073692135517818,
+        "speed_crps_u_occupied": 1.0033481769912342
+      },
+      {
+        "condition_index": 18,
+        "demand_group": "698f5bc2f4d9b052b3b7aeda3f301c0b0ccbbee0858b23c3ea55c175ad56066e",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_004142.npz::4142",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.02958474418906382,
+        "count_crps_u_occupied": 0.44643866474292526,
+        "speed_crps_u_all": 0.1985059853825981,
+        "speed_crps_u_occupied": 2.2765289585282438
+      },
+      {
+        "condition_index": 18,
+        "demand_group": "698f5bc2f4d9b052b3b7aeda3f301c0b0ccbbee0858b23c3ea55c175ad56066e",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_004142.npz::4142",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.037585862431139955,
+        "count_crps_u_occupied": 0.6026087450315537,
+        "speed_crps_u_all": 0.20612525711158294,
+        "speed_crps_u_occupied": 2.2649044314912983
+      },
+      {
+        "condition_index": 18,
+        "demand_group": "698f5bc2f4d9b052b3b7aeda3f301c0b0ccbbee0858b23c3ea55c175ad56066e",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_004142.npz::4142",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.029244992335776147,
+        "count_crps_u_occupied": 0.46771383492931745,
+        "speed_crps_u_all": 0.19131112952497192,
+        "speed_crps_u_occupied": 2.0146855318491834
+      },
+      {
+        "condition_index": 19,
+        "demand_group": "698f5bc2f4d9b052b3b7aeda3f301c0b0ccbbee0858b23c3ea55c175ad56066e",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_004142.npz::4142",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.04345316539453071,
+        "count_crps_u_occupied": 0.6989282234887091,
+        "speed_crps_u_all": 0.19263954066037084,
+        "speed_crps_u_occupied": 1.0395538643179907
+      },
+      {
+        "condition_index": 19,
+        "demand_group": "698f5bc2f4d9b052b3b7aeda3f301c0b0ccbbee0858b23c3ea55c175ad56066e",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_004142.npz::4142",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.0614176255840901,
+        "count_crps_u_occupied": 1.0022330697019695,
+        "speed_crps_u_all": 0.20517464288781934,
+        "speed_crps_u_occupied": 0.9809638388514046
+      },
+      {
+        "condition_index": 19,
+        "demand_group": "698f5bc2f4d9b052b3b7aeda3f301c0b0ccbbee0858b23c3ea55c175ad56066e",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_004142.npz::4142",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.05836183942982939,
+        "count_crps_u_occupied": 0.9860323614753436,
+        "speed_crps_u_all": 0.20373851991191647,
+        "speed_crps_u_occupied": 1.0661226709624607
+      },
+      {
+        "condition_index": 20,
+        "demand_group": "d84d430d050da0370e93cdf92e1571d5499aa16923328b3659212618052333c9",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_003164.npz::3164",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.029932666980255672,
+        "count_crps_u_occupied": 0.3713727427081979,
+        "speed_crps_u_all": 0.1597319755240279,
+        "speed_crps_u_occupied": 0.669546753705834
+      },
+      {
+        "condition_index": 20,
+        "demand_group": "d84d430d050da0370e93cdf92e1571d5499aa16923328b3659212618052333c9",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_003164.npz::3164",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.03909612201314945,
+        "count_crps_u_occupied": 0.5190443993515088,
+        "speed_crps_u_all": 0.15661821583402283,
+        "speed_crps_u_occupied": 0.5890157907547074
+      },
+      {
+        "condition_index": 20,
+        "demand_group": "d84d430d050da0370e93cdf92e1571d5499aa16923328b3659212618052333c9",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_003164.npz::3164",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.037530925266742225,
+        "count_crps_u_occupied": 0.5433575859291759,
+        "speed_crps_u_all": 0.1561300077746535,
+        "speed_crps_u_occupied": 0.5373371655088184
+      },
+      {
+        "condition_index": 21,
+        "demand_group": "d84d430d050da0370e93cdf92e1571d5499aa16923328b3659212618052333c9",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_003164.npz::3164",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.02454234555414796,
+        "count_crps_u_occupied": 0.4310095711589782,
+        "speed_crps_u_all": 0.20165675541121164,
+        "speed_crps_u_occupied": 0.770946916838185
+      },
+      {
+        "condition_index": 21,
+        "demand_group": "d84d430d050da0370e93cdf92e1571d5499aa16923328b3659212618052333c9",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_003164.npz::3164",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.03235160417936295,
+        "count_crps_u_occupied": 0.5462447270578948,
+        "speed_crps_u_all": 0.20837951756625733,
+        "speed_crps_u_occupied": 0.791918566705246
+      },
+      {
+        "condition_index": 21,
+        "demand_group": "d84d430d050da0370e93cdf92e1571d5499aa16923328b3659212618052333c9",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_003164.npz::3164",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.027685577508733995,
+        "count_crps_u_occupied": 0.48963475347836677,
+        "speed_crps_u_all": 0.20583189486099673,
+        "speed_crps_u_occupied": 0.8114062692619021
+      },
+      {
+        "condition_index": 22,
+        "demand_group": "735774a2fca8797550ed4ede10a46452f808b1f237dca3acdaeee806edb18c89",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer/episodes/train/episode_000171.npz::171",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.07472908627530363,
+        "count_crps_u_occupied": 0.3752147019550684,
+        "speed_crps_u_all": 0.23381233359358708,
+        "speed_crps_u_occupied": 0.6212426863265657
+      },
+      {
+        "condition_index": 22,
+        "demand_group": "735774a2fca8797550ed4ede10a46452f808b1f237dca3acdaeee806edb18c89",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer/episodes/train/episode_000171.npz::171",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.0971618037469304,
+        "count_crps_u_occupied": 0.522007562612117,
+        "speed_crps_u_all": 0.28609820993018553,
+        "speed_crps_u_occupied": 0.967393526061122
+      },
+      {
+        "condition_index": 22,
+        "demand_group": "735774a2fca8797550ed4ede10a46452f808b1f237dca3acdaeee806edb18c89",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer/episodes/train/episode_000171.npz::171",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.0899074103004172,
+        "count_crps_u_occupied": 0.5050713432334817,
+        "speed_crps_u_all": 0.2417424809938823,
+        "speed_crps_u_occupied": 0.6732688604242867
+      },
+      {
+        "condition_index": 23,
+        "demand_group": "735774a2fca8797550ed4ede10a46452f808b1f237dca3acdaeee806edb18c89",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer/episodes/train/episode_000171.npz::171",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.07156806095282969,
+        "count_crps_u_occupied": 0.3981064313673774,
+        "speed_crps_u_all": 0.1609310089264098,
+        "speed_crps_u_occupied": 0.4169007682756626
+      },
+      {
+        "condition_index": 23,
+        "demand_group": "735774a2fca8797550ed4ede10a46452f808b1f237dca3acdaeee806edb18c89",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer/episodes/train/episode_000171.npz::171",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.07474032494138044,
+        "count_crps_u_occupied": 0.4438634059866738,
+        "speed_crps_u_all": 0.1521410223497775,
+        "speed_crps_u_occupied": 0.3803420702543596
+      },
+      {
+        "condition_index": 23,
+        "demand_group": "735774a2fca8797550ed4ede10a46452f808b1f237dca3acdaeee806edb18c89",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer/episodes/train/episode_000171.npz::171",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.067534437388044,
+        "count_crps_u_occupied": 0.4048578032035106,
+        "speed_crps_u_all": 0.1664846354948578,
+        "speed_crps_u_occupied": 0.4352073391606083
+      },
+      {
+        "condition_index": 24,
+        "demand_group": "6885c882a0c264c2312dbee783d09a7d716981b9444ea11d21cdc388bcbb2fbe",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_003998.npz::3998",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.0918345857789356,
+        "count_crps_u_occupied": 0.3548402062797881,
+        "speed_crps_u_all": 0.2426138888804947,
+        "speed_crps_u_occupied": 0.5889672536287092
+      },
+      {
+        "condition_index": 24,
+        "demand_group": "6885c882a0c264c2312dbee783d09a7d716981b9444ea11d21cdc388bcbb2fbe",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_003998.npz::3998",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.11559185175524386,
+        "count_crps_u_occupied": 0.47055609161285855,
+        "speed_crps_u_all": 0.26752870011088326,
+        "speed_crps_u_occupied": 0.6984652237309573
+      },
+      {
+        "condition_index": 24,
+        "demand_group": "6885c882a0c264c2312dbee783d09a7d716981b9444ea11d21cdc388bcbb2fbe",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_003998.npz::3998",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.10562535711020463,
+        "count_crps_u_occupied": 0.4435757628419345,
+        "speed_crps_u_all": 0.26776947188555317,
+        "speed_crps_u_occupied": 0.6659779216971092
+      },
+      {
+        "condition_index": 25,
+        "demand_group": "6885c882a0c264c2312dbee783d09a7d716981b9444ea11d21cdc388bcbb2fbe",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_003998.npz::3998",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.059092182927805326,
+        "count_crps_u_occupied": 0.3615513511287449,
+        "speed_crps_u_all": 0.20488413401931307,
+        "speed_crps_u_occupied": 0.7381301067340679
+      },
+      {
+        "condition_index": 25,
+        "demand_group": "6885c882a0c264c2312dbee783d09a7d716981b9444ea11d21cdc388bcbb2fbe",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_003998.npz::3998",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.07541500642527782,
+        "count_crps_u_occupied": 0.47868951858300524,
+        "speed_crps_u_all": 0.23134803992925856,
+        "speed_crps_u_occupied": 0.9271125751579808
+      },
+      {
+        "condition_index": 25,
+        "demand_group": "6885c882a0c264c2312dbee783d09a7d716981b9444ea11d21cdc388bcbb2fbe",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_003998.npz::3998",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.06888431911048751,
+        "count_crps_u_occupied": 0.4667004890401702,
+        "speed_crps_u_all": 0.22721904521304856,
+        "speed_crps_u_occupied": 0.8701917429153656
+      },
+      {
+        "condition_index": 26,
+        "demand_group": "eff82873b3c71b23e7a0d62e5b742cbf7e7f59f17dbea004054864f3b093df4b",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_002285.npz::2285",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.047038626719357476,
+        "count_crps_u_occupied": 0.5880256512466411,
+        "speed_crps_u_all": 0.2829739644138036,
+        "speed_crps_u_occupied": 2.2030571602345597
+      },
+      {
+        "condition_index": 26,
+        "demand_group": "eff82873b3c71b23e7a0d62e5b742cbf7e7f59f17dbea004054864f3b093df4b",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_002285.npz::2285",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.0470301080637368,
+        "count_crps_u_occupied": 0.5887935420685338,
+        "speed_crps_u_all": 0.2903973163891502,
+        "speed_crps_u_occupied": 2.232110924171494
+      },
+      {
+        "condition_index": 26,
+        "demand_group": "eff82873b3c71b23e7a0d62e5b742cbf7e7f59f17dbea004054864f3b093df4b",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_002285.npz::2285",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.04429276407604027,
+        "count_crps_u_occupied": 0.6186143724491006,
+        "speed_crps_u_all": 0.27221576475637044,
+        "speed_crps_u_occupied": 1.993132003148864
+      },
+      {
+        "condition_index": 27,
+        "demand_group": "eff82873b3c71b23e7a0d62e5b742cbf7e7f59f17dbea004054864f3b093df4b",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_002285.npz::2285",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.04464865068132397,
+        "count_crps_u_occupied": 0.5627495042026871,
+        "speed_crps_u_all": 0.20665880641412582,
+        "speed_crps_u_occupied": 0.9139682158500283
+      },
+      {
+        "condition_index": 27,
+        "demand_group": "eff82873b3c71b23e7a0d62e5b742cbf7e7f59f17dbea004054864f3b093df4b",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_002285.npz::2285",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.06083179568616513,
+        "count_crps_u_occupied": 0.772678837394592,
+        "speed_crps_u_all": 0.2274541916150061,
+        "speed_crps_u_occupied": 0.8649105426374372
+      },
+      {
+        "condition_index": 27,
+        "demand_group": "eff82873b3c71b23e7a0d62e5b742cbf7e7f59f17dbea004054864f3b093df4b",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_002285.npz::2285",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.05889549138407146,
+        "count_crps_u_occupied": 0.7547786703338546,
+        "speed_crps_u_all": 0.23635909200373498,
+        "speed_crps_u_occupied": 0.9328514696150034
+      },
+      {
+        "condition_index": 28,
+        "demand_group": "de5c04470039b940afaa373929d96da91d6f02c93a8302a78181909d386e4560",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac/episodes/train/episode_001054.npz::1054",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.08568326907292813,
+        "count_crps_u_occupied": 0.44551641625327343,
+        "speed_crps_u_all": 0.23042010650565287,
+        "speed_crps_u_occupied": 0.611753356648178
+      },
+      {
+        "condition_index": 28,
+        "demand_group": "de5c04470039b940afaa373929d96da91d6f02c93a8302a78181909d386e4560",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac/episodes/train/episode_001054.npz::1054",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.10017902869590822,
+        "count_crps_u_occupied": 0.5378575777997472,
+        "speed_crps_u_all": 0.22189964089256256,
+        "speed_crps_u_occupied": 0.585836068967384
+      },
+      {
+        "condition_index": 28,
+        "demand_group": "de5c04470039b940afaa373929d96da91d6f02c93a8302a78181909d386e4560",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac/episodes/train/episode_001054.npz::1054",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.09170205440214818,
+        "count_crps_u_occupied": 0.50944893313,
+        "speed_crps_u_all": 0.2245503720267297,
+        "speed_crps_u_occupied": 0.6277028927837364
+      },
+      {
+        "condition_index": 29,
+        "demand_group": "de5c04470039b940afaa373929d96da91d6f02c93a8302a78181909d386e4560",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac/episodes/train/episode_001054.npz::1054",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.01934565619945444,
+        "count_crps_u_occupied": 0.38635699546108315,
+        "speed_crps_u_all": 0.13381501761960898,
+        "speed_crps_u_occupied": 1.2008450555666865
+      },
+      {
+        "condition_index": 29,
+        "demand_group": "de5c04470039b940afaa373929d96da91d6f02c93a8302a78181909d386e4560",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac/episodes/train/episode_001054.npz::1054",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.02000149315859477,
+        "count_crps_u_occupied": 0.36774474125743434,
+        "speed_crps_u_all": 0.1250001355748935,
+        "speed_crps_u_occupied": 0.7893424068304105
+      },
+      {
+        "condition_index": 29,
+        "demand_group": "de5c04470039b940afaa373929d96da91d6f02c93a8302a78181909d386e4560",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac/episodes/train/episode_001054.npz::1054",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.023538750719379158,
+        "count_crps_u_occupied": 0.47790752658262825,
+        "speed_crps_u_all": 0.1312826531918152,
+        "speed_crps_u_occupied": 0.9524397789611528
+      },
+      {
+        "condition_index": 30,
+        "demand_group": "7f7210776077decd9802f3eb6bc25c26c09ac6281af9fb67e1e43a485f576401",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_004523.npz::4523",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.09711073525062766,
+        "count_crps_u_occupied": 0.3850669718322616,
+        "speed_crps_u_all": 0.2764983165355967,
+        "speed_crps_u_occupied": 0.6946764122788646
+      },
+      {
+        "condition_index": 30,
+        "demand_group": "7f7210776077decd9802f3eb6bc25c26c09ac6281af9fb67e1e43a485f576401",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_004523.npz::4523",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.11958057296379311,
+        "count_crps_u_occupied": 0.46472957515244245,
+        "speed_crps_u_all": 0.27863594840228145,
+        "speed_crps_u_occupied": 0.6738684817021633
+      },
+      {
+        "condition_index": 30,
+        "demand_group": "7f7210776077decd9802f3eb6bc25c26c09ac6281af9fb67e1e43a485f576401",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_004523.npz::4523",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.11350769447923596,
+        "count_crps_u_occupied": 0.45318583486447606,
+        "speed_crps_u_all": 0.27186088967495,
+        "speed_crps_u_occupied": 0.6386915804458265
+      },
+      {
+        "condition_index": 31,
+        "demand_group": "7f7210776077decd9802f3eb6bc25c26c09ac6281af9fb67e1e43a485f576401",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_004523.npz::4523",
+        "arm": "B_parent",
+        "count_crps_u_all": 0.06146019749401567,
+        "count_crps_u_occupied": 0.40894992022560167,
+        "speed_crps_u_all": 0.26505442347073077,
+        "speed_crps_u_occupied": 1.1680255180174093
+      },
+      {
+        "condition_index": 31,
+        "demand_group": "7f7210776077decd9802f3eb6bc25c26c09ac6281af9fb67e1e43a485f576401",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_004523.npz::4523",
+        "arm": "C2_epoch4",
+        "count_crps_u_all": 0.06693942139878915,
+        "count_crps_u_occupied": 0.4342481324390677,
+        "speed_crps_u_all": 0.2804998814932699,
+        "speed_crps_u_occupied": 1.1893721475753753
+      },
+      {
+        "condition_index": 31,
+        "demand_group": "7f7210776077decd9802f3eb6bc25c26c09ac6281af9fb67e1e43a485f576401",
+        "episode": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_004523.npz::4523",
+        "arm": "C2_converged",
+        "count_crps_u_all": 0.06494828992006904,
+        "count_crps_u_occupied": 0.44964688443272216,
+        "speed_crps_u_all": 0.27288144692953903,
+        "speed_crps_u_occupied": 1.167199272673805
+      }
+    ],
+    "runner_sha256": "19fdb0b43ac517e529ffdb349c06ec8ba43be5b636b0441ef6cb759da5982e6e"
+  },
+  "h4_gate": {
+    "eligible": [],
+    "protocol_sha256": "6e99cd00a5c9ae4136b332fc8594100d34ae23154f9c401f8432bac2622bfce1",
+    "tuning_after_test": false
+  },
+  "parent_coarse_accuracy_summary": {
+    "status": "exploratory_existing_parent_test_only",
+    "parent_state_hash": "0ea814b8ce0fa714ad5ac1b48f10a5e94d965e745866f879d59a9929083a70ef",
+    "aggregate_skill": 0.3347503448042747,
+    "spearman_accuracy_vs_ES_gain": 0.16458944281524926,
+    "cluster_bootstrap_ci": [
+      -0.1874449087674966,
+      0.470645983158751
+    ],
+    "quartiles": [
+      {
+        "quartile": 1,
+        "n": 8,
+        "mean_coarse_skill": 0.1865946835424609,
+        "mean_ES_gain": -0.9870679492755725,
+        "C2_wins": 0
+      },
+      {
+        "quartile": 2,
+        "n": 8,
+        "mean_coarse_skill": 0.32876847349680105,
+        "mean_ES_gain": -0.8134374391629553,
+        "C2_wins": 1
+      },
+      {
+        "quartile": 3,
+        "n": 8,
+        "mean_coarse_skill": 0.3744002640329181,
+        "mean_ES_gain": -0.7245985547935248,
+        "C2_wins": 1
+      },
+      {
+        "quartile": 4,
+        "n": 8,
+        "mean_coarse_skill": 0.41843878983710486,
+        "mean_ES_gain": -0.5956108520832556,
+        "C2_wins": 1
+      }
+    ],
+    "limitations": "32oldstates16groups, correlationnotcausation; currentcontinuationtestuntouched; nottrainingorschedulerinput"
+  }
+}
