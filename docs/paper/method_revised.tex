@@ -1,0 +1,526 @@
+\section{Method}
+\label{sec:method}
+
+\subsection{Overview}
+\label{sec:overview}
+
+UrbanDreamer learns cooperative routing policies under unknown future demand
+by reusing environment experience through a learned traffic world model.
+As illustrated in Fig.~\ref{fig:architecture}, the framework couples
+network-wide traffic prediction with vehicle-level route selection:
+the world model captures how routing decisions change road-segment traffic,
+while the shared actor selects remaining routes using vehicle-specific states
+and available traffic information. Following
+Section~\ref{sec:wm-formulation}, vehicle decisions and network-wide traffic
+predictions follow the same fixed physical-time grid.
+
+After representation learning and world-model pretraining on archived
+traffic trajectories, online training repeats four stages. First, the
+current actor interacts with SUMO, and the observed traffic, vehicle states,
+realized requests, executed route choices, turning commitments, and global
+rewards are stored in a replay buffer. Second, the world model is fitted
+to recorded transitions and their corresponding controls. Third, imagined
+rollouts start from replay states and the associated active vehicle records.
+The actor generates new route choices at fixed decision times, while the
+learned traffic dynamics and vehicle execution produce subsequent imagined
+states. These rollouts advance vehicles already active at initialization.
+Finally, centralized value learning uses return targets from these
+rollouts, and global reward-to-go advantages guide updates to the shared
+actor. Repeating this cycle supplies additional policy-training
+trajectories without requiring a new external rollout for each imagined
+trajectory.
+
+The traffic model follows a coarse-to-fine design: a low-frequency graph
+prior provides a coarse estimate of the latent state increment, and
+conditional flow matching uses this estimate as a background condition
+when generating the next state from the current state with graph-structured
+noise. To support recursive use, model fitting includes multi-step
+supervision, while a latent-state disagreement penalty regularizes the
+global imagined reward used for policy optimization. We describe the causal
+routing framework in Section~\ref{sec:wm-routing}, the graph-structured
+traffic model in Section~\ref{sec:traffic-world-model}, and the stability
+mechanisms and actor--critic updates in
+Section~\ref{sec:stable-imagination}.
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.8\textwidth]{figure/UrbanDreamer}
+  \caption{Overview of UrbanDreamer. Environment experience trains the
+  graph-structured traffic model; imagined rollouts support global value
+  learning and cooperative routing policy optimization.}
+  \label{fig:architecture}
+\end{figure*}
+
+\subsection{World-Model-Based Cooperative Routing}
+\label{sec:wm-routing}
+
+\subsubsection{Experience Collection and Imagination Initialization}
+
+UrbanDreamer converts collected traffic experience into new routing
+trajectories through model-based imagination. Replay $\mathcal B$ stores
+macro-grid traffic fields, explicit vehicle records, and their matching
+requests, controls, and rewards. Contiguous sequences train the traffic
+model. To initialize imagination, we sample uniformly over eligible
+nonterminal macro boundaries containing active vehicles and restore their
+positions, destinations, remaining routes, and movement progress. The
+observed traffic field is encoded with the current encoder. The original
+physical time, cumulative travel cost $C_{\mathrm{time}}$, and trip-start
+count $B$ are also restored. From this restored state, the actor generates
+new decisions and the model supplies subsequent traffic predictions,
+extending the training experience beyond the recorded prefix.
+
+\subsubsection{Periodic Causal Imagination}
+\label{sec:causal-imagination}
+
+At decision time $s_k$, the shared actor scores candidate remaining routes
+for each $i\in\mathcal D_k$:
+\begin{equation}
+ \pi_\theta(a\mid o_{i,k})=
+ \frac{\exp f_\theta^{\mathrm{route}}(o_{i,k},a)}
+ {\sum_{b\in\mathcal A_i(S_k)}
+       \exp f_\theta^{\mathrm{route}}(o_{i,k},b)}.
+ \label{eq:shared-next-hop-policy}
+\end{equation}
+Vehicles follow the selected routes between decision times. Each imagined
+environment starts with the vehicles already departed and not yet arrived
+at its sampled boundary. The restored cumulative trip-start count remains
+fixed during the rollout, and future requests are not inserted. Real environment collection
+continues to reveal requests online; the imagined vehicle layer therefore
+approximates subsequent evolution of the observed active cohort.
+
+Macro-endpoint updates couple periodic route selection with traffic
+prediction. At $t_n$, eligible vehicles select routes from a shared
+pre-action traffic snapshot. Within $[t_n,t_{n+1})$, the vehicle layer
+advances using traffic-speed readouts from $\widehat Z_n$, held fixed
+within that interval, and local execution rules. It processes arrivals
+and records the turning commitments encountered while following the
+selected routes. At $t_{n+1}$, this completed control log forms $\Psi_n$.
+The world model uses the current latent state and these controls to
+predict the interval's endpoint; its readouts then drive the next interval.
+Boundary route choices and turning commitments belong to the next
+half-open interval. This split update handles local execution within
+each interval and refreshes the remaining network-level traffic feedback
+at its boundary.
+
+Explicit records maintain vehicle identities, trip starts, destination
+arrivals, and the counts used for reward accounting. The decoder supplies
+road-segment count and speed readouts. At each fixed state and condition,
+$K$ independent latent samples provide the disagreement statistic.
+We propagate one designated sample,
+$\widehat Z_{n+1}=\widehat Z_{n+1}^{(1)}$.
+Its selection is independent of the sample values, so it retains the
+model's conditional transition distribution and cross-segment dependencies.
+All $K$ samples contribute to disagreement estimation. An imagined rollout
+lasts at most eight 30-second intervals and ends earlier at the physical
+cutoff or when all vehicles in its initial active cohort have arrived.
+
+\subsection{Graph-Structured Traffic World Model}
+\label{sec:traffic-world-model}
+
+We organize traffic transition learning into spatially coherent change
+and conditional refinement. A graph prior predicts a low-frequency
+background increment and supplies it as an explicit transition condition.
+Conditional flow matching transforms the current state with
+graph-structured noise into complete next-state samples, capturing
+nonlinear variation and accommodating errors in the coarse estimate.
+This coarse-to-fine design uses road structure in both state representation
+and transition generation. Compared with propagating a single point
+prediction, conditional sampling supplies alternative network states for
+imagined policy learning, exposing the actor to different downstream
+congestion consequences under the available state and controls.
+
+\subsubsection{Graph Representation and Transition Conditions}
+
+A residual graph encoder with layer normalization aggregates traffic
+along the directed road graph into
+$Z_n=f_\phi(X_n,G)\in\mathbb R^{M\times d}$.
+Its segment-aligned features combine local conditions with neighboring
+traffic. The decoder gives $\widehat Y_n=d_\phi(Z_n)$, including vehicle
+counts and speeds, together with occupancy and normalized halting counts;
+static attributes remain fixed. Counts are reconstructed in vehicle units.
+For speed supervision, the target is the mean of the observed speeds at
+the current and following boundaries, normalized by the segment speed
+limit. Thus the decoded speed at $t_n$ represents the following interval.
+
+Let $\langle\cdot\rangle$ denote a mean over valid segment observations in
+a reconstruction batch, with subscripts $\mathrm{occ}$ and
+$\mathrm{slow}$ restricting it to occupied and sufficiently populated
+slow segments. A mean over an empty subset is zero. Define
+$e_u^c=[\log(1+\widehat c_u)-\log(1+c_u)]^2$ and let $e_u^v$ be the
+smooth-$L_1$ loss, with threshold $0.1$, between the normalized predicted
+speed and its forward-interval target. Reconstruction uses
+\begin{equation}
+ \begin{aligned}
+ \mathcal L_c
+   &=(1-\zeta)\langle e^c\rangle
+      +\zeta\langle e^c\rangle_{\mathrm{occ}},\\
+ \mathcal L_v
+   &=\langle e^v\rangle
+      +w_{\mathrm{occ}}\langle e^v\rangle_{\mathrm{occ}}
+      +w_{\mathrm{slow}}\langle e^v\rangle_{\mathrm{slow}},\\
+ \mathcal L_{\mathrm{mass}}
+   &=\mathbb E_{\mathcal B}\!\left[
+      \operatorname{asinh}^{2}\!\left(
+       \frac{\sum_u(\widehat c_u-c_u)}{1+\sum_u c_u}
+      \right)\right],\\
+ \mathcal L_{\mathrm{rec}}
+   &=\mathcal L_c+0.1\mathcal L_{\mathrm{mass}}+\mathcal L_v
+       +0.05(\mathcal L_{\mathrm{occ}}+\mathcal L_{\mathrm{halt}}).
+ \end{aligned}
+ \label{eq:traffic-reconstruction}
+\end{equation}
+Here $\zeta=0.2$, set to zero for a batch without occupied segments;
+$\mathcal L_{\mathrm{occ}}$ and $\mathcal L_{\mathrm{halt}}$ are mean
+squared errors in occupancy and normalized halting counts. The speed
+weights and slow-segment thresholds are configured using the training
+protocol. Speed targets require an observed following boundary.
+After reconstruction pretraining, the encoder is frozen during dynamics
+learning. Decoder calibration uses a separate supervised objective and
+optimizer, including during online learning. Neither encoder nor decoder
+is updated through the flow-matching loss.
+
+The transition condition is $C_n=\Psi_n$. It encodes the observed or
+imagined turning commitments within the interval, including source
+segment, next segment, destination, and relative occurrence time.
+The transition is
+\begin{equation}
+ \widehat Z_{n+1}=F_\phi(Z_n,C_n;\eta_n).
+ \label{eq:causal-macro-history}
+\end{equation}
+The velocity network processes the current physical transition as one
+traffic block, using segment tokens, a flow-time token, and register
+tokens. Its segment tokens receive the encoded controls and a projection
+of the current latent state. Recursive predictions become the current
+state for subsequent transitions. Clean future states supply fitting
+targets rather than transition conditions.
+
+\subsubsection{Low-Frequency Graph Prior}
+
+The directed adjacency $A$ encodes legal vehicle movements and directed
+message passing. To extract spatially coherent changes, we construct
+the symmetric weights $W=(A+A^\top)/2$. With
+$D_W=\operatorname{diag}(W\mathbf1)$, use the symmetric normalized
+Laplacian and its soft low-pass operator:
+\begin{equation}
+ \begin{aligned}
+ L_G&=D_W^{\dagger/2}(D_W-W)D_W^{\dagger/2},\\
+ P_{\mathrm{soft}}&=(I+\tau_{\mathrm{LP}}L_G)^{-1},
+ \qquad \tau_{\mathrm{LP}}\geq0.
+ \end{aligned}
+ \label{eq:prior-spectral-operator}
+\end{equation}
+The diagonal entries of $D_W^{\dagger/2}$ are inverse square roots of
+positive degrees and zero for isolated segments. Low graph frequencies
+describe spatially coherent variation~\cite{shuman2013emerging}.
+For $L_G=U\Lambda U^\top$, the filter has spectral response
+\begin{equation}
+ P_{\mathrm{soft}}
+   =U\operatorname{diag}\!\left(
+      \frac{1}{1+\tau_{\mathrm{LP}}\lambda_j}
+     \right)U^\top.
+ \label{eq:soft-low-frequency-filter}
+\end{equation}
+It attenuates higher graph frequencies while retaining all modes.
+The mainline uses $\tau_{\mathrm{LP}}=0.1$.
+
+With $\Delta Z_n=Z_{n+1}^{\mathrm{tar}}-Z_n$, the state-only prior is
+\begin{equation}
+ \begin{aligned}
+ R_n&=p_\phi(Z_n;A),\\
+ b_n=\Delta\widehat Z_n^{\mathrm{low}}
+    &=P_{\mathrm{soft}}R_n,\\
+ \mathcal L_{\mathrm{prior}}
+   &=\mathbb E_{\mathcal B}\!\left[
+       \frac{1}{Md}
+       \left\|b_n-\operatorname{sg}
+          (P_{\mathrm{soft}}\Delta Z_n)\right\|_F^2
+      \right].
+ \end{aligned}
+ \label{eq:graph-prior-loss}
+\end{equation}
+Here $\operatorname{sg}$ denotes a stop-gradient operation.
+The prior combines the current state with separate upstream and downstream
+messages. Its input retains all graph frequencies, and filtering is
+applied only to the predicted increment. The background increment $b_n$
+is supplied to the velocity network with stopped gradients; the auxiliary
+prior loss trains the background predictor.
+
+Graph-structured noise defines the transition source around the current
+state:
+\begin{equation}
+ \begin{aligned}
+ \bar x_{0,n}&=Z_n,\\
+ \tilde x_{0,n}&=Z_n+\sigma U_r\eta_n,
+ \qquad (\eta_n)_{ab}\overset{\mathrm{iid}}{\sim}\mathcal N(0,1),
+ \end{aligned}
+ \label{eq:noisy-graph-prior}
+\end{equation}
+where $\eta_n\in\mathbb R^{r\times d}$ and $U_r$ is an orthonormal
+basis of $r$ lowest-frequency graph modes. The noise basis is distinct
+from the full-rank soft filter used by the background predictor.
+The mainline uses $\sigma=0.1$ and rank $r=16$ where the graph size permits.
+The current state remains the source mean and reference state, while
+$b_n$ provides the coarse predictive condition. The learned transport
+operates in the complete latent space, allowing both spatially coherent
+and localized variation.
+
+\subsubsection{Conditional Flow-Matching Transition}
+
+The conditional velocity field transports the noisy current state to the
+next latent state. For a recorded pair, sample
+$\tau\sim\mathcal U(0,1)$ and define
+\begin{equation}
+ \begin{aligned}
+ x_{n,\tau}&=(1-\tau)\tilde x_{0,n}
+                  +\tau Z_{n+1}^{\mathrm{tar}},\\
+ \nu_n^\star&=Z_{n+1}^{\mathrm{tar}}-\tilde x_{0,n},\\
+ Z_{n+1}^{\mathrm{tar}}
+   &=\operatorname{sg}[f_\phi(X_{n+1}^{\mathrm{tar}},G)].
+ \end{aligned}
+ \label{eq:conditional-fm-path}
+\end{equation}
+The target field $X_{n+1}^{\mathrm{tar}}$ uses the vehicle-membership
+convention specified in the multi-step supervision below.
+The velocity network predicts
+$\widehat\nu_{n,\tau}
+ =\nu_\phi(x_{n,\tau},\tau,C_n,Z_n,\operatorname{sg}(b_n))$,
+trained by conditional flow matching~\cite{lipman2023flow}:
+\begin{equation}
+ \mathcal L_{\mathrm{FM}}
+   =\mathbb E_{\mathcal B,\tau,\eta}\!\left[
+       \frac1{Md}
+       \left\|\widehat\nu_{n,\tau}
+                  -\operatorname{sg}(\nu_n^\star)\right\|_F^2
+     \right].
+ \label{eq:conditional-fm-loss}
+\end{equation}
+The loss weights latent coordinates uniformly. In addition to the
+transformer features, a conditional residual head receives the current
+state, the detached background increment, the displacement
+$x_{n,\tau}-Z_n$, and flow time. The encoder supplies detached reference
+targets. During recursive training, gradients remain live through the
+generated current state and its reference projection, while the background
+condition remains detached.
+
+Inference integrates from $\hat x_n(0)=\tilde x_{0,n}$:
+\begin{equation}
+ \begin{aligned}
+ \frac{\mathrm d\hat x_n(\tau)}{\mathrm d\tau}
+   &=\nu_\phi\bigl(\hat x_n(\tau),\tau,C_n,Z_n,
+                         \operatorname{sg}(b_n)\bigr),\\
+ \widehat Z_{n+1}&=\hat x_n(1).
+ \end{aligned}
+ \label{eq:conditional-fm-ode}
+\end{equation}
+Euler integration operates in the full latent space. The parameter $\tau$
+tracks transport from the source to the endpoint, and each completed solve
+predicts one physical interval $\Delta T$. The mainline uses 100 Euler
+steps per transition. The basic dynamics objective combines prior
+alignment and flow matching:
+\begin{equation}
+ \mathcal L_{\mathrm{base}}
+   =\mathcal L_{\mathrm{FM}}
+      +\alpha_{\mathrm{prior}}\mathcal L_{\mathrm{prior}},
+ \qquad \alpha_{\mathrm{prior}}=0.1.
+ \label{eq:base-world-model-loss}
+\end{equation}
+Reconstruction and decoder calibration are optimized separately from
+this latent dynamics objective. An auxiliary exposure readout is also
+fitted by squared error using detached observed endpoint latents and
+recorded active-vehicle exposure; imagined rewards use the explicit
+vehicle accounting described below.
+
+\subsection{Stable Imagined Policy Learning}
+\label{sec:stable-imagination}
+
+We couple model-side trajectory supervision with policy-side reward
+regularization. Multi-step supervision trains the traffic model on its own
+recursive predictions. Latent disagreement assigns a penalty to
+high-dispersion predictions during policy learning.
+
+\subsubsection{Multi-Step Model Supervision}
+
+To align model fitting with recursive imagination, initialize a contiguous
+replay sequence at
+$\widehat Z_{n\mid n}=\operatorname{sg}[f_\phi(X_n,G)]$.
+Let $\mathcal C_n^0$ contain the vehicles already active at the sequence
+start. At later recorded boundaries, vehicle-count targets include only
+members of $\mathcal C_n^0$ that remain on the network; speed, occupancy,
+and halting labels retain their observed background values. Recorded
+turning controls are restricted to the same cohort. Denote the resulting
+targets and controls by $X_{n+h}^{\mathrm{tar}}$ and
+$C_{n+h-1}^{\mathcal B,\mathcal C_n^0}$, respectively. Predict
+\begin{equation}
+ \widehat Z_{n+h\mid n}
+   =F_\phi\bigl(\widehat Z_{n+h-1\mid n},
+          C_{n+h-1}^{\mathcal B,\mathcal C_n^0};\eta_{n+h-1}\bigr).
+ \label{eq:multistep-model-rollout}
+\end{equation}
+Each sampled prediction becomes the next input. At every depth, construct
+the noisy source and interpolated flow path from this generated input
+and the corresponding detached recorded target, using
+Eqs.~\eqref{eq:noisy-graph-prior}--\eqref{eq:conditional-fm-loss}.
+Let $\ell_{n,h}^{\mathrm{FM}}$ and
+$\ell_{n,h}^{\mathrm{prior}}$ be the resulting velocity-regression and
+prior-alignment losses at depth $h$. The supervised discrepancy is
+\begin{equation}
+ \ell_{n,h}^{\mathrm{roll}}
+   =\ell_{n,h}^{\mathrm{FM}}
+       +\alpha_{\mathrm{prior}}\ell_{n,h}^{\mathrm{prior}}.
+ \label{eq:explicit-rollout-discrepancy}
+\end{equation}
+If $b_{n,h}$ marks valid recorded endpoints and
+$H_n^{\mathrm{valid}}=\sum_h b_{n,h}>0$, the recursive objective is
+\begin{equation}
+ \mathcal L_{\mathrm{wm}}
+   =\mathbb E_{\mathcal B,\tau,\eta}\!\left[
+       \frac{\sum_{h=1}^{H_{\mathrm{wm}}}
+                       b_{n,h}\ell_{n,h}^{\mathrm{roll}}}
+            {H_n^{\mathrm{valid}}}
+      \right].
+ \label{eq:full-world-model-loss}
+\end{equation}
+The default supervision depth is $H_{\mathrm{wm}}=3$, corresponding to
+90 seconds; shorter sequences use their available recorded endpoints.
+The policy horizon $H_\pi=8$ and solver resolution are configured
+separately. Gradients propagate through the finite predicted unroll,
+including earlier flow solves, while recorded targets and target
+velocities are detached. Thus multi-step supervision applies the
+flow-matching objective at recursively generated prefixes. The
+disagreement statistic is used for imagined-reward regularization rather
+than for weighting this model-fitting objective.
+
+\subsubsection{Latent-State Disagreement Regularization}
+\label{sec:global-return}
+
+Holding $(Z,C)$ fixed, generate
+$\widehat Z^{(j)}=F_\phi(Z,C;\eta^{(j)})$, $j=1,\ldots,K$,
+with $K\ge2$. Using the raw latent coordinates, define
+\begin{equation}
+ \begin{aligned}
+ \overline Z&=\frac1K\sum_j\widehat Z^{(j)},\\
+ d_u(Z,C)&=\frac{\sum_j
+       \|\widehat z_u^{(j)}-\overline z_u\|_2^2}{(K-1)d},\\
+ u(Z,C)&=\frac1M\sum_u d_u(Z,C).
+ \end{aligned}
+ \label{eq:latent-disagreement}
+\end{equation}
+This statistic measures conditional prediction dispersion directly in
+latent space, with identity scaling of latent coordinates. Its network
+average supplies the global imagined-reward penalty. It measures
+dispersion under the learned conditional model, rather than an error bound
+or a calibrated estimate of epistemic uncertainty.
+
+Policy learning uses the finite-horizon cumulative mean
+$m(t)=C_{\mathrm{time}}(t)/(B(t)\vee1)$ defined in the preliminaries.
+All started trips contribute their elapsed travel time up to arrival or
+the cutoff $T$. For completeness, a discount-compatible form follows by
+setting $\Gamma(a,b)=\gamma_0^{(b-a)/\Delta T}$ and writing
+\begin{equation}
+ r_\gamma^g[a,b]=\kappa_g[m(a)-\Gamma(a,b)m(b)].
+ \label{eq:method-global-reward}
+\end{equation}
+Across $[0,T]$, its discounted sum telescopes to
+$-\kappa_g\Gamma(0,T)m(T)$, retaining the fixed-horizon mean objective.
+The implemented learner uses $\gamma_0=1$ and $\kappa_g=1/60$, recovering
+the undiscounted mean-increment reward. During imagination, $B(t)$ remains
+equal to the restored trip-start count, and $C_{\mathrm{time}}$ grows by
+the explicitly accumulated travel time of the active seed vehicles.
+
+Let $q_j$ denote successive imagined macro boundaries, including a
+possibly shorter terminal endpoint, and write
+$u_j=u(\widehat Z_j,C_j)$. Charge the penalty once for each complete
+predicted physical interval:
+\begin{equation}
+ \widetilde r_j^g
+   =r^g[q_j,q_{j+1}]
+     -\beta\,\mathbf1\{q_{j+1}-q_j=\Delta T\}\,u_j.
+ \label{eq:regularized-event-reward}
+\end{equation}
+The mainline uses $K=2$ and $\beta=0.1$. A partial terminal interval
+contributes its observed physical cost without an additional model
+transition or disagreement charge. The actor--critic learner optimizes
+these regularized returns; traffic evaluation uses the finite-horizon
+mean travel-time objective.
+
+\subsubsection{Global Actor--Critic Optimization}
+
+A centralized state-value critic $V_\omega(\widehat Z_j,c_j)$ estimates
+the shared remaining return at $q_j$. It receives mean-pooled segment
+latents and the causal context
+$c_j=[q_j/T,\,N_{\mathrm{active}}(q_j)/(B(q_j)\vee1),\,
+\log(1+C_{\mathrm{time}}(q_j)/60),\,\log(1+B(q_j))]$.
+Let $v_j^-=\operatorname{sg}[V_\omega(\widehat Z_j,c_j)]$,
+setting it to zero at the physical cutoff or exhaustion of the imagined
+seed cohort. Let $d_j$ mark either terminal condition at $q_{j+1}$.
+For a rollout ending at $q_L$, use
+\begin{equation}
+ \begin{aligned}
+ G_L^\lambda&=v_L^-,\\
+ G_j^\lambda&=\widetilde r_j^g+
+       (1-d_j)[(1-\lambda)v_{j+1}^-+\lambda G_{j+1}^\lambda],\\
+ \mathcal L_V&=\mathbb E_j\!\left[
+       \bigl(V_\omega(\widehat Z_j,c_j)
+                -\operatorname{sg}(G_j^\lambda)\bigr)^2\right],
+ \end{aligned}
+ \label{eq:global-lambda-return}
+\end{equation}
+with $\lambda=0.95$. At a nonterminal imagination-horizon cutoff, the
+critic supplies the bootstrap value. It continues to value shared
+outcomes after individual vehicle arrivals while other cohort vehicles
+remain active.
+
+A shared candidate-action critic $Q_\psi$ supplies a vehicle-specific
+counterfactual baseline under the same global reward. Its causal input
+$\chi_{i,k}$ includes the current traffic latent, route-candidate
+features, destination, reward context, and other simultaneous choices.
+For $s_k=q_{j(k)}$, the decisions share a Monte Carlo reward-to-go target
+with value bootstrapping at a nonterminal rollout cutoff:
+\begin{equation}
+ \begin{aligned}
+ R_k&=\sum_{j=j(k)}^{L-1}\widetilde r_j^g+v_L^-,\\
+ b_{i,k}&=\operatorname{sg}\!\left[
+    \sum_{a\in\mathcal A_i(S_k)}
+       \pi_\theta(a\mid o_{i,k})Q_\psi(\chi_{i,k},a)\right],\\
+ A_{i,k}&=\operatorname{sg}(R_k-b_{i,k}),\\
+ \mathcal L_Q&=\mathbb E_{i,k}\!\left[
+      \bigl(Q_\psi(\chi_{i,k},a_{i,k})
+                   -\operatorname{sg}(R_k)\bigr)^2\right].
+ \end{aligned}
+ \label{eq:counterfactual-global-advantage}
+\end{equation}
+The baseline is saved before fitting either critic and reused for the
+actor update. Only executed candidate actions are fitted to $R_k$.
+Simultaneous decisions share their global return target, while their
+counterfactual baselines can differ.
+
+Across the decision samples in an imagination training pass, normalize
+advantages by their population standard deviation, floored at one,
+without subtracting their mean:
+\begin{equation}
+ \begin{aligned}
+ s_A&=\max\{1,\operatorname{Std}(\{A_{i,k}\})\},\\
+ \widehat A_{i,k}&=\operatorname{clip}(A_{i,k}/s_A,-2.5,2.5).
+ \end{aligned}
+ \label{eq:global-advantage-scaling}
+\end{equation}
+The shared actor uses the entropy-regularized policy-gradient objective
+\begin{equation}
+ \begin{aligned}
+ \mathcal L_\pi=-\mathbb E_{i,k}\bigl[
+    &\log\pi_\theta(a_{i,k}\mid o_{i,k})
+                 \operatorname{sg}(\widehat A_{i,k})\\
+    &+\alpha_{\mathrm{ent}}\mathcal H(
+                 \pi_\theta(\cdot\mid o_{i,k}))\bigr].
+ \end{aligned}
+ \label{eq:next-hop-actor-loss}
+\end{equation}
+The expectation averages over vehicle decisions, and $\mathcal H(\pi)$
+denotes policy entropy. The entropy coefficient follows the configured
+episode-based annealing schedule. Each periodic route decision
+contributes a policy update weighted by its global reward-to-go advantage.
+Actor--critic optimization treats imagined trajectories and saved
+baselines as fixed training data, with model parameters held constant.
+Alternating this optimization with environment collection and model
+fitting converts traffic experience into additional cooperative-policy
+updates.

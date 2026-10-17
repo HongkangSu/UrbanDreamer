@@ -17,8 +17,11 @@ def source_fixture(tmp_path, *, final=True, entropy_mode='annealed'):
     source.mkdir()
     config = load_config(Path(__file__).parents[1] / 'configs/ingolstadt_custom.toml')
     config = replace(config, run=replace(config.run, output_dir=source, world_model_initialization_epochs=5),
-                     method=replace(config.method, actor_entropy_mode=entropy_mode),
-                     resources=replace(config.resources, world_model_imagination_compile=False))
+                     # This queue migrates the frozen single-step pretrainer.
+                     method=replace(config.method, actor_entropy_mode=entropy_mode,
+                                    fm_training_mode='single_step', disagreement_weight=0.),
+                     resources=replace(config.resources, world_model_imagination_compile=False,
+                                       world_model_initialization_sequence_length=1))
     config = replace(config, semantic_fingerprint=_semantic_fingerprint(**{
         key: getattr(config, key) for key in ('inputs', 'run', 'simulation', 'resources', 'method', 'data', 'codec')}))
     export_run_config(config, source / 'run_config.toml')
@@ -123,6 +126,67 @@ def test_paper_seed_preserves_pretraining_and_is_idempotent(tmp_path, entropy_mo
     assert first['online_budgets'] == queue.learning_budgets(config)
     assert queue.stage_seed(source, seed) == first
     assert queue.sha256_file(source / 'checkpoints/latest.pt') == source_hash
+
+
+def test_causal_recursive_seed_preserves_multistep_training_and_disagreement(tmp_path):
+    source, config, state = source_fixture(tmp_path)
+    config = replace(config,
+        method=replace(config.method, fm_training_mode='recursive_3step', disagreement_weight=.1),
+        resources=replace(config.resources, world_model_initialization_sequence_length=3))
+    config = replace(config, semantic_fingerprint=_semantic_fingerprint(**{
+        key: getattr(config, key) for key in ('inputs', 'run', 'simulation', 'resources', 'method', 'data', 'codec')}))
+    state, _ = queue.migrate_pretrained_reward(state)
+    export_run_config(config, source / 'run_config.toml')
+    save_checkpoint(output_dir=source, config_fingerprint=config.semantic_fingerprint, input_hash='network',
+                    phase=CheckpointPhase.ONLINE_TRAINING, next_unit=0, training_state=state)
+    assert queue.inspect_source(source)['ready']
+
+    seed = tmp_path / 'seed'
+    manifest = queue.stage_seed(source, seed)
+    target = load_config(seed / 'run_config.toml')
+    checkpoint = load_checkpoint(output_dir=seed, expected_config_fingerprint=target.semantic_fingerprint,
+                                 expected_input_hash='network')
+    queue._assert_equal(state, checkpoint.training_state)
+    queue.validate_profile_transfer(config, target)
+    assert target.method.fm_training_mode == 'recursive_3step'
+    assert target.resources.world_model_initialization_sequence_length == 3
+    assert target.method.disagreement_weight == .1
+    assert manifest['training_state_preserved_exactly']
+    assert manifest['reward_migration']['kind'] == 'already_causal_global'
+    assert queue.stage_seed(source, seed) == manifest
+    with pytest.raises(ValueError, match='only entropy schedule'):
+        queue.validate_profile_transfer(config, replace(target,
+            method=replace(target.method, disagreement_weight=0.)))
+
+
+def test_legacy_reward_migration_explicitly_disables_source_disagreement(tmp_path):
+    source, config, state = source_fixture(tmp_path)
+    config = replace(config, method=replace(config.method, disagreement_weight=.1))
+    config = replace(config, semantic_fingerprint=_semantic_fingerprint(**{
+        key: getattr(config, key) for key in ('inputs', 'run', 'simulation', 'resources', 'method', 'data', 'codec')}))
+    export_run_config(config, source / 'run_config.toml')
+    config = replace(config, semantic_fingerprint=legacy_semantic_fingerprint(config))
+    save_checkpoint(output_dir=source, config_fingerprint=config.semantic_fingerprint, input_hash='network',
+                    phase=CheckpointPhase.ONLINE_TRAINING, next_unit=0, training_state=state)
+    seed = tmp_path / 'seed'
+    queue.stage_seed(source, seed)
+    target = load_config(seed / 'run_config.toml')
+    assert target.method.disagreement_weight == 0.
+    queue.validate_profile_transfer(config, target, legacy_reward=True)
+
+
+@pytest.mark.parametrize('field', ['sequence_length', 'supervision_horizon'])
+def test_recursive_source_requires_multistep_profile(tmp_path, field):
+    _, config, state = source_fixture(tmp_path)
+    config = replace(config, method=replace(config.method, fm_training_mode='recursive_3step'),
+                     resources=replace(config.resources, world_model_initialization_sequence_length=3))
+    if field == 'sequence_length':
+        config = replace(config, resources=replace(config.resources, world_model_initialization_sequence_length=1))
+    else:
+        config = replace(config, method=replace(config.method, supervision_horizon=1))
+    checkpoint = SimpleNamespace(phase=CheckpointPhase.ONLINE_TRAINING, next_unit=0, training_state=state)
+    with pytest.raises(ValueError, match='sequence length and supervision horizon'):
+        queue.validate_completed_source(checkpoint, config)
 
 
 @pytest.mark.parametrize('field,value', [('codec_ready', False), ('codec_validation_updates', 4444),

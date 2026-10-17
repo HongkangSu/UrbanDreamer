@@ -1,9 +1,8 @@
-"""Per-transition endpoint volume labels with full observed source inputs.
+"""Endpoint volume labels for recursive cohorts and independent transitions.
 
-Only cars newly observed as departed during the current interval are excluded
-from its endpoint volume target. Earlier newborns become eligible at the next
-observed boundary. The fixed sequence-cohort helper is retained explicitly for
-historical diagnostic experiments; it is not the mainline label definition.
+Recursive mainline supervision follows vehicles already active at the sequence
+start. Independent modes instead exclude only cars newly observed as departed
+during the current interval; earlier newborns become eligible at the next boundary.
 """
 from __future__ import annotations
 
@@ -146,7 +145,7 @@ def prepare_transition_targets(batch: SequenceBatch, *, capacities, window_secon
 
 
 def prepare_cohort_batch(batch: SequenceBatch, *, capacities, window_seconds: float = 30.) -> SequenceBatch:
-    """Legacy diagnostic definition: fixed sequence-start C0, including controls.
+    """Recursive definition: fixed sequence-start C0, including controls.
 
     Arrival times are observed event times, so interval exposure is exact even
     for a vehicle that disappears between macro boundaries. Both action counts

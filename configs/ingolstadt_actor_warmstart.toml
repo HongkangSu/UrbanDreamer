@@ -41,7 +41,7 @@ meso_interpolate_positions = true
 
 [resources]
 world_model_initialization_batch_size = 64
-world_model_initialization_sequence_length = 1
+world_model_initialization_sequence_length = 3
 world_model_gradient_accumulation_steps = 1
 online_world_model_batch_size = 4
 world_model_pretrain_space_chunk = 64
@@ -76,7 +76,7 @@ picard_iterations = 2
 supervision_horizon = 3
 supervision_increment_updates = 100
 disagreement_samples = 2
-disagreement_weight = 0.0
+disagreement_weight = 0.1
 sp_prior_weight = 1.0
 # Evaluate the learned actor without guidance; training and imagination share the prior.
 sp_prior_evaluation_weight = 0.0
@@ -91,7 +91,7 @@ actor_entropy_initial_coefficient = 0.002
 actor_entropy_final_coefficient = 0.0001
 actor_entropy_hold_fraction = 0.1
 actor_entropy_end_fraction = 0.8
-fm_training_mode = "single_step"
+fm_training_mode = "recursive_3step"
 
 [data]
 archive_roots = []

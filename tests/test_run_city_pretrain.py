@@ -58,6 +58,27 @@ def test_ingo_profile_uses_batch64_compiled_and_migrated_config(tmp_path):
         assert fm[fm.index(key) + 1] == value
 
 
+@pytest.mark.parametrize('resume,mode,sequence', [
+    (False, 'recursive_3step', 3),
+    (True, 'single_step', 1),
+])
+def test_fm_mode_and_sequence_are_left_to_selected_config(tmp_path, resume, mode, sequence):
+    args = options(tmp_path)
+    config = tmp_path / 'base_config.toml'
+    if resume:
+        (tmp_path / 'world_model').mkdir()
+        config = tmp_path / 'world_model/run_config.toml'
+    content = (f'[resources]\nworld_model_initialization_sequence_length = {sequence}\n'
+               f'[method]\nfm_training_mode = "{mode}"\n')
+    config.write_text(content)
+    fm = commands(args, cache=dict(status='complete', entries=[
+        dict(split='train'), dict(split='validation')]))['world_model']
+    assert fm[fm.index('--config') + 1] == str(config)
+    assert '--sequence-length' not in fm
+    assert '--fm-training-mode' not in fm
+    assert config.read_text() == content
+
+
 def test_gpu_admission_reserves_cap_plus_margin_and_selects_device():
     run = lambda *a, **k: SimpleNamespace(stdout='0, 2000, 20000\n1, 1712, 20000\n')
     assert gpu_admission('cuda:1', .06, run=run)['ready']

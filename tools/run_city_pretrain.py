@@ -80,8 +80,8 @@ def commands(args, *, cache=None):
             '--space-chunk', '64' if ingo else '16', '--time-chunk', '65536' if ingo else '32768',
             '--mlp-chunk', '65536' if ingo else '16384',
             '--activation-checkpointing', 'on', '--compile-blocks', 'on' if ingo else 'off', '--precision', 'bf16',
-            '--gpu-memory-fraction', str(args.wm_memory_fraction), '--sequence-length', '1',
-            '--fm-training-mode', 'single_step', '--readout-supervision', 'observed_endpoint',
+            '--gpu-memory-fraction', str(args.wm_memory_fraction),
+            '--readout-supervision', 'observed_endpoint',
             '--expected-train-episodes', str(counts['train']),
             '--expected-validation-episodes', str(counts['validation'])]
         if getattr(args, 'activation_offload', False):

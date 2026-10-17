@@ -874,9 +874,17 @@ class MainlineTrainer:
             fraction_targets = batch.active_vehicle_fraction[:, :depth].to(self.device)
         batch_size = inputs.shape[0]
         with torch.no_grad():
-            z_inputs = self.world_model.encode(inputs.reshape(-1, self.edge_count, 8)).reshape(
-                batch_size, depth, self.edge_count, FLOW_LATENT_DIM)
-            z_targets = self.world_model.encode(targets.reshape(-1, self.edge_count, 8)).reshape_as(z_inputs)
+            if recursive:
+                # Adjacent input/target frames are the same cohort observations.
+                # Encode H+1 distinct frames once instead of two overlapping Hs.
+                frames = torch.cat([inputs[:, :1], targets], dim=1)
+                encoded = self.world_model.encode(frames.reshape(-1, self.edge_count, 8)).reshape(
+                    batch_size, depth + 1, self.edge_count, FLOW_LATENT_DIM)
+                z_inputs, z_targets = encoded[:, :-1], encoded[:, 1:]
+            else:
+                z_inputs = self.world_model.encode(inputs.reshape(-1, self.edge_count, 8)).reshape(
+                    batch_size, depth, self.edge_count, FLOW_LATENT_DIM)
+                z_targets = self.world_model.encode(targets.reshape(-1, self.edge_count, 8)).reshape_as(z_inputs)
         precision = getattr(self, '_world_training_precision',
                             getattr(self.config.resources, 'world_model_pretrain_precision', 'fp32'))
         if precision == 'bf16' and self.device.type != 'cuda':
@@ -889,7 +897,8 @@ class MainlineTrainer:
                     z_sequence=torch.cat([z_inputs[:, :1], z_targets], dim=1),
                     action=action, action_events=events,
                     steps=method.fm_steps, solver=method.fm_solver,
-                    picard_iterations=method.picard_iterations, prior_weight=method.prior_loss_weight)
+                    picard_iterations=method.picard_iterations, prior_weight=method.prior_loss_weight,
+                    predict_endpoints=sampled_readout, checkpoint_interval=10)
                 # Readout updates are separate from the FM graph. Recursion itself
                 # retains gradients through every generated physical transition.
                 predicted = generated.detach() if sampled_readout else z_targets

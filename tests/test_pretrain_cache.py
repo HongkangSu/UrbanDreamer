@@ -343,6 +343,9 @@ def test_fm_prefix_is_exact_and_does_not_decode_snapshots(setup,tmp_path,monkeyp
 def test_prefix_epoch_keeps_full_sequence_starts_order_rng_and_contract(setup,tmp_path,monkeypatch):
     base,_=make_cache(setup,tmp_path,monkeypatch,windows=20)
     data=CompactPretrainDataset(*setup,16,cache_manifest_path=base.cache_manifest_path)
+    # Prefix-only metadata elision belongs to independent training; recursion
+    # intentionally keeps vehicle membership and observed arrival metadata.
+    data.config=replace(data.config,method=replace(data.config.method,fm_training_mode='legacy_independent'))
     identity=data.manifest['identity'];expected=[];reference_rng=np.random.default_rng(5)
     for episode in reference_rng.permutation(2):
         expected.extend((int(episode),int(start)) for start in reference_rng.permutation(5))

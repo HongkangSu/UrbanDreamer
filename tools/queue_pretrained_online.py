@@ -178,11 +178,14 @@ def validate_completed_source(checkpoint, config):
                 raise ValueError(f'source codec quality gate failed: {prefix + key}')
     method, simulation, resources = config.method, config.simulation, config.resources
     if (method.fm_steps != 100 or method.fm_solver != 'euler' or
-            method.fm_training_mode != 'single_step' or method.sp_prior_weight != 0 or
+            method.fm_training_mode not in {'single_step', 'recursive_3step'} or method.sp_prior_weight != 0 or
             method.actor_entropy_mode not in {'population', 'annealed'} or simulation.traffic_model != 'meso' or
             simulation.session_protocol != 'event' or simulation.observation_step_seconds != 1 or
             simulation.incident_start_seconds < 1000000):
         raise ValueError('source does not match the approved Euler/no-incident/meso/prior/entropy settings')
+    if method.fm_training_mode == 'recursive_3step' and (
+            resources.world_model_initialization_sequence_length < 3 or method.supervision_horizon < 3):
+        raise ValueError('recursive_3step source requires sequence length and supervision horizon of at least three')
     if (resources.world_model_imagination_precision not in {'fp32', 'fp16', 'bf16', 'tf32'} or
             resources.world_model_imagination_compile_mode != 'default' or
             (resources.world_model_imagination_space_chunk,
@@ -212,17 +215,18 @@ def inspect_source(source_dir, *, pretrain_pid=None, pretrain_identity=None):
                 epochs=config.run.world_model_initialization_epochs, codec_ready=bool(checkpoint.training_state['metrics'].get('codec_ready')), updates=checkpoint.training_state['metrics'].get('world_model_updates'))
 
 
-def target_config(source, seed_dir):
+def target_config(source, seed_dir, *, legacy_reward=False):
     from tools.continue_mainline_entropy_annealing import annealed_config
     config = annealed_config(source, seed_dir)
-    config = replace(config, method=replace(config.method, disagreement_weight=0.))
+    if legacy_reward:
+        config = replace(config, method=replace(config.method, disagreement_weight=0.))
     config = replace(config, resources=replace(source.resources, **{COMPILE_FIELD: True},
                                                world_model_imagination_precision='fp16'))
     return replace(config, semantic_fingerprint=_semantic_fingerprint(**{
         key: getattr(config, key) for key in ('inputs', 'run', 'simulation', 'resources', 'method', 'data', 'codec')}))
 
 
-def validate_profile_transfer(source, target):
+def validate_profile_transfer(source, target, *, legacy_reward=False):
     before, after = source.resolved_snapshot(), target.resolved_snapshot()
     for snapshot in (before, after):
         snapshot['resources'].pop(COMPILE_FIELD)
@@ -234,7 +238,9 @@ def validate_profile_transfer(source, target):
             snapshot['method'].pop(name, None)
         snapshot['method'].pop('disagreement_weight')
     from tools.continue_mainline_entropy_annealing import annealed_config
-    expected_method = replace(annealed_config(source, target.run.output_dir).method, disagreement_weight=0.)
+    expected_method = annealed_config(source, target.run.output_dir).method
+    if legacy_reward:
+        expected_method = replace(expected_method, disagreement_weight=0.)
     if (before != after or not target.resources.world_model_imagination_compile
             or target.resources.world_model_imagination_precision != 'fp16'
             or target.method != expected_method):
@@ -262,8 +268,9 @@ def stage_seed(source_dir, seed_dir):
     source_config = checkpoint_source_config(source_config, raw)
     checkpoint = _read_frozen(source_path, source_config, raw['input_hash'])
     validate_completed_source(checkpoint, source_config)
-    config = target_config(source_config, seed)
-    validate_profile_transfer(source_config, config)
+    legacy_reward = checkpoint.training_state['reward_contract'] == LEGACY_REWARD_CONTRACT
+    config = target_config(source_config, seed, legacy_reward=legacy_reward)
+    validate_profile_transfer(source_config, config, legacy_reward=legacy_reward)
     seed.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix='.' + seed.name + '-', dir=seed.parent))
     try:

@@ -68,11 +68,12 @@ def tail_seconds(profile, size):
 
 def estimate_epoch(entries, profile):
     batch = int(profile['batch_size'])
+    sequence_length = int(profile.get('sequence_length', 1))
     full_time = float(profile['full_update_seconds_median'])
     loading = profile.get('sample_loading_seconds', 0)
     if not isinstance(loading, dict):
         loading = float(loading)
-    if batch < 1 or not math.isfinite(full_time) or full_time <= 0 or (not isinstance(loading, dict) and loading < 0):
+    if batch < 1 or sequence_length < 1 or not math.isfinite(full_time) or full_time <= 0 or (not isinstance(loading, dict) and loading < 0):
         raise ValueError('invalid full-batch benchmark')
     full = tails = windows = 0
     seconds = 0.
@@ -80,6 +81,7 @@ def estimate_epoch(entries, profile):
         count = int(entry['windows'])
         if count < 1:
             raise ValueError('episode has no legal sequence starts')
+        count = max(1, count - sequence_length + 1)
         batches, remainder = divmod(count, batch)
         full += batches
         tails += bool(remainder)
@@ -99,7 +101,7 @@ def estimate_epoch(entries, profile):
             return value
         # Every episode incurs its first cold load; remaining batches reuse its cache.
         for entry in entries:
-            count = int(entry['windows'])
+            count = max(1, int(entry['windows']) - sequence_length + 1)
             batches, remainder = divmod(count, batch)
             seconds += loading_cost(min(count, batch), 'cold')
             seconds += max(0, batches - 1) * loading_cost(batch, 'warm_median')
@@ -111,6 +113,20 @@ def estimate_epoch(entries, profile):
                 updates_per_epoch=full + tails, training_seconds_per_epoch=seconds,
                 estimated_seconds_per_epoch=seconds * 1.15,
                 peak_allocated_mib=profile.get('peak_allocated_mib'))
+
+
+def validate_benchmark_profile(config, benchmark):
+    """Recursive execution needs timings measured with the same unroll depth."""
+    if config.method.fm_training_mode != 'recursive_3step':
+        return
+    sequence_length = config.resources.world_model_initialization_sequence_length
+    for profile in benchmark['profiles']:
+        if profile.get('status', 'complete') != 'complete':
+            continue
+        if (profile.get('fm_training_mode') != 'recursive_3step'
+                or profile.get('sequence_length') != sequence_length):
+            raise ValueError('recursive_3step requires matching benchmark fm_training_mode '
+                             f'and sequence_length = {sequence_length}')
 
 
 def make_plan(cache, benchmark, *, exposure_target=5263655, target_hours=6, max_hours=8,
@@ -191,14 +207,14 @@ def write_config(args, plan):
         run=replace(config.run, output_dir=args.run_dir / 'world_model', device=args.device,
                     world_model_initialization_epochs=plan['epochs'], online_training_episodes=2000),
         resources=replace(config.resources, world_model_initialization_batch_size=plan['batch_size'],
-            world_model_initialization_sequence_length=1, world_model_gradient_accumulation_steps=1,
+            world_model_gradient_accumulation_steps=1,
             world_model_pretrain_precision='bf16', world_model_pretrain_compile_blocks=True,
             world_model_pretrain_space_chunk=64, world_model_pretrain_time_chunk=65536,
             world_model_pretrain_mlp_chunk=65536, world_model_pretrain_activation_checkpointing=True,
             world_model_imagination_precision='bf16', world_model_imagination_compile=True,
             imagination_rollouts_per_pass=16, imagination_passes_per_episode=4,
             imagination_time_budget_seconds=0.),
-        method=replace(config.method, fm_training_mode='single_step', exposure_readout_supervision='observed_endpoint', fm_steps=100,
+        method=replace(config.method, fm_steps=100,
                        fm_solver='euler', disagreement_samples=2),
         codec=replace(config.codec, decoder_pretrain_enabled=True, decoder_online_enabled=True,
             decoder_allow_unready=True, occupied_speed_weight=1., slow_speed_weight=1.,
@@ -218,6 +234,8 @@ def write_config(args, plan):
 
 
 def commands(args, plan, config):
+    from urban_dreamer.workflow.config import load_config
+    frozen = load_config(config)
     pretrain = [sys.executable, '-u', str(args.source_root / 'tools/run_complete_pretrain.py'),
         '--config', str(config), '--calibrated-codec', str(args.calibrated_codec),
         '--cache-manifest', str(args.cache_manifest), '--output-dir', str(args.run_dir / 'world_model'),
@@ -225,7 +243,9 @@ def commands(args, plan, config):
         '--accumulation-steps', '1', '--space-chunk', '64', '--time-chunk', '65536',
         '--mlp-chunk', '65536', '--activation-checkpointing', 'on', '--compile-blocks', 'on',
         '--gpu-memory-fraction', str(args.gpu_memory_fraction), '--precision', 'bf16',
-        '--sequence-length', '1', '--fm-training-mode', 'single_step', '--readout-supervision', 'observed_endpoint',
+        '--sequence-length', str(frozen.resources.world_model_initialization_sequence_length),
+        '--fm-training-mode', frozen.method.fm_training_mode,
+        '--readout-supervision', frozen.method.exposure_readout_supervision,
         '--expected-train-episodes', str(plan['train_episodes']),
         '--expected-validation-episodes', str(plan['validation_episodes'])]
     if getattr(args, 'calibration_binding', None) is not None:
@@ -280,6 +300,7 @@ def stop_owned_online(args):
 
 
 def run(args):
+    from urban_dreamer.workflow.config import load_config
     args.run_dir.mkdir(parents=True, exist_ok=True)
     status_path = args.run_dir / 'status.json'
     def status(phase, **extra):
@@ -311,6 +332,7 @@ def run(args):
                 '--query-gpu=memory.free', '--format=csv,noheader,nounits'], text=True).strip())
         else:
             memory = None
+        validate_benchmark_profile(load_config(args.config), benchmark)
         plan = make_plan(cache, benchmark, available_memory_mib=memory)
         frozen_paths = [args.config, args.calibrated_codec, args.cache_manifest, args.benchmark,
                         args.source_root / 'manifest.json']

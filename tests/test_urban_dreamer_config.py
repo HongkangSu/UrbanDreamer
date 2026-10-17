@@ -274,8 +274,9 @@ def test_shipped_configs_use_offline_pretraining_contract():
         assert config.run.codec_pretraining_epochs == 10
         assert config.codec.speed_positive
         assert config.method.transition_volume_scope == 'previous_state_excluding_current_births'
-        assert config.resources.world_model_initialization_sequence_length == 1
-        assert config.method.fm_training_mode == "single_step"
+        assert config.resources.world_model_initialization_sequence_length == 3
+        assert config.method.fm_training_mode == "recursive_3step"
+        assert config.method.disagreement_weight == .1
         assert config.resources.world_model_pretrain_space_chunk == 16
         assert config.resources.world_model_pretrain_time_chunk == 32768
         assert config.resources.world_model_pretrain_mlp_chunk == 16384
@@ -473,15 +474,15 @@ def test_midpoint_solver_is_accepted_and_fingerprinted(tmp_path):
     assert midpoint.semantic_fingerprint != same_steps_euler.semantic_fingerprint
 
 
-def test_all_presets_select_euler_100_without_recursive_training():
+def test_all_presets_select_euler_100_with_recursive_training():
     paths = list((Path(__file__).resolve().parents[1] / 'configs').glob('*.toml'))
     assert paths
     for path in paths:
         config = load_config(path)
         assert config.method.fm_steps == 100, path
         assert config.method.fm_solver == 'euler', path
-        assert config.method.fm_training_mode == 'single_step', path
-        assert config.resources.world_model_initialization_sequence_length == 1, path
+        assert config.method.fm_training_mode == 'recursive_3step', path
+        assert config.resources.world_model_initialization_sequence_length == 3, path
 
 
 

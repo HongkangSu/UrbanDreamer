@@ -308,3 +308,80 @@ def test_orphan_live_child_keeps_reservation_and_priority(setup):
         launch.assert_not_called()
         resume.assert_not_called()
     assert queue.read(output / 'status.json')['runs']['ingo']['status'] == 'running'
+
+
+@pytest.mark.parametrize('restart', [False, True])
+def test_adopted_live_runner_is_monitored_without_launch(setup, restart):
+    plan, run, tmp = setup
+    receipt = tmp / 'previous.result.json'
+    run.update(adopted_result_path=str(receipt), adopted_plan_identity='previous-plan')
+    write(receipt, dict(status='running', pid=os.getpid(),
+        process_identity=queue.process_identity(os.getpid()), plan_identity='previous-plan'))
+    original = receipt.read_bytes()
+    plan_path = write(tmp / 'plan.json', plan)
+    output = tmp / 'queue'
+    if restart:
+        output.mkdir()
+        write(output / 'plan.json', plan)
+    with patch.object(queue.subprocess, 'Popen') as launch, patch.object(queue.time, 'sleep', side_effect=KeyboardInterrupt):
+        with pytest.raises(KeyboardInterrupt):
+            queue.run_queue(plan_path, output)
+        launch.assert_not_called()
+    assert queue.read(output / 'status.json')['runs']['ingo']['status'] == 'running'
+    assert receipt.read_bytes() == original
+
+
+@pytest.mark.parametrize('adopted', [False, True])
+def test_foreign_receipt_identity_rejected(setup, adopted):
+    plan, run, tmp = setup
+    output = tmp / 'queue'
+    output.mkdir()
+    receipt = output / 'ingo.result.json'
+    if adopted:
+        receipt = tmp / 'adopted.json'
+        run.update(adopted_result_path=str(receipt), adopted_plan_identity='old-plan')
+    write(receipt, dict(status='running', plan_identity='foreign'))
+    plan_path = write(tmp / 'plan.json', plan)
+    with patch.object(queue.subprocess, 'Popen') as launch:
+        with pytest.raises(ValueError, match='another plan'):
+            queue.run_queue(plan_path, output)
+        launch.assert_not_called()
+
+
+def test_missing_adopted_receipt_never_launches(setup):
+    plan, run, tmp = setup
+    run.update(adopted_result_path=str(tmp / 'missing.json'), adopted_plan_identity='old-plan')
+    plan_path = write(tmp / 'plan.json', plan)
+    with patch.object(queue.subprocess, 'Popen') as launch, patch.object(queue.time, 'sleep', side_effect=KeyboardInterrupt):
+        with pytest.raises(KeyboardInterrupt):
+            queue.run_queue(plan_path, tmp / 'queue')
+        launch.assert_not_called()
+    record = queue.read(tmp / 'queue/status.json')['runs']['ingo']
+    assert record['launch_pending'] and record['reason'].startswith('adopted_receipt_missing')
+
+
+@pytest.mark.parametrize('state', ['completed', 'failed'])
+def test_adopted_terminal_result(setup, state):
+    plan, run, tmp = setup
+    receipt = tmp / 'previous.result.json'
+    run.update(adopted_result_path=str(receipt), adopted_plan_identity='old-plan')
+    write(receipt, dict(status=state, exit_code=0 if state == 'completed' else 1,
+                        plan_identity='old-plan'))
+    write(Path(run['completion_status_path']), {'phase': 'pretraining_completed'})
+    plan_path = write(tmp / 'plan.json', plan)
+    with patch.object(queue.subprocess, 'Popen') as launch:
+        assert queue.run_queue(plan_path, tmp / 'queue') == int(state == 'failed')
+        launch.assert_not_called()
+
+
+@pytest.mark.parametrize('fields', [
+    {'adopted_result_path': '/tmp/receipt'},
+    {'adopted_plan_identity': 'old'},
+    {'adopted_result_path': 'relative', 'adopted_plan_identity': 'old'},
+    {'adopted_result_path': '/tmp/receipt', 'adopted_plan_identity': ''},
+])
+def test_adoption_requires_absolute_path_and_paired_identity(setup, fields):
+    plan, run, _ = setup
+    run.update(fields)
+    with pytest.raises(ValueError, match='adopted'):
+        queue.validate_plan(plan)

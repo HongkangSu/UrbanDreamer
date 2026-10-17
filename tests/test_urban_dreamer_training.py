@@ -42,7 +42,10 @@ def make_trainer(tmp_path, *, archive_roots=(), traffic_model=None):
         resources=replace(config.resources, world_model_initialization_batch_size=1,
             world_model_initialization_sequence_length=1, online_world_model_batch_size=1,
             imagination_passes_per_episode=16, imagination_time_budget_seconds=0.),
-        method=replace(config.method, fm_steps=2, fm_solver='euler'),
+        # Single-window fixtures isolate lifecycle/codec behavior; recursive
+        # supervision and nonzero latent risk have separate integration tests.
+        method=replace(config.method, fm_steps=2, fm_solver='euler',
+            fm_training_mode='single_step', disagreement_weight=0.),
         codec=replace(config.codec, decoder_pretrain_enabled=False, decoder_online_enabled=False),
         data=replace(config.data, archive_roots=tuple(archive_roots)))
     prepared = validate_prepared_inputs(config)

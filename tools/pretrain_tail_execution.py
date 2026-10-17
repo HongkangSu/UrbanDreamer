@@ -20,7 +20,9 @@ def enable_pretrain_tail_execution(trainer, *, max_batch=32):
             for start in range(0, batch, max_batch):
                 stop = min(start + max_batch, batch)
                 selected = ConditionEncoding(condition.edge_tokens[start:stop],
-                    condition.reference_tokens[start:stop] if condition.reference_tokens is not None else None)
+                    condition.reference_tokens[start:stop] if condition.reference_tokens is not None else None,
+                    condition.current_state[start:stop] if condition.current_state is not None else None,
+                    condition.background[start:stop] if condition.background is not None else None)
                 outputs.append(original(action[start:stop], packed_latents=packed_latents[start:stop],
                     flow_time=flow_time[start:stop], condition=selected).latent_velocity)
             return DynamicsOutput(torch.cat(outputs, dim=0))

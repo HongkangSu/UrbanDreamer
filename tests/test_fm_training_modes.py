@@ -1,4 +1,4 @@
-"""Single physical transition is the preset; recursion is explicit and causal."""
+"""Recursive presets retain explicit single-step and historical compatibility."""
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -53,13 +53,53 @@ def test_recursive_requires_three_frame_intervals(tmp_path):
         configured(tmp_path, '"recursive_3step"', sequence=1)
 
 
-def test_presets_use_single_30_second_transition():
+def test_presets_enable_recursive_supervision_and_latent_risk():
     paths = list((Path(__file__).resolve().parents[1] / 'configs').glob('*.toml'))
     assert paths
     for path in paths:
         config = cfg.load_config(path)
-        assert config.method.fm_training_mode == 'single_step', path
-        assert config.resources.world_model_initialization_sequence_length == 1, path
+        assert config.method.fm_training_mode == 'recursive_3step', path
+        assert config.resources.world_model_initialization_sequence_length == 3, path
+        assert config.method.supervision_horizon == 3, path
+        assert config.method.disagreement_samples >= 2, path
+        assert config.method.disagreement_weight == .1, path
+
+
+def test_method_defaults_enable_stability_without_reinterpreting_omitted_legacy_fields(tmp_path):
+    current = cfg.MethodConfig()
+    assert current.fm_training_mode == 'recursive_3step'
+    assert current.disagreement_weight == .1
+    historical = configured(tmp_path)
+    explicit = configured(tmp_path, '"legacy_independent"')
+    assert historical.method.fm_training_mode == 'legacy_independent'
+    assert historical.method.disagreement_weight == 0.
+    assert historical.semantic_fingerprint == explicit.semantic_fingerprint
+
+
+@pytest.mark.parametrize('mode', ['legacy_independent', 'single_step'])
+def test_stability_profile_changes_checkpoint_identity(tmp_path, mode):
+    legacy = configured(tmp_path, '"' + mode + '"')
+    recursive = replace(legacy, method=replace(legacy.method,
+        fm_training_mode='recursive_3step', disagreement_weight=.1))
+    values = {name: getattr(recursive, name) for name in
+              ('inputs', 'run', 'simulation', 'resources', 'method', 'data', 'codec')}
+    assert cfg._semantic_fingerprint(**values) != legacy.semantic_fingerprint
+
+
+def test_default_latent_penalty_reaches_shared_imagined_returns():
+    from test_urban_dreamer_event_returns import make_case, seed
+    results = []
+    for weight in (0., cfg.MethodConfig().disagreement_weight):
+        trainer, batch, _ = make_case(states=[seed('a'), seed('b')], population=4)
+        trainer.config.method.disagreement_weight = weight
+        rows, _ = trainer._imagine_from_seed(batch, 0, rollout_index=0)
+        results.append(rows)
+    assert len(results[0]) == len(results[1]) == 4
+    for unpenalized, penalized in zip(*results):
+        # The fixture predicts variance 2 at the sole complete endpoint.
+        assert penalized['global_return'].item() == pytest.approx(
+            unpenalized['global_return'].item() - .2)
+        torch.testing.assert_close(penalized['global_reward'], unpenalized['global_reward'])
 
 
 def fake_trainer(mode, monkeypatch, *, sampled=False):
@@ -121,6 +161,10 @@ def test_recursive_uses_fixed_cohort_controls_and_correct_readout(monkeypatch, s
     assert loss == 2.
     assert len(calls) == 1
     call = calls[0]
+    assert call['predict_endpoints'] is sampled
+    assert call['checkpoint_interval'] == 10
+    assert len(encoded) == 1 and encoded[0].shape == (4, 3, 8)
+    torch.testing.assert_close(encoded[0], expected.transition_flow.reshape(4, 3, 8))
     assert not call['z_sequence'].requires_grad
     assert call['z_sequence'].shape == (1, 4, 3, 64)
     torch.testing.assert_close(call['action'], expected.transition_action)
@@ -142,6 +186,38 @@ def test_recursive_rejects_missing_membership_metadata(monkeypatch):
     trainer, *_ = fake_trainer('recursive_3step', monkeypatch)
     with pytest.raises(ValueError, match='boundary snapshots and observed arrival metadata'):
         training.MainlineTrainer._world_loss(trainer, replace(transition_batch(), boundary_vehicles=None))
+
+
+def test_recursive_condition_only_training_backpropagates_through_generated_states(monkeypatch):
+    from urban_dreamer.models.world_model import Dynamics
+    torch.manual_seed(131)
+    trainer, _, _, encoder_weight = fake_trainer('recursive_3step', monkeypatch)
+    dynamics = Dynamics(adjacency=torch.tensor([[0., 1., 0.], [0., 0., 1.], [1., 0., 0.]]),
+        static_features=torch.zeros(3, 5), low_frequency_rank=2, event_protocol=True,
+        prior_filter='soft', prior_filter_strength=.1, prior_action_conditioned=False,
+        prior_usage='condition_only')
+    with torch.no_grad():
+        dynamics.flow_head.weight.normal_(std=.01)
+    trainer.world_model.dynamics = dynamics
+    generated = []
+    solve = dynamics.solve
+    def capture(*args, **kwargs):
+        result = solve(*args, **kwargs)
+        result.retain_grad()
+        generated.append(result)
+        return result
+    monkeypatch.setattr(dynamics, 'solve', capture)
+    batch = cohort_replay()._batch_from_picks([(0, 0)])
+    loss, readout = training.MainlineTrainer._world_loss(trainer, batch)
+    (loss + readout).backward()
+    assert trainer.metrics['world_model_supervision_depth_last'] == 3
+    assert len(generated) == 2
+    assert torch.isfinite(loss) and torch.isfinite(readout)
+    assert generated[0].grad is not None and generated[0].grad.abs().sum() > 0
+    assert generated[1].grad is not None and generated[1].grad.abs().sum() > 0
+    assert dynamics.condition_residual.output.weight.grad.abs().sum() > 0
+    assert dynamics.graph_prior.output.weight.grad.abs().sum() > 0
+    assert encoder_weight.grad is None
 
 
 def test_single_actual_fm_has_no_solve_and_future_windows_do_not_change_loss(monkeypatch):

@@ -17,11 +17,9 @@ epsilon-greedy exploration. See [the continuation protocol](docs/entropy_anneali
 installed bundles. Existing frozen experiment snapshots remain unchanged.
 
 UrbanDreamer trains a routing policy for a fully controlled CAV fleet in SUMO.
-The mainline observes vehicles once per second and chooses a next road edge
-when an observed external entry has multiple destination-reachable candidates.
-A learned world model predicts the network state
-at fixed 30-second intervals. Vehicle decisions and world-model updates run on
-separate clocks.
+The mainline observes vehicles once per second and selects one of four complete
+current-to-destination routes for each eligible vehicle at 30-second boundaries.
+A learned world model predicts the network state over the same fixed intervals.
 
 Bundled mainline and baseline profiles now use **SUMO mesoscopic traffic** through
 libsumo: one-second event observations, 30-second world-model windows, active
@@ -36,6 +34,9 @@ The mainline first pretrains its world model on existing compatible real SUMO
 training archives, then collects online episodes to fine-tune the world model
 and routing policy, and finally evaluates the policy. It requires a nonempty
 offline source and starts no SUMO session during pretraining.
+For the paper's sample-efficiency metric, environment interactions count online
+training collection only. The fixed offline pretraining dataset and imagined
+transitions are reported separately and excluded from that online count.
 
 ```bash
 git lfs install
@@ -139,7 +140,14 @@ The old `world_model_initialization_steps` key is rejected. Pretraining does not
 start a session or collect new source trajectories. Metrics report completed
 epochs, batches, sampled sequences and optimizer updates separately.
 
-Every transition uses its complete observed previous state as input. Its endpoint
+The default dynamics objective recursively supervises up to three 30-second
+transitions, feeding generated latents into later predictions. Vehicle-count
+targets and recorded controls follow vehicles already active at the sequence
+start, matching imagined vehicle lifecycles; speed, occupancy and halt labels
+retain the observed background. The first input is the full observed state.
+Short episode tails use their available transitions.
+
+The retained independent-transition modes use the complete observed previous state as input. Their endpoint
 vehicle-count target excludes only vehicles not yet departed in that previous
 observation. A vehicle born in one window appears in the next full observed
 input and becomes eligible for the next target. Actions, sparse events,
@@ -401,7 +409,8 @@ Both real and imagined rewards carry their cumulative accounting history.
 The four critic context fields are time progress, active/B, log1p(C/60),
 and log1p(B); Actor observations never use the final future vehicle count.
 Empty demand contributes zero. Unfinished trips contribute observed time only;
-default individual timeout penalties and the default model-risk weight are zero.
+default individual timeout penalties are zero. Mainline imagined rewards subtract
+`0.1` times latent disagreement, estimated from two same-condition noise samples.
 The new reward contract is `causal_cumulative_mean_global_v1` and replay schema 8.
 Legacy checkpoints need an explicit migration before paper-reward continuation.
 
@@ -433,20 +442,33 @@ and exposure but not completed-episode travel time. Reward semantics, policy
 execution and advantage normalization are included in the semantic fingerprint;
 legacy sources can be inspected but require recorded migration for learning.
 
-The transition starts from `z + P_low prior(z, action)` plus
-`sigma * U_low * GaussianNoise`. The graph spectrum uses a symmetric normalized
-Laplacian; directed upstream/downstream messages still feed the prior. FM regresses
-velocity toward detached birth-adjusted endpoint encodings. Mainline supervision
-uses independent windows with full observed starts; a target cleaned of current
-births is never fed as the next window's input. The default three supervised
-windows are three 30-second predictions, not a recursive 90-second training
-objective. The legacy recursive helper remains available to other experiments.
-Sampled solves run without gradients and train only the detached exposure
-readout; the FM velocity and graph prior retain gradients. Codec reconstruction
+The transition starts from `z + sigma * U_low * GaussianNoise`. The state-only
+graph low-frequency predictor uses directed upstream/downstream messages and
+soft output filtering `(I + 0.1 Lsym)^-1`; its increment is a detached FM condition,
+without shifting the source mean or current-state reference. The graph spectrum
+uses a symmetric normalized Laplacian. FM regresses velocity toward detached
+sequence-start-cohort endpoint encodings. Mainline supervision recursively feeds
+generated predictions into later transitions over up to 90 seconds, retaining
+gradients through earlier solves. Independent single-step and legacy-window
+training remain explicit alternatives. The exposure readout uses detached
+observed endpoint latents by default; the FM velocity and graph prior retain
+their respective prediction-loss gradients. Codec reconstruction
 has its own optimizer and is frozen during dynamics training. Euler and Picard share the same transition interface;
 Picard batches independent integration nodes, and each solve caches only its
 state/time-independent condition branches. Caches are local to a call and rebuilt
 after parameter or condition changes.
+
+Recursive training encodes the four distinct observed frames once instead of
+encoding two overlapping sets of three. With observed-endpoint readout targets,
+the final generated endpoint has no loss consumer: the trainer omits only that
+solve, preserving all three FM/prior losses and both differentiable prefix
+solves. At 100 Euler steps this uses 203 velocity forwards rather than 303.
+Integration checkpoints every ten solver steps bound saved activation memory;
+backward recomputes these segments without truncating physical or solver
+gradients. Public recursive-loss callers still receive all predicted endpoints
+by default. Deterministic positional encodings use a bounded four-shape execution
+cache outside compilation/capture, and dropout-free transformer checkpoints
+avoid redundant RNG snapshots. These execution changes add no checkpoint keys.
 
 The attention sequence is `[FM time, edge states, register tokens]`. FM time is
 the numerical integration coordinate, distinct from physical episode progress.
@@ -467,14 +489,17 @@ pretraining keeps codec, parameters, gradients, optimizer state and evaluation
 in FP32. The singleton temporal attention path avoids a padded FlashAttention
 workspace. Auxiliary exposure reads are learned from detached observed endpoint
 latents, removing unnecessary integration passes from FM training. The shipped
-pretraining sequence length is three, matching the independent supervision
+pretraining sequence length is three, matching the recursive supervision
 horizon and covering episode tail windows.
 
 An optional `[method]` table configures graph rank, noise, solver, supervision depth
 and risk; see [the method configuration](configs/mainline.example.toml). The default
-supervision curriculum increases from one to at most three transitions every 100
-optimizer updates, bounded by the sampled sequence length. Online replay supports
-that horizon; offline sequence length remains the resource setting. Latent variance uses raw
+`recursive_3step` mode uses three transitions when available, with a disagreement
+weight of `0.1`. The old one-to-three-window curriculum applies only to
+`legacy_independent`. Online replay supports that horizon; offline sequence
+length remains the resource setting. Omitted FM-mode and disagreement-weight
+fields in historical TOML files retain `legacy_independent` and zero, respectively;
+new profiles and exported snapshots state these fields explicitly. Latent variance uses raw
 coordinates (`S_Z=I`) with parameters frozen during imagination. It describes
 conditional predictive dispersion, which can include random demand, and is not a
 measurement of pure epistemic uncertainty or an error bound.

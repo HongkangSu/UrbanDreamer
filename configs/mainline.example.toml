@@ -61,7 +61,7 @@ world_model_pretrain_time_chunk = 32768
 world_model_pretrain_mlp_chunk = 16384
 world_model_pretrain_activation_checkpointing = true
 world_model_initialization_batch_size = 1
-world_model_initialization_sequence_length = 1
+world_model_initialization_sequence_length = 3
 world_model_gradient_accumulation_steps = 1
 online_world_model_batch_size = 4
 
@@ -73,7 +73,7 @@ prior_filter_strength = 0.1
 prior_action_conditioned = false
 prior_filter_input = false
 prior_usage = "condition_only"
-fm_training_mode = "single_step"
+fm_training_mode = "recursive_3step"
 actor_entropy_mode = "annealed"
 actor_entropy_initial_coefficient = 0.002
 actor_entropy_final_coefficient = 0.0001

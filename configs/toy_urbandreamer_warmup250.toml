@@ -58,7 +58,7 @@ world_model_pretrain_time_chunk = 32768
 world_model_pretrain_mlp_chunk = 16384
 world_model_pretrain_activation_checkpointing = true
 world_model_initialization_batch_size = 64
-world_model_initialization_sequence_length = 1
+world_model_initialization_sequence_length = 3
 world_model_gradient_accumulation_steps = 1
 online_world_model_batch_size = 16
 
@@ -80,9 +80,10 @@ prior_action_conditioned = false
 prior_filter_input = false
 prior_usage = "condition_only"
 disagreement_samples = 2
+disagreement_weight = 0.1
 fm_solver = "euler"
 fm_steps = 100
-fm_training_mode = "single_step"
+fm_training_mode = "recursive_3step"
 actor_entropy_mode = "annealed"
 actor_entropy_initial_coefficient = 0.002
 actor_entropy_final_coefficient = 0.0001
@@ -93,7 +94,7 @@ sp_prior_weight = 0.0
 sp_prior_temperature = 30.0
 sp_prior_hold_episodes = 200
 sp_prior_off_episode = 1000
-# Inputs retain all observed vehicles; target volume excludes current-window departures.
+# Independent-mode label scope; recursive supervision follows the sequence-start fleet.
 transition_volume_scope = "previous_state_excluding_current_births"
 
 [codec]

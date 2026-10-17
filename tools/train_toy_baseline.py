@@ -206,6 +206,12 @@ def main(argv=None):
     parser.add_argument('--iql-replay-capacity', type=int, default=200_000)
     parser.add_argument('--iql-target-tau', type=float, default=.01,
                         help='Target synchronization amount per iql-batch-size sampled transitions')
+    parser.add_argument('--iql-profile', choices=('legacy_v1', 'double_dueling_v2'),
+                        default='double_dueling_v2',
+                        help='Fresh IQL uses Double DQN, masked dueling values and epsilon-greedy exploration; old checkpoints require legacy_v1')
+    parser.add_argument('--iql-epsilon-initial', type=float, default=1.)
+    parser.add_argument('--iql-epsilon-final', type=float, default=.05)
+    parser.add_argument('--iql-epsilon-decay-episodes', type=int, default=1000)
     parser.add_argument('--mamba-model-warmup-updates', type=int, default=100)
     parser.add_argument('--mamba-min-model-frames', type=int, default=100)
     parser.add_argument('--mamba-burn-in-windows', type=int, default=5)

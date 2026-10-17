@@ -44,8 +44,8 @@ def profile(args):
         run=replace(config.run, device=args.device, output_dir=args.output_dir / 'private_unused'),
         data=DataConfig(pretrain_cache_manifest=args.cache_manifest, validation_cache_manifest=args.cache_manifest),
         codec=replace(config.codec, decoder_pretrain_enabled=True, decoder_online_enabled=True, decoder_allow_unready=True),
-        method=replace(config.method, fm_training_mode='single_step', exposure_readout_supervision='observed_endpoint', fm_steps=100, fm_solver='euler'),
-        resources=replace(config.resources, world_model_initialization_sequence_length=1,
+        method=replace(config.method, exposure_readout_supervision='observed_endpoint', fm_steps=100, fm_solver='euler'),
+        resources=replace(config.resources,
             world_model_initialization_batch_size=args.batch, world_model_pretrain_precision='bf16',
             world_model_pretrain_compile_blocks=True, world_model_pretrain_space_chunk=64,
             world_model_pretrain_time_chunk=65536, world_model_pretrain_mlp_chunk=65536,
@@ -68,25 +68,30 @@ def profile(args):
     entries = trainer.offline_data.manifest['entries']
     episode = max(range(len(entries)), key=lambda i: entries[i]['windows'])
     available = entries[episode]['windows']
+    sequence_length = config.resources.world_model_initialization_sequence_length
+    legal_starts = max(1, available - sequence_length + 1)
     tails = args.tail_batches or {32: [16], 64: [32], 128: [64, 96]}[args.batch]
     if any(size < 1 or size >= args.batch for size in tails):
         raise ValueError('tail batches must be positive and smaller than the full batch')
     result = dict(batch_size=args.batch, status='running', compiled_blocks=compiled,
         precision='bf16', decoder_supervision=True, encoder_frozen=True,
-        fm_training_mode='single_step', readout_supervision='observed_endpoint',
+        fm_training_mode=config.method.fm_training_mode, sequence_length=sequence_length,
+        readout_supervision=config.method.exposure_readout_supervision,
         tail_update_seconds={}, sample_loading_seconds={}, measurements={},
         memory_fraction=args.memory_fraction, fresh_dynamics=True, codec_source=str(args.codec),
         activation_offload=args.activation_offload,
         tail_execution_batch=args.tail_execution_batch,
-        source_episode_windows=available, full_batch_repeated_starts=max(args.batch-available, 0),
-        note='Full B128 repeats one valid start because real episodes have at most127 windows; throughput only, production retains tails without padding.')
+        source_episode_windows=available, full_batch_repeated_starts=max(args.batch-legal_starts, 0),
+        note='Throughput batches may repeat valid sequence starts; production retains tails without padding.')
     output = args.output_dir / f'batch_{args.batch}.json'
     write(output, result)
     for size in [args.batch] + tails:
         host = []
         for _ in range(3):
             started = time.perf_counter()
-            batch = trainer.offline_data.batch_from_starts(episode, [index % available for index in range(size)], fm_only=True)
+            batch = trainer.offline_data.batch_from_starts(episode,
+                [index % legal_starts for index in range(size)],
+                fm_only=config.method.fm_training_mode != 'recursive_3step')
             host.append(time.perf_counter() - started)
         def update():
             torch.cuda.synchronize(device)

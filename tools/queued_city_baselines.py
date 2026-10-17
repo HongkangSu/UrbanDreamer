@@ -69,12 +69,68 @@ def effective_gpu_free_mib(gpu, running, allocation_by_pid, headroom_mib=1024, r
     return max(0., gpu['free_mib'] - headroom_mib - reservation_fraction * pending)
 
 
-def choose_gpu(required_mib, gpus, running, allocation_by_pid, headroom_mib=1024, reservation_fraction=1.):
+def choose_gpu(required_mib, gpus, running, allocation_by_pid, headroom_mib=1024, reservation_fraction=1.,
+               external_reservations=None):
     candidates = [(effective_gpu_free_mib(gpu, running, allocation_by_pid, headroom_mib,
-                                         reservation_fraction), gpu['index'])
-                  for gpu in gpus]
+                                         reservation_fraction) - (external_reservations or {}).get(gpu['index'], 0.),
+                   gpu['index']) for gpu in gpus]
     fits = [(free, index) for free, index in candidates if free >= reservation_fraction * required_mib]
     return max(fits)[1] if fits else None
+
+
+def pending_external_reservations(policy, allocations):
+    """Reserve external workers' unallocated budgets; invalid sources fail closed."""
+    pending = {}
+
+    def read(path):
+        if not isinstance(path, str) or not Path(path).is_absolute():
+            raise ValueError('external reservation paths must be absolute')
+        value = json.loads(Path(path).read_text())
+        if not isinstance(value, dict):
+            raise ValueError('external reservation source must be an object')
+        return value
+
+    def reserve(gpu, required, row, pretrain=False):
+        if (isinstance(gpu, bool) or not isinstance(gpu, int) or gpu < 0
+                or isinstance(required, bool) or not isinstance(required, (int, float))
+                or not math.isfinite(required) or required <= 0):
+            raise ValueError('invalid external GPU reservation')
+        pid = row.get('child_pid' if pretrain else 'pid')
+        expected = row.get('child_process_identity' if pretrain else 'process_starttime')
+        identity = process_identity(pid) if pid else None
+        if pretrain and identity is not None:
+            identity = Path('/proc/sys/kernel/random/boot_id').read_text().strip() + ':' + identity
+        observed = allocations.get(pid, 0.) if identity is not None and identity == expected else 0.
+        pending[gpu] = pending.get(gpu, 0.) + max(0., required - observed)
+
+    try:
+        sources = policy.get('external_reservation_sources', [])
+        baselines = policy.get('other_baseline_status_paths', [])
+        if not isinstance(sources, list) or not isinstance(baselines, list):
+            raise ValueError('external reservation sources must be lists')
+        for source in sources:
+            plan, state = read(source['plan']), read(source['status'])
+            runs, rows = plan['runs'], state['runs']
+            if not isinstance(runs, list) or not runs or not isinstance(rows, dict):
+                raise ValueError('invalid external pretrain runs')
+            for run in runs:
+                row = rows[run['city']]
+                if row['status'] in {'completed', 'failed', 'stopped'}:
+                    continue
+                gpu = dict(plan['gpu'], **run.get('gpu', {}))
+                reserve(gpu['index'], gpu['required_mib'], row, pretrain=True)
+        for path in baselines:
+            rows = read(path)['runs']
+            if isinstance(rows, dict):
+                rows = list(rows.values())
+            if not isinstance(rows, list):
+                raise ValueError('invalid external baseline runs')
+            for row in rows:
+                if row['status'] == 'running' and row['required_gpu_mib']:
+                    reserve(row['gpu_index'], row['required_gpu_mib'], row)
+    except (KeyError, TypeError, AttributeError) as error:
+        raise ValueError('malformed external reservation source') from error
+    return pending
 
 
 def effective_host_free_mib(available_mib, running_budgets, headroom_mib, reservation_fraction=1.):
@@ -156,6 +212,8 @@ def apply_admission_overrides(root, manifest, entries, jobs, gpus=None):
     if not path.exists():
         return False
     policy = json.loads(path.read_text())
+    if not isinstance(policy, dict):
+        raise ValueError('invalid admission resource overrides')
     budgets = policy.get('required_gpu_mib', {})
     headroom = policy.get('gpu_headroom_mib', manifest['gpu_headroom_mib'])
     poll = policy.get('poll_seconds', manifest['poll_seconds'])
@@ -515,6 +573,13 @@ def run(root):
             ledger.pop('admission_override_error', None)
         except (OSError, ValueError) as error:
             ledger['admission_override_error'] = str(error)
+        external_reservations = {}
+        try:
+            external_reservations = pending_external_reservations(
+                manifest.get('active_admission_policy', {}), allocations)
+            ledger.pop('external_reservation_error', None)
+        except (OSError, ValueError) as error:
+            ledger['external_reservation_error'] = str(error)
         free_disk = disk_status(root, manifest)['free_disk_gb']
         if free_disk < manifest['min_free_gb']:
             # Pause only this batch's workers; the independent compactor can
@@ -541,8 +606,11 @@ def run(root):
                 state['status']='waiting_host';continue
             gpu_index = None
             if state['required_gpu_mib']:
+                if ledger.get('external_reservation_error') or ledger.get('admission_override_error'):
+                    state['status'] = 'waiting_gpu';continue
                 gpu_index = choose_gpu(state['required_gpu_mib'], gpus, running, allocations,
-                                       manifest['gpu_headroom_mib'],manifest.get('pending_reservation_fraction',1.))
+                                       manifest['gpu_headroom_mib'],manifest.get('pending_reservation_fraction',1.),
+                                       external_reservations=external_reservations)
                 if gpu_index is None:
                     state['status']='waiting_gpu';continue
             elif cpu_count >= manifest['max_cpu_jobs']:

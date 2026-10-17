@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from functools import lru_cache, partial
 
 import torch
 import torch.nn as nn
@@ -429,12 +430,30 @@ def sinusoid_table(size: int, width: int, *, device: torch.device) -> torch.Tens
     return torch.where((channel % 2) == 0, torch.sin(angle), torch.cos(angle))
 
 
-def add_sinusoidal_positions(tokens: torch.Tensor) -> torch.Tensor:
-    batch, time_steps, token_count, width = tokens.shape
-    position_t = sinusoid_table(time_steps, width, device=tokens.device)
-    position_s = sinusoid_table(token_count, width, device=tokens.device)
+def _build_sinusoidal_positions(time_steps: int, token_count: int, width: int,
+                                device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    position_t = sinusoid_table(time_steps, width, device=device)
+    position_s = sinusoid_table(token_count, width, device=device)
     position = (position_t[None, :, None, :] + position_s[None, None, :, :]) * (1.0 / math.sqrt(width))
-    return tokens + position.to(dtype=tokens.dtype)
+    return position.to(dtype=dtype)
+
+
+@lru_cache(maxsize=4)
+def _sinusoidal_positions(time_steps: int, token_count: int, width: int,
+                          device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    # FM repeatedly evaluates identical positions. Keep only four execution
+    # shapes and create ordinary constants even if inference warms the cache.
+    with torch.inference_mode(False), torch.no_grad():
+        return _build_sinusoidal_positions(time_steps, token_count, width, device, dtype)
+
+
+def add_sinusoidal_positions(tokens: torch.Tensor) -> torch.Tensor:
+    _, time_steps, token_count, width = tokens.shape
+    # Tracing and CUDA graph capture must own their constants and allocations.
+    uncached = torch.compiler.is_compiling() or (
+        tokens.is_cuda and torch.cuda.is_current_stream_capturing())
+    positions = _build_sinusoidal_positions if uncached else _sinusoidal_positions
+    return tokens + positions(time_steps, token_count, width, tokens.device, tokens.dtype)
 
 
 class SpaceSelfAttention(nn.Module):
@@ -522,7 +541,8 @@ class BlockCausalTransformer(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         for layer in self.layers:
             if torch.is_grad_enabled() and self.activation_checkpointing:
-                x = checkpoint(layer, x, use_reentrant=False)
+                # These blocks use no dropout or other random operations.
+                x = checkpoint(layer, x, use_reentrant=False, preserve_rng_state=False)
             else:
                 x = layer(x)
         return x
@@ -920,12 +940,43 @@ class Dynamics(nn.Module):
         self, start: torch.Tensor, action: torch.Tensor, condition: ConditionEncoding,
         *, steps: int = 2, solver: str = "euler", picard_iterations: int | None = None,
         picard_batch_chunk_size: int = 64,
+        checkpoint_interval: int = 0,
     ) -> torch.Tensor:
         if steps < 1 or int(steps) != steps:
             raise ValueError("steps must be a positive integer")
         if solver not in {"euler", "midpoint", "picard"}:
             raise ValueError("solver must be 'euler', 'midpoint' or 'picard'")
+        if (isinstance(checkpoint_interval, bool) or not isinstance(checkpoint_interval, int)
+                or checkpoint_interval < 0):
+            raise ValueError("checkpoint_interval must be a nonnegative integer")
         batch, intervals, edges, width = start.shape
+        if (checkpoint_interval and torch.is_grad_enabled() and solver in {"euler", "midpoint"}
+                and steps > checkpoint_interval):
+            # Save only integration-segment boundaries. Every node is recomputed
+            # during backward, preserving the full solver and condition gradients.
+            def integrate(state, action, edge_tokens, reference_tokens, current_state, background,
+                          *, begin, end):
+                segment_condition = ConditionEncoding(edge_tokens, reference_tokens, current_state, background)
+                for node in range(begin, end):
+                    time = torch.full((batch, intervals), node / steps, device=start.device, dtype=start.dtype)
+                    velocity = self(action, packed_latents=state, flow_time=time,
+                                    condition=segment_condition).latent_velocity
+                    if solver == "midpoint":
+                        midpoint = state + velocity / (2 * steps)
+                        midpoint_time = torch.full((batch, intervals), (node + .5) / steps,
+                                                   device=start.device, dtype=start.dtype)
+                        velocity = self(action, packed_latents=midpoint, flow_time=midpoint_time,
+                                        condition=segment_condition).latent_velocity
+                    state = state + velocity / steps
+                return state
+
+            state = start
+            for begin in range(0, steps, checkpoint_interval):
+                segment = partial(integrate, begin=begin, end=min(begin + checkpoint_interval, steps))
+                state = checkpoint(segment, state, action, condition.edge_tokens,
+                    condition.reference_tokens, condition.current_state, condition.background,
+                    use_reentrant=False, preserve_rng_state=False)
+            return state
         if solver in {"euler", "midpoint"}:
             state = start
             for node in range(steps):
@@ -1331,11 +1382,15 @@ def recursive_fm_loss(
     prior_weight: float = 0.1, depth_weights: torch.Tensor | None = None,
     noise: torch.Tensor | None = None, flow_time: torch.Tensor | None = None,
     action_events: SparseActionEvents | None = None,
-) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
+    predict_endpoints: bool = True,
+    checkpoint_interval: int = 0,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor | None]:
     """Recorded-condition recursion; later losses retain gradients through earlier solves.
 
     Reference encodings, prior increment targets and target velocities are detached.
     Predicted stochastic endpoints have no endpoint reconstruction/MSE objective.
+    When endpoints are not consumed, the final solve is unnecessary: every
+    supervised velocity/prior loss and every earlier recursive solve remains.
     """
     if z_sequence.dim() != 4 or tuple(z_sequence.shape[-2:]) != (dynamics.n_edges, FLOW_LATENT_DIM):
         raise ValueError("z_sequence must have shape (B, H+1, E, 64)")
@@ -1348,6 +1403,11 @@ def recursive_fm_loss(
         raise ValueError('action event windows must cover the recursive supervision horizon')
     if not math.isfinite(prior_weight) or prior_weight < 0:
         raise ValueError("prior_weight must be finite and nonnegative")
+    if not isinstance(predict_endpoints, bool):
+        raise ValueError("predict_endpoints must be a boolean")
+    if (isinstance(checkpoint_interval, bool) or not isinstance(checkpoint_interval, int)
+            or checkpoint_interval < 0):
+        raise ValueError("checkpoint_interval must be a nonnegative integer")
     if flow_time is None:
         flow_time = torch.rand(batch, horizon, device=z_sequence.device, dtype=z_sequence.dtype)
     _validate_transition_tensor(flow_time, name="flow_time", expected_shape=(batch, horizon))
@@ -1379,9 +1439,12 @@ def recursive_fm_loss(
         flow_losses.append((velocity.float() - target_velocity.float()).square().mean())
         prior_target = dynamics.graph_prior.project(target - current).detach()
         prior_losses.append((increment.float() - prior_target.float()).square().mean())
-        current = dynamics.solve(start, step_action, condition, steps=steps, solver=solver,
-                                 picard_iterations=picard_iterations)
-        predictions.append(current)
+        if predict_endpoints or index + 1 < horizon:
+            solve_kwargs = ({'checkpoint_interval': checkpoint_interval} if checkpoint_interval else {})
+            current = dynamics.solve(start, step_action, condition, steps=steps, solver=solver,
+                                     picard_iterations=picard_iterations, **solve_kwargs)
+            if predict_endpoints:
+                predictions.append(current)
     flow_mse = (torch.stack(flow_losses) * weights).sum() / weights.sum()
     prior_mse = (torch.stack(prior_losses) * weights).sum() / weights.sum()
     loss = (flow_mse if prior_weight == 0 and not getattr(dynamics.graph_prior, "prior_action_conditioned", True)
@@ -1389,7 +1452,8 @@ def recursive_fm_loss(
     return loss, {"flow_mse": flow_mse.detach(), "weighted_flow_mse": flow_mse.detach(),
                   "prior_mse": prior_mse.detach(), "prior_loss": (prior_weight * prior_mse).detach(),
                   "t_mean": flow_time.mean().detach(),
-                  "supervision_horizon": torch.tensor(horizon, device=z_sequence.device)}, torch.cat(predictions, dim=1)
+                  "supervision_horizon": torch.tensor(horizon, device=z_sequence.device)}, (
+                      torch.cat(predictions, dim=1) if predict_endpoints else None)
 
 
 def cfm_loss(

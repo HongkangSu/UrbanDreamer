@@ -139,7 +139,7 @@ class MethodConfig:
     supervision_horizon: int = 3
     supervision_increment_updates: int = 100
     disagreement_samples: int = 3
-    disagreement_weight: float = 0.0
+    disagreement_weight: float = 0.1
     critic_value_mode: str = 'legacy'
     critic_target_tau: float = .01
     critic_terminal_aux_ratio: float = .25
@@ -159,7 +159,7 @@ class MethodConfig:
     actor_entropy_final_coefficient: float = .0001
     actor_entropy_hold_fraction: float = .1
     actor_entropy_end_fraction: float = .8
-    fm_training_mode: str = 'legacy_independent'
+    fm_training_mode: str = 'recursive_3step'
 
 
 @dataclass(frozen=True)
@@ -656,6 +656,10 @@ def validate_fm_training_profile(method: MethodConfig, resources: ResourceConfig
 
 def _parse_method(raw: Mapping[str, Any]) -> MethodConfig:
     values = {**asdict(MethodConfig()), **raw}
+    # Archived configs may omit these fields. New mainline profiles state both
+    # explicitly; missing settings must not silently change a saved objective.
+    values['fm_training_mode'] = raw.get('fm_training_mode', 'legacy_independent')
+    values['disagreement_weight'] = raw.get('disagreement_weight', 0.0)
     if 'prior_usage' not in raw:
         values['prior_usage'] = 'source_reference'
         if 'prior_filter_strength' not in raw:

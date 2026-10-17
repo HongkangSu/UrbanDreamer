@@ -671,3 +671,10 @@ def test_archived_calibration_rejects_corrupted_codec(tmp_path, monkeypatch, cha
     with pytest.raises((ValueError, RuntimeError), match=expected):
         runner.calibrated_codec_prerequisites(path, cache_path, config,
             binding_path=binding_path, expected_train=1, expected_validation=1)
+
+
+def test_status_creates_only_monitor_parent(tmp_path):
+    monitor = tmp_path / 'new_run' / 'monitor' / 'status.json'
+    runner.status(monitor, {'phase': 'starting'})
+    assert json.loads(monitor.read_text())['phase'] == 'starting'
+    assert not (tmp_path / 'new_run' / 'world_model').exists()

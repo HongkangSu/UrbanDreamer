@@ -547,6 +547,8 @@ def import_calibrated_codec(trainer, checkpoint):
 
 
 def status(path, value):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     value = dict(utc=time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime()), **value)
     temporary = path.with_suffix('.tmp')
     temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + '\n')

@@ -283,3 +283,85 @@ def test_missing_archive_volume_fails_closed(monkeypatch):
     result = queue.disk_status('local', {'archive_storage_root': 'archive'})
     assert result['free_disk_gb'] == 0.
     assert set(result['disk_query_errors']) == {'local', 'archive'}
+
+
+def external_policy(tmp_path, states):
+    plan = dict(gpu=dict(index=0, required_mib=4000), runs=[
+        dict(city='a'), dict(city='b', gpu=dict(index=1, required_mib=6000))])
+    queue.write_json(tmp_path/'plan.json', plan)
+    queue.write_json(tmp_path/'external.json', dict(runs=states))
+    return dict(external_reservation_sources=[dict(
+        plan=str(tmp_path/'plan.json'), status=str(tmp_path/'external.json'))])
+
+
+def test_external_pending_startup_reserves_full_budgets_without_changing_free(tmp_path):
+    policy = external_policy(tmp_path, dict(a=dict(status='waiting'), b=dict(status='running')))
+    pending = queue.pending_external_reservations(policy, {})
+    assert pending == {0: 4000, 1: 6000}
+    gpus = [dict(index=0, free_mib=9000), dict(index=1, free_mib=9000)]
+    assert queue.choose_gpu(4000, gpus, [], {}, external_reservations=pending) is None
+    assert queue.choose_gpu(3000, gpus, [], {}, external_reservations=pending) == 0
+    assert gpus[0]['free_mib'] == gpus[1]['free_mib'] == 9000
+
+
+def test_external_observed_memory_offsets_only_matching_process_identity(tmp_path, monkeypatch):
+    boot = queue.Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    policy = external_policy(tmp_path, dict(
+        a=dict(status='running', child_pid=101, child_process_identity=boot+':123'),
+        b=dict(status='failed')))
+    baseline = tmp_path/'baseline.json'
+    queue.write_json(baseline, dict(runs={
+        'ok': dict(status='running', gpu_index=0, required_gpu_mib=2000, pid=102, process_starttime='123'),
+        'reused': dict(status='running', gpu_index=1, required_gpu_mib=3000, pid=103, process_starttime='old'),
+        'queued': dict(status='queued', gpu_index=1, required_gpu_mib=3000),
+    }))
+    policy['other_baseline_status_paths'] = [str(baseline)]
+    monkeypatch.setattr(queue, 'process_identity', lambda pid: '123')
+    assert queue.pending_external_reservations(policy, {101:3000, 102:1500, 103:2500}) == {0:1500, 1:3000}
+    assert queue.pending_external_reservations({}, {}) == {}
+
+
+@pytest.mark.parametrize('bad_source', ['missing', 'json', 'schema'])
+def test_external_missing_or_malformed_source_raises_instead_of_releasing_memory(tmp_path, bad_source):
+    policy = external_policy(tmp_path, dict(a=dict(status='waiting'), b=dict(status='stopped')))
+    path = tmp_path/'external.json'
+    if bad_source == 'missing':
+        path.unlink()
+    elif bad_source == 'json':
+        path.write_text('{')
+    else:
+        queue.write_json(path, dict(runs={}))
+    with pytest.raises((OSError, ValueError)):
+        queue.pending_external_reservations(policy, {})
+
+
+def test_external_missing_source_blocks_gpu_launch_but_keeps_controller_alive(tmp_path, monkeypatch):
+    source = tmp_path/'source'
+    source.mkdir()
+    entry = dict(id='a', city='a', method='mappo', device='cuda', episode_budget=100,
+                 required_gpu_mib=1000, required_host_mib=1000, state=str(tmp_path/'a.json'),
+                 output_dir=str(tmp_path/'output'))
+    manifest = dict(source_snapshot=str(source), runs=[entry], reward_mode='test',
+                    gpu_headroom_mib=1024, host_headroom_mib=0, min_free_gb=0,
+                    max_cpu_jobs=2, max_oom_retries=2, poll_seconds=1)
+    state = dict(status='queued', pid=None, attempt=0, required_gpu_mib=1000,
+                 observed_peak_mib=0, oom_retries=0, next_eligible=0)
+    queue.write_json(tmp_path/'manifest.json', manifest)
+    queue.write_json(tmp_path/'queue_state.json', dict(jobs={'a':state}))
+    queue.write_json(tmp_path/'source_hashes.json', {})
+    queue.write_json(tmp_path/'admission_overrides.json',
+                     dict(other_baseline_status_paths=[str(tmp_path/'missing.json')]))
+    monkeypatch.setattr(queue, 'query_gpus', lambda: ([dict(index=0, free_mib=20000, total_mib=24000)], {}))
+    monkeypatch.setattr(queue, 'host_available_mib', lambda: 64000)
+    monkeypatch.setattr(queue, 'durable_episode', lambda entry: 0)
+    monkeypatch.setattr(queue.subprocess, 'Popen', lambda *a, **kw: pytest.fail('must not admit GPU job'))
+    class NextPoll(Exception):
+        pass
+    def stop(duration):
+        raise NextPoll
+    monkeypatch.setattr(queue.time, 'sleep', stop)
+    with pytest.raises(NextPoll):
+        queue.run(tmp_path)
+    ledger = json.loads((tmp_path/'queue_state.json').read_text())
+    assert ledger['jobs']['a']['status'] == 'waiting_gpu'
+    assert 'missing.json' in ledger['external_reservation_error']

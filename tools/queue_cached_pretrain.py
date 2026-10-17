@@ -69,6 +69,12 @@ def validate_plan(plan):
     if len(cities) != len(set(cities)) or any('/' in city or city in {'.', '..'} for city in cities):
         raise ValueError('cities must be unique safe names')
     for run in plan['runs']:
+        adoption_keys = ('adopted_result_path', 'adopted_plan_identity')
+        if any(key in run for key in adoption_keys):
+            if not all(isinstance(run.get(key), str) and run[key] for key in adoption_keys):
+                raise ValueError('adopted result path and plan identity must be provided together')
+            if not Path(run['adopted_result_path']).is_absolute():
+                raise ValueError('adopted_result_path must be absolute')
         if not isinstance(run['command'], list) or not run['command'] or not all(isinstance(x, str) for x in run['command']):
             raise ValueError('command must be nonempty argv list')
         for key in ('cwd', 'cache_manifest', 'cache_verification', 'completion_status_path'):
@@ -250,10 +256,12 @@ def run_queue(plan_path, output):
                 # work. A missing cache in one city never blocks another ready city.
                 for run in plan['runs']:
                     city = run['city']
-                    result_path = output / f'{city}.result.json'
+                    adopted = 'adopted_result_path' in run
+                    result_path = Path(run['adopted_result_path']) if adopted else output / f'{city}.result.json'
+                    expected_identity = run['adopted_plan_identity'] if adopted else plan_id
                     if result_path.exists():
                         record = read(result_path)
-                        if record.get('plan_identity') != plan_id:
+                        if record.get('plan_identity') != expected_identity:
                             raise ValueError('child result bound to another plan')
                         runs[city] = record
                         if record['status'] == 'completed':
@@ -266,6 +274,9 @@ def run_queue(plan_path, output):
                                 runs[city].update(status='running', error='runner disappeared; child still alive; retaining reservation')
                             else:
                                 runs[city].update(status='failed', error='runner disappeared; refusing duplicate launch')
+                    elif adopted:
+                        runs[city] = dict(status='waiting', launch_pending=True,
+                                         reason='adopted_receipt_missing; no duplicate launch')
                     elif (output / f'{city}.launch.json').exists():
                         runs[city] = dict(status='waiting', launch_pending=True,
                                          reason='launch_receipt_pending_or_unknown; no duplicate launch')
@@ -277,6 +288,8 @@ def run_queue(plan_path, output):
                     return int(failed)
                 for run in plan['runs']:
                     city = run['city']
+                    if 'adopted_result_path' in run:
+                        continue  # Adopted runners are monitored only, never launched here.
                     if runs[city]['status'] in TERMINAL or runs[city]['status'] == 'running' or runs[city].get('launch_pending'):
                         continue
                     if not plan.get('allow_gpu_sharing', False) and any(
