@@ -119,7 +119,7 @@ def test_ippo_same_window_events_prorate_future_rewards_from_actual_decision_tim
     # At t=25 the vehicle receives the final five seconds plus all subsequent
     # team windows, never the 25 seconds of costs before its own decision.
     tail = -65. if later_team_window else -5.
-    torch.testing.assert_close(targets, torch.tensor([-10. + .95 * tail, tail]))
+    torch.testing.assert_close(targets, torch.tensor([-10. + .95 ** (10. / 30.) * tail, tail]))
 
 
 @pytest.mark.parametrize('cls', [MappoMethod, IppoMethod])
@@ -228,7 +228,7 @@ def test_constant_advantage_has_no_policy_update_when_entropy_disabled(cls, exis
     torch.testing.assert_close(model.actor_optimizer.state_dict(), optimizer_before, rtol=0, atol=0)
 
 
-def test_full_distribution_kl_stops_remaining_epochs(monkeypatch):
+def test_full_distribution_kl_rejects_unsafe_epochs(monkeypatch):
     model = method(MappoMethod)
     rows, windows = data(model)
     step = model.actor_optimizer.step
@@ -241,9 +241,10 @@ def test_full_distribution_kl_stops_remaining_epochs(monkeypatch):
 
     monkeypatch.setattr(model.actor_optimizer, 'step', large_step)
     metrics = model.on_episode(rows, windows, episode=1)
-    assert metrics['policy_kl'] > model.target_kl
-    assert metrics['actor_epochs_completed'] == 1
-    assert metrics['actor_optimizer_steps'] == 1
+    assert metrics['policy_kl'] <= model.target_kl
+    assert metrics['actor_epochs_completed'] == 0
+    assert metrics['actor_optimizer_steps'] == 0
+    assert metrics['actor_attempted_steps'] == model.max_backtracks + 1
     assert metrics['kl_early_stopped']
     assert math.isfinite(metrics['policy_kl'])  # masked candidates include -inf logits
 

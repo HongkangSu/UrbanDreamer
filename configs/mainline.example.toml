@@ -17,6 +17,8 @@ online_training_episodes = 1
 evaluation_episodes = 1
 
 [simulation]
+# K=4 current-to-destination route actions at global 30-second boundaries.
+routing_mode = "current_to_dest"
 # Shared mainline/baseline mesoscopic execution profile.
 traffic_model = "meso"
 meso_junction_control = true
@@ -67,9 +69,10 @@ online_world_model_batch_size = 4
 [method]
 # State-only background prior; FM retains action conditioning.
 prior_filter = "soft"
-prior_filter_strength = 10.0
+prior_filter_strength = 0.1
 prior_action_conditioned = false
 prior_filter_input = false
+prior_usage = "condition_only"
 fm_training_mode = "single_step"
 actor_entropy_mode = "annealed"
 actor_entropy_initial_coefficient = 0.002

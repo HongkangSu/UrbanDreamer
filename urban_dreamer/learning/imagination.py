@@ -28,6 +28,7 @@ class ImaginedWindow:
     cost_segments: tuple[ActiveCostSegment, ...]
     end_time: float
     action_events: tuple[ActionEvent, ...] = ()
+    policy_events: tuple[ActionEvent, ...] | None = None
 
 
 def _prepare_no_revisit_history(states: Sequence[dict[str, Any]], candidates: Any) -> None:
@@ -94,6 +95,9 @@ def advance_imagined_window(
     junction connection. Only arrival on that successor creates a new decision.
     ``session_protocol='event'`` instead exposes one-second observations and
     calls the policy only for observed multi-candidate external entries.
+    Current-to-destination candidates call the policy at 30-second boundaries,
+    retain its complete route, and expose observed turns separately from policy
+    samples so the existing world-model action interface remains unchanged.
     Meso motion uses external-road distances and skips internal junction links.
     Decoded road speeds still move vehicles independently: this approximation
     does not reproduce SUMO mesoscopic queue or junction-control dynamics.
@@ -106,6 +110,8 @@ def advance_imagined_window(
         raise ValueError('passage constraints require meso event imagination')
     if session_protocol not in ('legacy', 'event'):
         raise ValueError('session_protocol must be legacy or event')
+    if getattr(candidates, 'routing_mode', 'next_hop') == 'current_to_dest' and session_protocol != 'event':
+        raise ValueError('current_to_dest imagination requires the event session protocol')
     if traffic_model == 'meso':
         if session_protocol != 'event':
             raise ValueError('meso imagination requires the event session protocol')
@@ -308,7 +314,8 @@ def _advance_event_window(
     Pending actions identify the last *observed* external entry. In particular,
     crossing a fork between observations never creates an action. Exposure and
     arrivals follow the session's observation clock, even when an edge finishes
-    in the middle of a step.
+    in the middle of a step. Route-mode policy samples occur only at macro
+    boundaries; physical turns continue to use the existing observation clock.
     """
     from .action_events import ActionEvent
 
@@ -336,6 +343,7 @@ def _advance_event_window(
     if passage_constraint is not None:
         passage_constraint.prepare(states)
     tolerance = 1e-9
+    route_mode = getattr(candidates, 'routing_mode', 'next_hop') == 'current_to_dest'
 
     def active(state: dict[str, Any]) -> bool:
         return bool(state.get('departed', False)) and not bool(state.get('arrived', False))
@@ -347,8 +355,35 @@ def _advance_event_window(
     route_cache = getattr(candidates, '_event_route_cache', {})
     route_cache_limit = getattr(candidates, '_event_route_cache_limit', None)
 
+    def validate_route(state: dict[str, Any], route: Sequence[int]) -> tuple[int, ...]:
+        route = tuple(int(edge) for edge in route)
+        if (not route or route[0] != int(state['current_edge'])
+                or route[-1] != int(state['destination_edge'])):
+            raise ValueError('committed route endpoints disagree with its vehicle seed')
+        if any(not 0 <= edge < network.edge_count or not network.passenger_allowed[edge] for edge in route):
+            raise ValueError('committed route contains an invalid external road')
+        if any(target not in network.adjacency_list[source] for source, target in zip(route, route[1:])):
+            raise ValueError('committed route contains an illegal edge connection')
+        return route
+
     def route_successor(state: dict[str, Any], *, initial: bool = False) -> int | None:
         edge, destination = int(state['current_edge']), int(state['destination_edge'])
+        if route_mode:
+            route = state.get('committed_route')
+            if route is None:
+                successor = state.get('committed_next_edge')
+                # Old replay/checkpoint seeds contain only their first hop.
+                route = (candidates.full_route(edge, int(successor), destination)
+                         if successor is not None and not initial else candidates.generate_paths(edge, destination)[0])
+                route = validate_route(state, route)
+            elif route[0] != edge:
+                if len(route) < 2 or route[1] != edge:
+                    raise ValueError('committed route disagrees with physical entry')
+                route = route[1:]
+            # Complete routes were validated at seeding/selection. Physical
+            # entry only consumes that commitment; it never rebuilds a suffix.
+            state['committed_route'] = route
+            return int(route[1]) if len(route) > 1 else None
         if edge == destination:
             return None
         if getattr(candidates, 'forbid_revisit', False):
@@ -387,6 +422,8 @@ def _advance_event_window(
             state.update(junction_remaining_distance=0., junction_speed=0.,
                          junction_connection=None)
         if not active(state):
+            if route_mode and state.get('committed_route') is not None:
+                state['committed_route'] = validate_route(state, state['committed_route'])
             continue
         if state.get('in_junction', False):
             speed = float(state['junction_speed'])
@@ -396,6 +433,16 @@ def _advance_event_window(
             state['pending_decision'] = False
         elif not needs_decision(state):
             state['pending_decision'] = False
+        if route_mode:
+            if state.get('committed_route') is not None:
+                state['committed_route'] = validate_route(state, state['committed_route'])
+                expected = (state['committed_route'][1] if len(state['committed_route']) > 1 else None)
+                if state.get('committed_next_edge') is not None and state['committed_next_edge'] != expected:
+                    raise ValueError('committed route disagrees with its seed next hop')
+                state['committed_next_edge'] = expected
+            elif int(state['current_edge']) == int(state['destination_edge']):
+                state['committed_route'] = (int(state['current_edge']),)
+            state['pending_turn'] = bool(state.get('pending_turn', state.get('pending_decision', False)))
         if int(state['current_edge']) != int(state['destination_edge']):
             successor = state.get('committed_next_edge')
             if successor is None:
@@ -404,6 +451,9 @@ def _advance_event_window(
                 state['committed_next_edge'] = route_successor(state)
             elif int(successor) not in _legal_candidates(state, candidates):
                 raise ValueError('event seed has an illegal committed next hop')
+            if route_mode:
+                state['committed_next_edge'] = route_successor(state)
+                state['pending_decision'] = False
             if getattr(candidates, 'forbid_revisit', False):
                 state['no_revisit_route'] = candidates.full_route(
                     int(state['current_edge']), int(state['committed_next_edge']),
@@ -413,6 +463,7 @@ def _advance_event_window(
     departure = np.zeros_like(action)
     decisions: list[Any] = []
     action_events: list[ActionEvent] = []
+    policy_events: list[ActionEvent] = []
     arrivals: dict[str, float] = {}
     cost_segments: list[ActiveCostSegment] = []
     time = float(start_time)
@@ -501,7 +552,10 @@ def _advance_event_window(
         refresh_motion(index, states[index])
 
     crossing_time = float(start_time)
-    pending = [state for state in states if active(state) and state.get('pending_decision', False)]
+    pending = [state for state in states if active(state) and (
+        (int(start_time) % 30 == 0 and not state.get('in_junction', False)
+         and int(state['current_edge']) != int(state['destination_edge']))
+        if route_mode else state.get('pending_decision', False))]
     while time < end - tolerance:
         if stop_when_empty and states and finished.all():
             break
@@ -517,18 +571,36 @@ def _advance_event_window(
                     raise ValueError('policy selected a next hop outside the legal candidate set')
                 if abs(float(item.decision_time) - time) > tolerance:
                     raise ValueError('decision timestamp must match its observation')
+                if route_mode:
+                    candidates.decision_route(item, int(state['destination_edge']))
             for state in pending:
                 item = by_id[str(state['vehicle_id'])]
                 state['committed_next_edge'] = int(item.next_edge)
+                if route_mode:
+                    state['committed_route'] = candidates.decision_route(item, int(state['destination_edge']))
+                    policy_events.append(ActionEvent(str(item.vehicle_id), event_index_start + len(policy_events),
+                        time, int(item.current_edge), int(item.next_edge), int(state['destination_edge'])))
+                    state['pending_turn'] = needs_decision(state)
                 if getattr(candidates, 'forbid_revisit', False):
                     state['no_revisit_route'] = candidates.full_route(
                         int(state['current_edge']), int(item.next_edge),
                         int(state['destination_edge']), state['visited_edges'])
                 state['pending_decision'] = False
-                action[int(item.next_edge)] += 1.
                 decisions.append(item)
-                action_events.append(ActionEvent(str(item.vehicle_id), event_index_start + len(action_events),
-                    time, int(item.current_edge), int(item.next_edge), int(state['destination_edge'])))
+                if not route_mode:
+                    action[int(item.next_edge)] += 1.
+                    action_events.append(ActionEvent(str(item.vehicle_id), event_index_start + len(action_events),
+                        time, int(item.current_edge), int(item.next_edge), int(state['destination_edge'])))
+
+        if route_mode:
+            for state in states:
+                if active(state) and state.get('pending_turn', False) and not state.get('in_junction', False):
+                    successor = state.get('committed_next_edge')
+                    if needs_decision(state) and successor is not None:
+                        action[int(successor)] += 1.
+                        action_events.append(ActionEvent(str(state['vehicle_id']), event_index_start + len(action_events),
+                            time, int(state['current_edge']), int(successor), int(state['destination_edge'])))
+                    state['pending_turn'] = False
 
         pending = []
         if passage_constraint is not None:
@@ -573,15 +645,23 @@ def _advance_event_window(
                 state.update(arrived=True, arrival_time=observed_time, pending_decision=False,
                     committed_next_edge=None, in_junction=False, remaining_distance=0.,
                     junction_remaining_distance=0., junction_connection=None)
+                if route_mode:
+                    state['pending_turn'] = False
                 arrivals[str(state['vehicle_id'])] = observed_time
                 moving[index] = False
                 finished[index] = True
             elif state.get('in_junction', False):
                 state['pending_decision'] = False
+                if route_mode:
+                    state['pending_turn'] = False
             elif (previous_edge != int(state['current_edge']) or previous_junction or not was_departed):
-                state['pending_decision'] = needs_decision(state)
-                if state['pending_decision']:
-                    pending.append(state)
+                if route_mode:
+                    state['pending_decision'] = False
+                    state['pending_turn'] = needs_decision(state)
+                else:
+                    state['pending_decision'] = needs_decision(state)
+                    if state['pending_decision']:
+                        pending.append(state)
             if moving[index]:
                 refresh_motion(index, state)
 
@@ -598,4 +678,5 @@ def _advance_event_window(
         time = observed_time
     active_seconds = sum((segment.end_time - segment.start_time) * segment.active_count for segment in cost_segments)
     return ImaginedWindow(action / total_vehicle_count, departure / total_vehicle_count,
-        tuple(decisions), arrivals, float(active_seconds), tuple(cost_segments), time, tuple(action_events))
+        tuple(decisions), arrivals, float(active_seconds), tuple(cost_segments), time, tuple(action_events),
+        tuple(policy_events) if route_mode else None)

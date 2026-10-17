@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import copy
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import asdict, replace
 import hashlib
 import json
 import math
@@ -81,6 +81,37 @@ def validate_pretrained_source(checkpoint, config):
     if (metrics.get('online_episodes_completed', 0) != 0 or state['next_environment_episode'] != 0
             or state['replay']['online']['episodes']):
         raise ValueError('baseline source must not contain prior online training or collection')
+
+
+def validate_routing_only_change(source, target):
+    """Admit a fresh route policy while keeping pretrained physical/model contracts."""
+    if (source.simulation.routing_mode, target.simulation.routing_mode) != ('next_hop', 'current_to_dest'):
+        raise ValueError('routing initialization requires next_hop to current_to_dest')
+    before, after = asdict(source), asdict(target)
+    for values in (before, after):
+        values.pop('semantic_fingerprint')
+        values.pop('source_path')
+        values['run'].pop('output_dir')
+        values['run'].pop('device')
+        values['simulation'].pop('routing_mode')
+    if before != after:
+        raise ValueError('routing initialization may change only simulation.routing_mode and output/device')
+
+
+def routing_world_model_proof(trainer, checkpoint):
+    """Verify every pretrained world-model tensor, including codec and readouts."""
+    source = checkpoint.training_state['models']['world_model']
+    loaded = trainer.world_model.state_dict()
+    if source.keys() != loaded.keys():
+        raise ValueError('routing initialization changed the world-model state schema')
+    for name, value in source.items():
+        restored = loaded[name].detach().cpu()
+        if (value.dtype != restored.dtype or value.shape != restored.shape
+                or not torch.equal(value.detach().cpu(), restored)):
+            raise ValueError(f'routing initialization changed world-model tensor: {name}')
+    from tools.migrate_pretrained_meso import model_hashes
+    return dict(world_model_sha256=model_hashes({'world_model': source})['world_model'],
+                world_model_tensors_unchanged=True)
 
 
 @contextmanager
@@ -481,6 +512,8 @@ def main(argv=None):
     parser.add_argument('--output-dir', type=Path, default=ROOT / 'outputs/ingolstadt_online_pilot_20261003')
     parser.add_argument('--device', choices=('cpu', 'cuda:0', 'cuda:1'), default='cuda:1')
     parser.add_argument('--run-config', type=Path, help='explicit migrated runtime configuration; source pretrain provenance stays separate')
+    parser.add_argument('--routing-mode', choices=('next_hop', 'current_to_dest'),
+        help='reuse completed pretraining with a routing-only policy change')
     parser.add_argument('--threads', type=int, default=4)
     parser.add_argument('--gpu-memory-fraction', type=float, default=.06)
     parser.add_argument('--baseline-only', action='store_true')
@@ -520,6 +553,18 @@ def main(argv=None):
         runtime_config = replace(runtime_config, method=replace(runtime_config.method, disagreement_weight=0.))
         runtime_config = replace(runtime_config, semantic_fingerprint=_semantic_fingerprint(**{
             key: getattr(runtime_config, key) for key in ('inputs', 'run', 'simulation', 'resources', 'method', 'data', 'codec')}))
+    routing_source = source_config
+    if legacy_source:
+        # The existing reward migration independently removes disagreement cost.
+        routing_source = replace(source_config, method=replace(source_config.method, disagreement_weight=0.))
+    if args.routing_mode is not None:
+        runtime_config = replace(runtime_config,
+            simulation=replace(runtime_config.simulation, routing_mode=args.routing_mode))
+        runtime_config = replace(runtime_config, semantic_fingerprint=_semantic_fingerprint(**{
+            key: getattr(runtime_config, key) for key in ('inputs', 'run', 'simulation', 'resources', 'method', 'data', 'codec')}))
+    routing_transfer = source_config.simulation.routing_mode != runtime_config.simulation.routing_mode
+    if routing_transfer:
+        validate_routing_only_change(routing_source, runtime_config)
     config = replace(runtime_config, run=replace(runtime_config.run, output_dir=args.output_dir.resolve(), device=args.device))
     entropy_path = args.output_dir / 'entropy_migration.json'
     entropy_migration = json.loads(entropy_path.read_text()) if args.run_config and entropy_path.is_file() else None
@@ -538,10 +583,13 @@ def main(argv=None):
     decoder_migration = json.loads(decoder_path.read_text()) if args.run_config and decoder_path.is_file() else None
     profile_path = args.output_dir / 'latest_profile_change.json'
     profile_migration = json.loads(profile_path.read_text()) if args.run_config and profile_path.is_file() else None
+    if routing_transfer and any(value is not None for value in (meso_initialization, prior_migration,
+            calibrated_initialization, entropy_migration, budget_migration, decoder_migration, profile_migration)):
+        raise ValueError('routing-only initialization requires a fresh output without other migrations')
     if args.run_config:
         if (meso_initialization is None and prior_migration is None and calibrated_initialization is None
                 and entropy_migration is None and budget_migration is None and decoder_migration is None
-                and profile_migration is None):
+                and profile_migration is None and not routing_transfer):
             from tools.migrate_online_backend import validate_backend_only_change
             validate_backend_only_change(source_config, config)
             if not (args.output_dir / 'backend_migration.json').is_file():
@@ -560,7 +608,16 @@ def main(argv=None):
         evaluation_demand_seed=config.method.evaluation_demand_seed,
         session_protocol=config.simulation.session_protocol, observation_seconds=config.simulation.observation_step_seconds,
         backend=config.simulation.backend, device=args.device, threads=args.threads, gpu_memory_fraction=args.gpu_memory_fraction,
-        config_semantics_unchanged=not bool(args.run_config), output_isolated=True)
+        config_semantics_unchanged=not bool(args.run_config) and not routing_transfer, output_isolated=True)
+    if routing_transfer:
+        protocol.update(runtime_config_fingerprint=config.semantic_fingerprint,
+            routing_initialization=dict(kind='pretrained_next_hop_to_current_to_dest',
+                source_routing_mode=source_config.simulation.routing_mode,
+                target_routing_mode=config.simulation.routing_mode,
+                source_checkpoint_sha256=source_hash,
+                source_config_fingerprint=source_config.semantic_fingerprint,
+                target_config_fingerprint=config.semantic_fingerprint,
+                physics_unchanged=True, world_model_interfaces_unchanged=True))
     protocol['reward_contract'] = training.REWARD_CONTRACT
     protocol['global_reward'] = dict(formula='-(m(end)-m(start))/60',
         trip_start='actual_departure', normalization='cumulative_actual_started_count',
@@ -655,7 +712,7 @@ def main(argv=None):
             raise ValueError('meso runner episode budget must match the target run configuration')
         protocol.update(runtime_config_fingerprint=config.semantic_fingerprint,
                         meso_initialization=meso_initialization)
-    elif args.run_config:
+    elif args.run_config and not routing_transfer:
         migration = json.loads((args.output_dir / 'backend_migration.json').read_text())
         if (migration['target_config_fingerprint'] != config.semantic_fingerprint
                 or migration['source_config_fingerprint'] != source_config.semantic_fingerprint
@@ -709,6 +766,8 @@ def main(argv=None):
             trainer.load_state_dict(initial_state)
         else:
             trainer.load_state_dict(source_checkpoint.training_state)
+    if routing_transfer:
+        protocol['routing_initialization'].update(routing_world_model_proof(trainer, source_checkpoint))
     trainer.validate_codec_ready()
     runner = OnlinePilot(trainer, output=args.output_dir, input_hash=input_hash, protocol=protocol,
         online_episodes=args.online_episodes, evaluation_every=args.evaluation_every, extend_run=args.extend_run)

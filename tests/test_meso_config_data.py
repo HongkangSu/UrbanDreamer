@@ -20,7 +20,7 @@ from urban_dreamer.workflow.config import ConfigError, load_config
 
 
 def configured(tmp_path, setting=''):
-    path = _write_config(tmp_path / 'config.toml')
+    path = _write_config(tmp_path / 'config.toml', routing_mode='next_hop')
     path.write_text(path.read_text().replace('[simulation]', '[simulation]\n' + setting))
     return load_config(path)
 
@@ -67,7 +67,8 @@ def test_legacy_micro_fingerprint_is_byte_compatible(tmp_path):
     config = configured(tmp_path)
     assert config.simulation.traffic_model == 'micro'
     assert config.simulation.meso_edge_length_m == 98.
-    assert config.semantic_fingerprint == '9e053d62fddcc75db9166ae360297f6748bb6db6527c60fa31f8c2dd91956fd3'
+    # Current execution defaults already moved to FP16 in d255ac3.
+    assert config.semantic_fingerprint == '1eace275bc3805321e9c71b53a5e20beb0fd2cc99f5057168858590329ec94a5'
 
 
 def test_meso_fingerprint_binds_model_length_and_state_semantics(tmp_path):

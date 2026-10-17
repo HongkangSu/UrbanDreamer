@@ -37,7 +37,7 @@ def make_trainer(tmp_path, *, archive_roots=(), traffic_model=None):
         online_training_episodes=1, evaluation_episodes=1),
         simulation=replace(config.simulation, world_model_intervals_per_episode=6,
             training_completion_buffer_seconds=0, evaluation_horizon_seconds=180,
-            demand_duration_seconds=30,
+            demand_duration_seconds=30, routing_mode='next_hop',
             traffic_model=traffic_model or config.simulation.traffic_model),
         resources=replace(config.resources, world_model_initialization_batch_size=1,
             world_model_initialization_sequence_length=1, online_world_model_batch_size=1,

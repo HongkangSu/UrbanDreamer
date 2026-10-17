@@ -122,3 +122,39 @@ def test_gnac_actor_step_receives_scheduled_coefficient(tmp_path, monkeypatch):
         lambda **kwargs: coefficients.append(kwargs['entropy_coef']) or {'actor_loss': 0.})
     method.on_episode([{'window': 0}], [{}], episode=4001)
     assert coefficients == [.0001]
+
+
+def test_gnac_cli_extends_old_checkpoint_without_restarting_entropy(tmp_path):
+    import json
+    from micro_config_fixture import write_micro_config
+    from test_toy_baselines import sumo_available
+    if not sumo_available():
+        pytest.skip('SUMO unavailable')
+    config = write_micro_config(tmp_path)
+    text = config.read_text()
+    import re
+    text = re.sub(r'^actor_entropy_mode\s*=.*$', 'actor_entropy_mode = "annealed"', text, flags=re.MULTILINE)
+    if 'actor_entropy_mode' not in text:
+        text = text.replace('[method]', '[method]\nactor_entropy_mode = "annealed"')
+    config.write_text(text)
+    output = tmp_path / 'extended'
+    command = ['--method', 'gnac', '--config', str(config), '--output-dir', str(output),
+               '--eval-every', '1', '--eval-seeds', '1', '--vehicle-limit', '8',
+               '--skip-reference-baselines', '--skip-initial-evaluation']
+    tool = module()
+    assert tool.main(command + ['--episodes', '1']) == 0
+    first = torch.load(output / 'latest.pt', weights_only=False)
+    assert first['args'].get('entropy_schedule_episodes') is None
+    with pytest.raises(ValueError, match='entropy schedule'):
+        tool.main(command + ['--episodes', '2', '--resume'])
+    assert tool.main(command + ['--episodes', '2', '--entropy-schedule-episodes', '1', '--resume']) == 0
+    final = torch.load(output / 'latest.pt', weights_only=False)
+    assert final['episode'] == 2
+    assert final['args']['episodes'] == 2
+    assert final['args']['entropy_schedule_episodes'] == 1
+    assert final['config_fingerprint'] == first['config_fingerprint']
+    training = [json.loads(line) for line in (output / 'metrics.jsonl').read_text().splitlines()
+                if json.loads(line).get('phase') == 'train']
+    assert [row['episode'] for row in training] == [1, 2]
+    assert training[-1]['entropy_coefficient'] == .0001
+    assert training[-1]['entropy_total_episodes'] == 1

@@ -24,6 +24,8 @@ from .replay import SequenceBatch
 
 
 CACHE_SCHEMA_VERSION = 1
+# Reuse content validation across datasets/splits only while the file identity is unchanged.
+_VERIFIED_COMPACT_FILES: dict[tuple, list[int]] = {}
 TRANSITION_TARGET_SCOPE = 'previous_state_excluding_current_births'
 
 
@@ -284,7 +286,10 @@ class CompactPretrainDataset(OfflineEpisodeDataset):
     member identities avoid rereading their large JSON on every epoch; changed
     source stamps require full decompressed SHA256, permitting recompression.
     Set ``verify_sources='always'`` for unconditional source rehashing.
-    Compact cache bodies are always SHA256 checked when loaded.
+    Legacy compact cache bodies are SHA256 checked when loaded. Explicit
+    ``compact_only_v1`` manifests retain raw provenance but validate canonical
+    compact files instead: every cache is hashed on first verification, with
+    process-local reuse only for an unchanged file stamp and expected hashes.
     """
     def __init__(self, config, prepared_inputs, topology, sequence_length: int, *,
                  cache_manifest_path: Path, split: str = 'train', verify_sources: str = 'changed'):
@@ -304,6 +309,25 @@ class CompactPretrainDataset(OfflineEpisodeDataset):
             raise ValueError('compact cache is incomplete or has unsupported schema')
         if source.get('identity') != _identity({k: v for k, v in source.items() if k != 'identity'}):
             raise ValueError('invalid compact cache manifest identity')
+        self.source_storage = source.get('source_storage', 'raw_required')
+        if self.source_storage not in {'raw_required', 'compact_only_v1'}:
+            raise ValueError('unsupported compact source_storage')
+        self._canonical_entries = {}
+        if self.source_storage == 'compact_only_v1':
+            for entry in source['entries']:
+                trajectory = entry.get('trajectory_hash')
+                if trajectory in self._canonical_entries:
+                    raise ValueError('duplicate canonical compact trajectory')
+                self._canonical_entries[trajectory] = entry
+            sources_by_path = {row['path']: row for row in source['sources']}
+            if len(sources_by_path) != len(source['sources']):
+                raise ValueError('duplicate compact source provenance path')
+            for entry in source['entries']:
+                row = sources_by_path.get(entry['path'])
+                if row is None or any(row.get(key) != entry.get(key) for key in (
+                        'content_hash', 'trajectory_hash', 'source_member_signature', 'source_stamp',
+                        'cache_path', 'cache_content_hash', 'cache_member_signature')):
+                    raise ValueError('canonical compact entry missing matching source provenance')
         contract = source['contract']
         if contract['input_hashes'] != prepared_inputs.input_hashes or contract['city'] != config.inputs.network_name:
             raise ValueError('compact cache prepared inputs/city mismatch')
@@ -324,7 +348,49 @@ class CompactPretrainDataset(OfflineEpisodeDataset):
         self._all_sources = source['sources']
         self.verify_integrity()
 
+    def _verify_compact_binding(self, source):
+        canonical = self._canonical_entries.get(source.get('trajectory_hash'))
+        if canonical is None:
+            raise ValueError('compact source has no canonical trajectory')
+        for key in ('content_hash', 'trajectory_hash', 'source_member_signature',
+                    'cache_content_hash', 'cache_member_signature'):
+            value = source.get(key)
+            if not isinstance(value, str) or len(value) != 64 or any(c not in '0123456789abcdef' for c in value):
+                raise ValueError(f'invalid compact source provenance: {key}')
+        if not isinstance(source.get('path'), str) or not source['path']:
+            raise ValueError('invalid compact source provenance path')
+        stamp = source.get('source_stamp')
+        if not isinstance(stamp, list) or len(stamp) != 4 or any(type(v) is not int or v < 0 for v in stamp):
+            raise ValueError('invalid compact source provenance stamp')
+        if any(source.get(key) != canonical.get(key) for key in (
+                'cache_path', 'cache_content_hash', 'cache_member_signature')):
+            raise ValueError('compact source/canonical cache binding mismatch')
+        cache_path = source.get('cache_path')
+        if not isinstance(cache_path, str) or not cache_path:
+            raise ValueError('invalid compact canonical cache path')
+        return Path(cache_path)
+
+    def _verify_compact_file(self, source):
+        path = self._verify_compact_binding(source)
+        stamp = file_stamp(path)
+        key = (str(path.resolve()), source['cache_content_hash'], source['cache_member_signature'])
+        if self.verify_sources != 'always' and _VERIFIED_COMPACT_FILES.get(key) == stamp:
+            return
+        with zipfile.ZipFile(path) as archive:
+            members = archive.infolist()
+            names = [member.filename for member in members]
+            if len(names) != len(set(names)) or member_signature(members) != source['cache_member_signature']:
+                raise ValueError(f'compact episode member signature changed: {path}')
+        if archive_content_hash(path) != source['cache_content_hash']:
+            raise ValueError(f'compact episode content changed: {path}')
+        if file_stamp(path) != stamp:
+            raise ValueError(f'compact episode changed during verification: {path}')
+        _VERIFIED_COMPACT_FILES[key] = stamp
+
     def _verify_source(self, source):
+        if self.source_storage == 'compact_only_v1':
+            self._verify_compact_file(source)
+            return
         path = Path(source['path'])
         stamp = file_stamp(path)
         known = self._source_stamps.get(str(path), source['source_stamp'])
@@ -348,9 +414,12 @@ class CompactPretrainDataset(OfflineEpisodeDataset):
         self._verify_source(entry)
         path = Path(entry['cache_path'])
         stamp = file_stamp(path)
-        if index not in self._cache or self._cache[index]['_cache_stamp'] != stamp:
+        changed = index in self._cache and self._cache[index]['_cache_stamp'] != stamp
+        if self.source_storage != 'compact_only_v1' and (index not in self._cache or changed):
             if archive_content_hash(path) != entry['cache_content_hash']:
                 raise ValueError(f'compact episode content changed: {path}')
+        if changed:
+            del self._cache[index]
         if index not in self._cache or (not flow_only and 'metadata' not in self._cache[index]):
             while len(self._cache) >= self.cache_limit:
                 self._cache.popitem(last=False)

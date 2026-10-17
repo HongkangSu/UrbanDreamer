@@ -1,0 +1,1260 @@
+{
+  "arms": {
+    "0.0": {
+      "metrics": {
+        "count_coverage90_occupied": {
+          "ci_high": 0.43374014961432134,
+          "ci_low": 0.387286226693352,
+          "demand_groups": 16,
+          "estimate": 0.40714107599463356
+        },
+        "count_crps_u_occupied": {
+          "ci_high": 0.5157607169685436,
+          "ci_low": 0.4492986973949424,
+          "demand_groups": 16,
+          "estimate": 0.4809987369615372
+        },
+        "count_mae_occupied": {
+          "ci_high": 0.6321115660810993,
+          "ci_low": 0.5465392631041641,
+          "demand_groups": 16,
+          "estimate": 0.5872920032119961
+        },
+        "count_width90_occupied": {
+          "ci_high": 0.6903728759892923,
+          "ci_low": 0.548171660310587,
+          "demand_groups": 16,
+          "estimate": 0.6146098288584032
+        },
+        "energy_score": {
+          "ci_high": 9.846159244374872,
+          "ci_low": 7.652623503570839,
+          "demand_groups": 16,
+          "estimate": 8.655326684231493
+        },
+        "energy_score_u": {
+          "ci_high": 9.434060019582196,
+          "ci_low": 7.358597613819426,
+          "demand_groups": 16,
+          "estimate": 8.30370315299232
+        },
+        "speed_coverage90_occupied": {
+          "ci_high": 0.38634020825094445,
+          "ci_low": 0.35261136326982057,
+          "demand_groups": 16,
+          "estimate": 0.36894463530571076
+        },
+        "speed_crps_u_occupied": {
+          "ci_high": 0.9468358971632507,
+          "ci_low": 0.6579291926458858,
+          "demand_groups": 16,
+          "estimate": 0.7967839263451959
+        },
+        "speed_mae_occupied": {
+          "ci_high": 1.0435629495035452,
+          "ci_low": 0.7440302498689328,
+          "demand_groups": 16,
+          "estimate": 0.8870181083993114
+        },
+        "speed_width90_occupied": {
+          "ci_high": 0.5469262085175729,
+          "ci_low": 0.4449587743152109,
+          "demand_groups": 16,
+          "estimate": 0.49472404506388135
+        },
+        "total_count_absolute_error": {
+          "ci_high": 12.114530251976449,
+          "ci_low": 7.849158828349919,
+          "demand_groups": 16,
+          "estimate": 9.987317397683704
+        }
+      },
+      "minus_tau_0_1": {
+        "count_coverage90_occupied": {
+          "ci_high": 0.0010363595730765313,
+          "ci_low": -0.001986691988919304,
+          "demand_groups": 16,
+          "estimate": -0.00034378128806188124
+        },
+        "count_crps_u_occupied": {
+          "ci_high": 1.894837804268329e-05,
+          "ci_low": -2.0568219994043314e-05,
+          "demand_groups": 16,
+          "estimate": -5.009816616066698e-08
+        },
+        "count_mae_occupied": {
+          "ci_high": 3.1387548053729816e-05,
+          "ci_low": -1.2797689358861296e-05,
+          "demand_groups": 16,
+          "estimate": 1.0309526007475436e-05
+        },
+        "count_width90_occupied": {
+          "ci_high": 8.372846057268539e-05,
+          "ci_low": 4.6982597796150314e-05,
+          "demand_groups": 16,
+          "estimate": 6.465330898215542e-05
+        },
+        "energy_score": {
+          "ci_high": -0.00011601361274539928,
+          "ci_low": -0.0004976635109972614,
+          "demand_groups": 16,
+          "estimate": -0.000308727122185104
+        },
+        "energy_score_u": {
+          "ci_high": -0.00013192182527223557,
+          "ci_low": -0.0005193893532978048,
+          "demand_groups": 16,
+          "estimate": -0.000325357903113499
+        },
+        "speed_coverage90_occupied": {
+          "ci_high": 0.0008840999046223468,
+          "ci_low": -0.003583916386922916,
+          "demand_groups": 16,
+          "estimate": -0.0009984040242562511
+        },
+        "speed_crps_u_occupied": {
+          "ci_high": 4.904871618562302e-05,
+          "ci_low": -6.853349513429819e-05,
+          "demand_groups": 16,
+          "estimate": -1.0930155594765512e-05
+        },
+        "speed_mae_occupied": {
+          "ci_high": 5.839983089457275e-05,
+          "ci_low": -7.347652492707903e-05,
+          "demand_groups": 16,
+          "estimate": -7.010692079267161e-06
+        },
+        "speed_width90_occupied": {
+          "ci_high": 0.0001381737078781212,
+          "ci_low": 4.685497089115466e-05,
+          "demand_groups": 16,
+          "estimate": 9.395033542791698e-05
+        },
+        "total_count_absolute_error": {
+          "ci_high": -0.015610996139661257,
+          "ci_low": -0.0371545956873993,
+          "demand_groups": 16,
+          "estimate": -0.025550077398132087
+        }
+      }
+    },
+    "0.01": {
+      "metrics": {
+        "count_coverage90_occupied": {
+          "ci_high": 0.4339586881869579,
+          "ci_low": 0.3869896353507338,
+          "demand_groups": 16,
+          "estimate": 0.4070384487368339
+        },
+        "count_crps_u_occupied": {
+          "ci_high": 0.5157621734316271,
+          "ci_low": 0.44929815482003577,
+          "demand_groups": 16,
+          "estimate": 0.4809991844420596
+        },
+        "count_mae_occupied": {
+          "ci_high": 0.6321107234117924,
+          "ci_low": 0.5465381130736497,
+          "demand_groups": 16,
+          "estimate": 0.5872915191398075
+        },
+        "count_width90_occupied": {
+          "ci_high": 0.6903606847922532,
+          "ci_low": 0.5481674831127105,
+          "demand_groups": 16,
+          "estimate": 0.6146027772161813
+        },
+        "energy_score": {
+          "ci_high": 9.846191265376742,
+          "ci_low": 7.652658016224699,
+          "demand_groups": 16,
+          "estimate": 8.655367076287972
+        },
+        "energy_score_u": {
+          "ci_high": 9.434116972529417,
+          "ci_low": 7.358642150159202,
+          "demand_groups": 16,
+          "estimate": 8.30374532377878
+        },
+        "speed_coverage90_occupied": {
+          "ci_high": 0.3864687503954995,
+          "ci_low": 0.35261136326982057,
+          "demand_groups": 16,
+          "estimate": 0.3690444755613018
+        },
+        "speed_crps_u_occupied": {
+          "ci_high": 0.9468359186199952,
+          "ci_low": 0.6579368070761631,
+          "demand_groups": 16,
+          "estimate": 0.796785841530071
+        },
+        "speed_mae_occupied": {
+          "ci_high": 1.0435628169876676,
+          "ci_low": 0.7440276316010519,
+          "demand_groups": 16,
+          "estimate": 0.8870192776590455
+        },
+        "speed_width90_occupied": {
+          "ci_high": 0.5469093608360408,
+          "ci_low": 0.4449483717701538,
+          "demand_groups": 16,
+          "estimate": 0.49471155590421617
+        },
+        "total_count_absolute_error": {
+          "ci_high": 12.11869959078347,
+          "ci_low": 7.850806476281014,
+          "demand_groups": 16,
+          "estimate": 9.990077582936792
+        }
+      },
+      "minus_tau_0_1": {
+        "count_coverage90_occupied": {
+          "ci_high": 0.0006185404055733222,
+          "ci_low": -0.001955445521578992,
+          "demand_groups": 16,
+          "estimate": -0.00044640854586155444
+        },
+        "count_crps_u_occupied": {
+          "ci_high": 1.734362651244373e-05,
+          "ci_low": -1.7705588873876982e-05,
+          "demand_groups": 16,
+          "estimate": 3.973823562101325e-07
+        },
+        "count_mae_occupied": {
+          "ci_high": 2.87258798403031e-05,
+          "ci_low": -1.0663346417337125e-05,
+          "demand_groups": 16,
+          "estimate": 9.825453818770521e-06
+        },
+        "count_width90_occupied": {
+          "ci_high": 7.290503939333193e-05,
+          "ci_low": 4.251611954157095e-05,
+          "demand_groups": 16,
+          "estimate": 5.7601666760158377e-05
+        },
+        "energy_score": {
+          "ci_high": -9.797657882451577e-05,
+          "ci_low": -0.0004351407865951888,
+          "demand_groups": 16,
+          "estimate": -0.0002683350657053385
+        },
+        "energy_score_u": {
+          "ci_high": -0.00011190254493780236,
+          "ci_low": -0.0004565169342889884,
+          "demand_groups": 16,
+          "estimate": -0.00028318711665423213
+        },
+        "speed_coverage90_occupied": {
+          "ci_high": 0.0010172976512599309,
+          "ci_low": -0.0034208757242810235,
+          "demand_groups": 16,
+          "estimate": -0.0008985637686651973
+        },
+        "speed_crps_u_occupied": {
+          "ci_high": 4.3690264542915816e-05,
+          "ci_low": -6.017496297868923e-05,
+          "demand_groups": 16,
+          "estimate": -9.014970719596616e-06
+        },
+        "speed_mae_occupied": {
+          "ci_high": 5.198123300588162e-05,
+          "ci_low": -6.462442992188951e-05,
+          "demand_groups": 16,
+          "estimate": -5.841432345046402e-06
+        },
+        "speed_width90_occupied": {
+          "ci_high": 0.00011977112113078271,
+          "ci_low": 4.098886730241089e-05,
+          "demand_groups": 16,
+          "estimate": 8.146117576275473e-05
+        },
+        "total_count_absolute_error": {
+          "ci_high": -0.014007928342972157,
+          "ci_low": -0.03314827145933978,
+          "demand_groups": 16,
+          "estimate": -0.022789892145045787
+        }
+      }
+    },
+    "0.1": {
+      "metrics": {
+        "count_coverage90_occupied": {
+          "ci_high": 0.43390366231285665,
+          "ci_low": 0.3872229433764411,
+          "demand_groups": 16,
+          "estimate": 0.40748485728269546
+        },
+        "count_crps_u_occupied": {
+          "ci_high": 0.5157723566043378,
+          "ci_low": 0.44929155740452564,
+          "demand_groups": 16,
+          "estimate": 0.4809987870597034
+        },
+        "count_mae_occupied": {
+          "ci_high": 0.632093834372364,
+          "ci_low": 0.5465233578122309,
+          "demand_groups": 16,
+          "estimate": 0.5872816936859886
+        },
+        "count_width90_occupied": {
+          "ci_high": 0.6902964977108319,
+          "ci_low": 0.5481166506385667,
+          "demand_groups": 16,
+          "estimate": 0.6145451755494211
+        },
+        "energy_score": {
+          "ci_high": 9.846387116686568,
+          "ci_low": 7.652879722021979,
+          "demand_groups": 16,
+          "estimate": 8.655635411353678
+        },
+        "energy_score_u": {
+          "ci_high": 9.434530473139464,
+          "ci_low": 7.358928996759401,
+          "demand_groups": 16,
+          "estimate": 8.304028510895435
+        },
+        "speed_coverage90_occupied": {
+          "ci_high": 0.38672231118451317,
+          "ci_low": 0.3541579147262674,
+          "demand_groups": 16,
+          "estimate": 0.36994303932996697
+        },
+        "speed_crps_u_occupied": {
+          "ci_high": 0.9468215717267242,
+          "ci_low": 0.6579958417263804,
+          "demand_groups": 16,
+          "estimate": 0.7967948565007907
+        },
+        "speed_mae_occupied": {
+          "ci_high": 1.0435517780337709,
+          "ci_low": 0.7440087652879455,
+          "demand_groups": 16,
+          "estimate": 0.8870251190913906
+        },
+        "speed_width90_occupied": {
+          "ci_high": 0.5468144945126132,
+          "ci_low": 0.4448837907365126,
+          "demand_groups": 16,
+          "estimate": 0.4946300947284534
+        },
+        "total_count_absolute_error": {
+          "ci_high": 12.150826717595283,
+          "ci_low": 7.866845452592034,
+          "demand_groups": 16,
+          "estimate": 10.012867475081837
+        }
+      },
+      "minus_tau_0_1": {
+        "count_coverage90_occupied": {
+          "ci_high": 0.0,
+          "ci_low": 0.0,
+          "demand_groups": 16,
+          "estimate": 0.0
+        },
+        "count_crps_u_occupied": {
+          "ci_high": 0.0,
+          "ci_low": 0.0,
+          "demand_groups": 16,
+          "estimate": 0.0
+        },
+        "count_mae_occupied": {
+          "ci_high": 0.0,
+          "ci_low": 0.0,
+          "demand_groups": 16,
+          "estimate": 0.0
+        },
+        "count_width90_occupied": {
+          "ci_high": 0.0,
+          "ci_low": 0.0,
+          "demand_groups": 16,
+          "estimate": 0.0
+        },
+        "energy_score": {
+          "ci_high": 0.0,
+          "ci_low": 0.0,
+          "demand_groups": 16,
+          "estimate": 0.0
+        },
+        "energy_score_u": {
+          "ci_high": 0.0,
+          "ci_low": 0.0,
+          "demand_groups": 16,
+          "estimate": 0.0
+        },
+        "speed_coverage90_occupied": {
+          "ci_high": 0.0,
+          "ci_low": 0.0,
+          "demand_groups": 16,
+          "estimate": 0.0
+        },
+        "speed_crps_u_occupied": {
+          "ci_high": 0.0,
+          "ci_low": 0.0,
+          "demand_groups": 16,
+          "estimate": 0.0
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.0,
+          "ci_low": 0.0,
+          "demand_groups": 16,
+          "estimate": 0.0
+        },
+        "speed_width90_occupied": {
+          "ci_high": 0.0,
+          "ci_low": 0.0,
+          "demand_groups": 16,
+          "estimate": 0.0
+        },
+        "total_count_absolute_error": {
+          "ci_high": 0.0,
+          "ci_low": 0.0,
+          "demand_groups": 16,
+          "estimate": 0.0
+        }
+      }
+    },
+    "1.0": {
+      "metrics": {
+        "count_coverage90_occupied": {
+          "ci_high": 0.43466660665615003,
+          "ci_low": 0.3877733670938495,
+          "demand_groups": 16,
+          "estimate": 0.40786368792602246
+        },
+        "count_crps_u_occupied": {
+          "ci_high": 0.5157219110669342,
+          "ci_low": 0.4492576331791297,
+          "demand_groups": 16,
+          "estimate": 0.4809726091795559
+        },
+        "count_mae_occupied": {
+          "ci_high": 0.6319893253587429,
+          "ci_low": 0.5464768034412287,
+          "demand_groups": 16,
+          "estimate": 0.5872232057699032
+        },
+        "count_width90_occupied": {
+          "ci_high": 0.6900704323470525,
+          "ci_low": 0.547904502503953,
+          "demand_groups": 16,
+          "estimate": 0.6143200583026874
+        },
+        "energy_score": {
+          "ci_high": 9.846319876431355,
+          "ci_low": 7.653327220610462,
+          "demand_groups": 16,
+          "estimate": 8.656197913573665
+        },
+        "energy_score_u": {
+          "ci_high": 9.435295379244938,
+          "ci_low": 7.359836877483917,
+          "demand_groups": 16,
+          "estimate": 8.30465325034747
+        },
+        "speed_coverage90_occupied": {
+          "ci_high": 0.38553696667040843,
+          "ci_low": 0.35328917119543995,
+          "demand_groups": 16,
+          "estimate": 0.369006257575577
+        },
+        "speed_crps_u_occupied": {
+          "ci_high": 0.9466750023212831,
+          "ci_low": 0.6582119259770811,
+          "demand_groups": 16,
+          "estimate": 0.7967781872961102
+        },
+        "speed_mae_occupied": {
+          "ci_high": 1.0434074144166046,
+          "ci_low": 0.7438782254233962,
+          "demand_groups": 16,
+          "estimate": 0.8869874663440759
+        },
+        "speed_width90_occupied": {
+          "ci_high": 0.5464120150854859,
+          "ci_low": 0.44461247448787183,
+          "demand_groups": 16,
+          "estimate": 0.49426814150588105
+        },
+        "total_count_absolute_error": {
+          "ci_high": 12.24973452100941,
+          "ci_low": 7.960007779377406,
+          "demand_groups": 16,
+          "estimate": 10.108217062399227
+        }
+      },
+      "minus_tau_0_1": {
+        "count_coverage90_occupied": {
+          "ci_high": 0.0020196147236537848,
+          "ci_low": -0.0010875733044478594,
+          "demand_groups": 16,
+          "estimate": 0.00037883064332706017
+        },
+        "count_crps_u_occupied": {
+          "ci_high": 6.590227744742057e-05,
+          "ci_low": -0.00011378635110447619,
+          "demand_groups": 16,
+          "estimate": -2.617788014745888e-05
+        },
+        "count_mae_occupied": {
+          "ci_high": 3.743723632810036e-05,
+          "ci_low": -0.00014817831100716843,
+          "demand_groups": 16,
+          "estimate": -5.848791608555233e-05
+        },
+        "count_width90_occupied": {
+          "ci_high": -0.0001564311692028204,
+          "ci_low": -0.0002895857021844051,
+          "demand_groups": 16,
+          "estimate": -0.00022511724673371543
+        },
+        "energy_score": {
+          "ci_high": 0.0015511685964750184,
+          "ci_low": -0.00047517714078835067,
+          "demand_groups": 16,
+          "estimate": 0.0005625022199884644
+        },
+        "energy_score_u": {
+          "ci_high": 0.0016351671536485298,
+          "ci_low": -0.0004105241787061342,
+          "demand_groups": 16,
+          "estimate": 0.0006247394520350058
+        },
+        "speed_coverage90_occupied": {
+          "ci_high": 0.0014037914541339875,
+          "ci_low": -0.003067538748673074,
+          "demand_groups": 16,
+          "estimate": -0.000936781754390029
+        },
+        "speed_crps_u_occupied": {
+          "ci_high": 0.00019829403963201898,
+          "ci_low": -0.00025667206312909803,
+          "demand_groups": 16,
+          "estimate": -1.6669204680543753e-05
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.00019226551839205777,
+          "ci_low": -0.00027575660348516646,
+          "demand_groups": 16,
+          "estimate": -3.765274731472312e-05
+        },
+        "speed_width90_occupied": {
+          "ci_high": -0.00019102278464091843,
+          "ci_low": -0.0005383374120175866,
+          "demand_groups": 16,
+          "estimate": -0.0003619532225724049
+        },
+        "total_count_absolute_error": {
+          "ci_high": 0.14204579004738108,
+          "ci_low": 0.055709298215545364,
+          "demand_groups": 16,
+          "estimate": 0.09534958731738952
+        }
+      }
+    },
+    "10.0": {
+      "metrics": {
+        "count_coverage90_occupied": {
+          "ci_high": 0.43358883202364096,
+          "ci_low": 0.3857818687332903,
+          "demand_groups": 16,
+          "estimate": 0.40635568242920694
+        },
+        "count_crps_u_occupied": {
+          "ci_high": 0.5156285392037021,
+          "ci_low": 0.44922665251963206,
+          "demand_groups": 16,
+          "estimate": 0.480926473363805
+        },
+        "count_mae_occupied": {
+          "ci_high": 0.631845350047469,
+          "ci_low": 0.5464529598355888,
+          "demand_groups": 16,
+          "estimate": 0.5871569881421532
+        },
+        "count_width90_occupied": {
+          "ci_high": 0.6899213532733897,
+          "ci_low": 0.5477721118652441,
+          "demand_groups": 16,
+          "estimate": 0.6141527111231619
+        },
+        "energy_score": {
+          "ci_high": 9.844837782801381,
+          "ci_low": 7.653318035229134,
+          "demand_groups": 16,
+          "estimate": 8.655883410038632
+        },
+        "energy_score_u": {
+          "ci_high": 9.433867998295806,
+          "ci_low": 7.360113948012826,
+          "demand_groups": 16,
+          "estimate": 8.304381726446532
+        },
+        "speed_coverage90_occupied": {
+          "ci_high": 0.38537935660827694,
+          "ci_low": 0.3535034870835333,
+          "demand_groups": 16,
+          "estimate": 0.3689631969289493
+        },
+        "speed_crps_u_occupied": {
+          "ci_high": 0.9462706247699278,
+          "ci_low": 0.6580903213026329,
+          "demand_groups": 16,
+          "estimate": 0.7966161536595529
+        },
+        "speed_mae_occupied": {
+          "ci_high": 1.0429924524052585,
+          "ci_low": 0.7436813872169744,
+          "demand_groups": 16,
+          "estimate": 0.886799712570843
+        },
+        "speed_width90_occupied": {
+          "ci_high": 0.5459426627516195,
+          "ci_low": 0.4442929908422636,
+          "demand_groups": 16,
+          "estimate": 0.49384480290189825
+        },
+        "total_count_absolute_error": {
+          "ci_high": 12.365073858282022,
+          "ci_low": 8.047618334188265,
+          "demand_groups": 16,
+          "estimate": 10.20501714596623
+        }
+      },
+      "minus_tau_0_1": {
+        "count_coverage90_occupied": {
+          "ci_high": 0.0008734506162134173,
+          "ci_low": -0.0033789276761375044,
+          "demand_groups": 16,
+          "estimate": -0.0011291748534885283
+        },
+        "count_crps_u_occupied": {
+          "ci_high": 0.0001274284964878031,
+          "ci_low": -0.0002745283355245113,
+          "demand_groups": 16,
+          "estimate": -7.231369589834682e-05
+        },
+        "count_mae_occupied": {
+          "ci_high": 7.99207198365176e-05,
+          "ci_low": -0.00032136344292377374,
+          "demand_groups": 16,
+          "estimate": -0.00012470554383545857
+        },
+        "count_width90_occupied": {
+          "ci_high": -0.00023236649784802392,
+          "ci_low": -0.0005388399967795834,
+          "demand_groups": 16,
+          "estimate": -0.00039246442625911863
+        },
+        "energy_score": {
+          "ci_high": 0.002743709946165959,
+          "ci_low": -0.0023546116989027767,
+          "demand_groups": 16,
+          "estimate": 0.00024799868495525845
+        },
+        "energy_score_u": {
+          "ci_high": 0.0028612131773873228,
+          "ci_low": -0.002274944830535043,
+          "demand_groups": 16,
+          "estimate": 0.00035321555109990577
+        },
+        "speed_coverage90_occupied": {
+          "ci_high": 0.003367248584253912,
+          "ci_low": -0.004978327249208995,
+          "demand_groups": 16,
+          "estimate": -0.0009798424010177258
+        },
+        "speed_crps_u_occupied": {
+          "ci_high": 0.0003010299794394631,
+          "ci_low": -0.0007170909320211442,
+          "demand_groups": 16,
+          "estimate": -0.00017870284123779577
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.0002457293378109063,
+          "ci_low": -0.0007100834588858745,
+          "demand_groups": 16,
+          "estimate": -0.00022540652054750011
+        },
+        "speed_width90_occupied": {
+          "ci_high": -0.00044073890353884854,
+          "ci_low": -0.001164730023532567,
+          "demand_groups": 16,
+          "estimate": -0.0007852918265551824
+        },
+        "total_count_absolute_error": {
+          "ci_high": 0.3005042822377055,
+          "ci_low": 0.09910271548968244,
+          "demand_groups": 16,
+          "estimate": 0.1921496708843935
+        }
+      }
+    },
+    "100.0": {
+      "metrics": {
+        "count_coverage90_occupied": {
+          "ci_high": 0.43319705277196746,
+          "ci_low": 0.3854645947975788,
+          "demand_groups": 16,
+          "estimate": 0.4059693634415039
+        },
+        "count_crps_u_occupied": {
+          "ci_high": 0.515628849718807,
+          "ci_low": 0.44922748721683226,
+          "demand_groups": 16,
+          "estimate": 0.480912055685356
+        },
+        "count_mae_occupied": {
+          "ci_high": 0.6318179399757039,
+          "ci_low": 0.5464780218124528,
+          "demand_groups": 16,
+          "estimate": 0.58714438830855
+        },
+        "count_width90_occupied": {
+          "ci_high": 0.6899240521940234,
+          "ci_low": 0.5477792644000258,
+          "demand_groups": 16,
+          "estimate": 0.6141367954995047
+        },
+        "energy_score": {
+          "ci_high": 9.844383761500568,
+          "ci_low": 7.6534708119679955,
+          "demand_groups": 16,
+          "estimate": 8.655791247087652
+        },
+        "energy_score_u": {
+          "ci_high": 9.433414677452454,
+          "ci_low": 7.360016205711035,
+          "demand_groups": 16,
+          "estimate": 8.304289970875123
+        },
+        "speed_coverage90_occupied": {
+          "ci_high": 0.3868320379895307,
+          "ci_low": 0.35310364709932773,
+          "demand_groups": 16,
+          "estimate": 0.3696663307219202
+        },
+        "speed_crps_u_occupied": {
+          "ci_high": 0.946032114633138,
+          "ci_low": 0.6579785988103647,
+          "demand_groups": 16,
+          "estimate": 0.7965017024187873
+        },
+        "speed_mae_occupied": {
+          "ci_high": 1.0427244374053342,
+          "ci_low": 0.7436337197461751,
+          "demand_groups": 16,
+          "estimate": 0.8866686103498805
+        },
+        "speed_width90_occupied": {
+          "ci_high": 0.5457834520827537,
+          "ci_low": 0.444160566860231,
+          "demand_groups": 16,
+          "estimate": 0.49369521253347626
+        },
+        "total_count_absolute_error": {
+          "ci_high": 12.400441884652897,
+          "ci_low": 8.047478903765967,
+          "demand_groups": 16,
+          "estimate": 10.236449812322695
+        }
+      },
+      "minus_tau_0_1": {
+        "count_coverage90_occupied": {
+          "ci_high": 0.0003717828674988985,
+          "ci_low": -0.0038027144114282847,
+          "demand_groups": 16,
+          "estimate": -0.0015154938411915675
+        },
+        "count_crps_u_occupied": {
+          "ci_high": 0.00014659759258117097,
+          "ci_low": -0.0003211699042650287,
+          "demand_groups": 16,
+          "estimate": -8.673137434740338e-05
+        },
+        "count_mae_occupied": {
+          "ci_high": 9.656908794789844e-05,
+          "ci_low": -0.00036561874468029606,
+          "demand_groups": 16,
+          "estimate": -0.00013730537743867656
+        },
+        "count_width90_occupied": {
+          "ci_high": -0.00020420245727539993,
+          "ci_low": -0.0005920294756330321,
+          "demand_groups": 16,
+          "estimate": -0.00040838004991636777
+        },
+        "energy_score": {
+          "ci_high": 0.003154157563894489,
+          "ci_low": -0.002959082165014093,
+          "demand_groups": 16,
+          "estimate": 0.0001558357339741523
+        },
+        "energy_score_u": {
+          "ci_high": 0.0033090765986484054,
+          "ci_low": -0.002887041066700488,
+          "demand_groups": 16,
+          "estimate": 0.0002614599796888495
+        },
+        "speed_coverage90_occupied": {
+          "ci_high": 0.0046280337940435646,
+          "ci_low": -0.004413837042935349,
+          "demand_groups": 16,
+          "estimate": -0.0002767086080468148
+        },
+        "speed_crps_u_occupied": {
+          "ci_high": 0.0002951392412868141,
+          "ci_low": -0.0009476992343807382,
+          "demand_groups": 16,
+          "estimate": -0.00029315408200333154
+        },
+        "speed_mae_occupied": {
+          "ci_high": 0.0002044651690337657,
+          "ci_low": -0.0009512886040345127,
+          "demand_groups": 16,
+          "estimate": -0.0003565087415101139
+        },
+        "speed_width90_occupied": {
+          "ci_high": -0.0005284897637375157,
+          "ci_low": -0.0013831969856065148,
+          "demand_groups": 16,
+          "estimate": -0.0009348821949771678
+        },
+        "total_count_absolute_error": {
+          "ci_high": 0.3598340622553974,
+          "ci_low": 0.10617429804036078,
+          "demand_groups": 16,
+          "estimate": 0.2235823372408574
+        }
+      }
+    }
+  },
+  "conditions": 32,
+  "demand_groups": 16,
+  "interpretation": "Inference sensitivity at fixed B weights and fixed prior regression head; not independently trained tau optima",
+  "selection_metric": "energy_score_u",
+  "status": "complete",
+  "test_evaluated": false,
+  "validation_selected_tau": 0.0,
+  "verification": {
+    "status": "passed",
+    "independently_recomputed_metrics": 1344,
+    "max_absolute_error": 5.329070518200751e-15,
+    "anchor_conditions": 8,
+    "anchor_max_absolute_error": 7.158517837524414e-05,
+    "test_bank_accessed": false
+  },
+  "recommendation": "Keep tau=0.1 in mainline. Across the grid integrated FM metrics vary negligibly; different metrics favor different tau. This fixed-weight inference sweep is not a retrained optimum.",
+  "protocol": {
+    "FM_fixed": true,
+    "conditions": [
+      {
+        "cache_content_hash": "2daad5807ddfcc746215ec359373d87b8613840c9a92a772728883ead46f94cb",
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/40b6c151f17a5e80bcb88c2eda8436691efe37a357c34b6586e7e4327e4dfbe9.npz",
+        "condition_index": 0,
+        "condition_seed": 170155006,
+        "demand_group": "841d0040c5d616039cc2c6f75c7c60bac701f4e9bd3537635037167ab871b654",
+        "episode": 918,
+        "episode_index": 25,
+        "requested_horizon": 1,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer/episodes/train/episode_000918.npz",
+        "start": 26,
+        "traffic_phase": "prespecified_temporal_quarter_or_65percent"
+      },
+      {
+        "cache_content_hash": "2daad5807ddfcc746215ec359373d87b8613840c9a92a772728883ead46f94cb",
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/40b6c151f17a5e80bcb88c2eda8436691efe37a357c34b6586e7e4327e4dfbe9.npz",
+        "condition_index": 1,
+        "condition_seed": 1846139750,
+        "demand_group": "841d0040c5d616039cc2c6f75c7c60bac701f4e9bd3537635037167ab871b654",
+        "episode": 918,
+        "episode_index": 25,
+        "requested_horizon": 1,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer/episodes/train/episode_000918.npz",
+        "start": 66,
+        "traffic_phase": "prespecified_temporal_quarter_or_65percent"
+      },
+      {
+        "cache_content_hash": "1ea4255443f3a605c006d8531cb7889edda14576d3f79876824e82ad1abc71ec",
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/c9d550c2389c8d6510bacb6ca05c6193ca147a7595abe777e3183f0f3d320224.npz",
+        "condition_index": 2,
+        "condition_seed": 3906956121,
+        "demand_group": "2530f5e2f2d0bb66972a435f308e18aa0082f7674eb1e58760bd58f215b98e18",
+        "episode": 792,
+        "episode_index": 27,
+        "requested_horizon": 1,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/random/episodes/train/episode_000792.npz",
+        "start": 30,
+        "traffic_phase": "prespecified_temporal_quarter_or_65percent"
+      },
+      {
+        "cache_content_hash": "1ea4255443f3a605c006d8531cb7889edda14576d3f79876824e82ad1abc71ec",
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/c9d550c2389c8d6510bacb6ca05c6193ca147a7595abe777e3183f0f3d320224.npz",
+        "condition_index": 3,
+        "condition_seed": 2625800895,
+        "demand_group": "2530f5e2f2d0bb66972a435f308e18aa0082f7674eb1e58760bd58f215b98e18",
+        "episode": 792,
+        "episode_index": 27,
+        "requested_horizon": 1,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/random/episodes/train/episode_000792.npz",
+        "start": 79,
+        "traffic_phase": "prespecified_temporal_quarter_or_65percent"
+      },
+      {
+        "cache_content_hash": "13dfb0a25470c2d9c9c902ae8645f87412c24bf108c07351188017602fa5d5f4",
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/233523896b34961eb0bf5398f52069290b423e7e0974b93c52338e1c6d540b12.npz",
+        "condition_index": 4,
+        "condition_seed": 1792711084,
+        "demand_group": "d493cb749d3a77ba00e6e1d948a969b15f73b0310593e8b8288a2d0e36c8d880",
+        "episode": 3735,
+        "episode_index": 10,
+        "requested_horizon": 1,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_003735.npz",
+        "start": 18,
+        "traffic_phase": "prespecified_temporal_quarter_or_65percent"
+      },
+      {
+        "cache_content_hash": "13dfb0a25470c2d9c9c902ae8645f87412c24bf108c07351188017602fa5d5f4",
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/233523896b34961eb0bf5398f52069290b423e7e0974b93c52338e1c6d540b12.npz",
+        "condition_index": 5,
+        "condition_seed": 3904667690,
+        "demand_group": "d493cb749d3a77ba00e6e1d948a969b15f73b0310593e8b8288a2d0e36c8d880",
+        "episode": 3735,
+        "episode_index": 10,
+        "requested_horizon": 1,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_003735.npz",
+        "start": 47,
+        "traffic_phase": "prespecified_temporal_quarter_or_65percent"
+      },
+      {
+        "cache_content_hash": "376374d8b4e454ade2ba9e1a06633ef35cfceeb4764948728fd6f28411726997",
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/556d76adbb1ed0cafb5937383e532f65bbc6a6eb9c28802c83b8094688195d8c.npz",
+        "condition_index": 6,
+        "condition_seed": 1608587107,
+        "demand_group": "1c7cdda8ad2fdde583ec67cea5b07c52c11967f9a92bad4c80b3dbe88ffc26f8",
+        "episode": 932,
+        "episode_index": 12,
+        "requested_horizon": 1,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_000932.npz",
+        "start": 17,
+        "traffic_phase": "prespecified_temporal_quarter_or_65percent"
+      },
+      {
+        "cache_content_hash": "376374d8b4e454ade2ba9e1a06633ef35cfceeb4764948728fd6f28411726997",
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/556d76adbb1ed0cafb5937383e532f65bbc6a6eb9c28802c83b8094688195d8c.npz",
+        "condition_index": 7,
+        "condition_seed": 3991839255,
+        "demand_group": "1c7cdda8ad2fdde583ec67cea5b07c52c11967f9a92bad4c80b3dbe88ffc26f8",
+        "episode": 932,
+        "episode_index": 12,
+        "requested_horizon": 1,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_000932.npz",
+        "start": 45,
+        "traffic_phase": "prespecified_temporal_quarter_or_65percent"
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/d55620384634fba6752a6eb829857ff79a958fe097742858f4df540d159fb7ad.npz",
+        "condition_index": 8,
+        "condition_seed": 63945733,
+        "demand_group": "e34d5006395aa1b69f8951416ef114ee5ddfea1af82719c0aafb94b4aa930171",
+        "episode": 1200,
+        "episode_index": 8,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/iql/episodes/train/episode_001200.npz",
+        "start": 22
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/d55620384634fba6752a6eb829857ff79a958fe097742858f4df540d159fb7ad.npz",
+        "condition_index": 9,
+        "condition_seed": 3870732317,
+        "demand_group": "e34d5006395aa1b69f8951416ef114ee5ddfea1af82719c0aafb94b4aa930171",
+        "episode": 1200,
+        "episode_index": 8,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/iql/episodes/train/episode_001200.npz",
+        "start": 56
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/494915f923d92a9e831c470cf593ee87064f8e07df4d65cf1f544c0bb49630e8.npz",
+        "condition_index": 10,
+        "condition_seed": 169530031,
+        "demand_group": "59bde46278851ead677341619d965f13786d5f6a6325ff221844a3eceb9d8e8d",
+        "episode": 975,
+        "episode_index": 30,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer/episodes/train/episode_000975.npz",
+        "start": 30
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/494915f923d92a9e831c470cf593ee87064f8e07df4d65cf1f544c0bb49630e8.npz",
+        "condition_index": 11,
+        "condition_seed": 2530619382,
+        "demand_group": "59bde46278851ead677341619d965f13786d5f6a6325ff221844a3eceb9d8e8d",
+        "episode": 975,
+        "episode_index": 30,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dreamer/episodes/train/episode_000975.npz",
+        "start": 78
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/83bba38955ed599e84f21f31a32108f04d1d4448d2e9bb03ee57bcf58db78b30.npz",
+        "condition_index": 12,
+        "condition_seed": 2736138823,
+        "demand_group": "54ed01a38211e1b157e8af2e6bd8d786703b20164e473b012b37567a989bad3d",
+        "episode": 2384,
+        "episode_index": 5,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/iql/episodes/train/episode_002384.npz",
+        "start": 30
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/83bba38955ed599e84f21f31a32108f04d1d4448d2e9bb03ee57bcf58db78b30.npz",
+        "condition_index": 13,
+        "condition_seed": 24579158,
+        "demand_group": "54ed01a38211e1b157e8af2e6bd8d786703b20164e473b012b37567a989bad3d",
+        "episode": 2384,
+        "episode_index": 5,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/iql/episodes/train/episode_002384.npz",
+        "start": 79
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/a54a279bd4f761412fa06a314b495d1d829e2d2bb7b8c0bd526e71b85d535c57.npz",
+        "condition_index": 14,
+        "condition_seed": 471233536,
+        "demand_group": "5c4daa3dc16635c102e2bd48923682ffd477fcc106bd4eb8790bd273c2f9f038",
+        "episode": 2353,
+        "episode_index": 1,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac/episodes/train/episode_002353.npz",
+        "start": 26
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/a54a279bd4f761412fa06a314b495d1d829e2d2bb7b8c0bd526e71b85d535c57.npz",
+        "condition_index": 15,
+        "condition_seed": 1109412946,
+        "demand_group": "5c4daa3dc16635c102e2bd48923682ffd477fcc106bd4eb8790bd273c2f9f038",
+        "episode": 2353,
+        "episode_index": 1,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac/episodes/train/episode_002353.npz",
+        "start": 66
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/299020afec97b77a1fc0297be48f122345f27e1effbd019d2eff9a0cfb938d93.npz",
+        "condition_index": 16,
+        "condition_seed": 2402711671,
+        "demand_group": "9c756cb1c6f0109acefd105215a49779dffe62464e809014a986af2560da3a1e",
+        "episode": 2969,
+        "episode_index": 26,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_002969.npz",
+        "start": 23
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/299020afec97b77a1fc0297be48f122345f27e1effbd019d2eff9a0cfb938d93.npz",
+        "condition_index": 17,
+        "condition_seed": 2096478285,
+        "demand_group": "9c756cb1c6f0109acefd105215a49779dffe62464e809014a986af2560da3a1e",
+        "episode": 2969,
+        "episode_index": 26,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_002969.npz",
+        "start": 59
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/315e0297d1a47b3a563d3fa7965f08dc44994ae6dee90c38202c7ab1ea921be9.npz",
+        "condition_index": 18,
+        "condition_seed": 3109111900,
+        "demand_group": "58f26a65b8cf4e2db355bf6ea2b7cd7a246f4fbf0e991ec04038f724a5383525",
+        "episode": 2319,
+        "episode_index": 21,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_002319.npz",
+        "start": 16
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/315e0297d1a47b3a563d3fa7965f08dc44994ae6dee90c38202c7ab1ea921be9.npz",
+        "condition_index": 19,
+        "condition_seed": 3296617640,
+        "demand_group": "58f26a65b8cf4e2db355bf6ea2b7cd7a246f4fbf0e991ec04038f724a5383525",
+        "episode": 2319,
+        "episode_index": 21,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_002319.npz",
+        "start": 42
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/b2ede66b5819e9fe2fa76b3406d4563155f64802754a2ce6ba4e3d672001c33c.npz",
+        "condition_index": 20,
+        "condition_seed": 1827561503,
+        "demand_group": "91aab518ec4d83cf258d944fcd2b07e2205973b0588b9512cb12ada5c3546128",
+        "episode": 2220,
+        "episode_index": 4,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/iql/episodes/train/episode_002220.npz",
+        "start": 29
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/b2ede66b5819e9fe2fa76b3406d4563155f64802754a2ce6ba4e3d672001c33c.npz",
+        "condition_index": 21,
+        "condition_seed": 3491752621,
+        "demand_group": "91aab518ec4d83cf258d944fcd2b07e2205973b0588b9512cb12ada5c3546128",
+        "episode": 2220,
+        "episode_index": 4,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/iql/episodes/train/episode_002220.npz",
+        "start": 75
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/67671df65d573c88e479e395f8bbe9f928faccc2a1ce9c596faaa8fba1085c92.npz",
+        "condition_index": 22,
+        "condition_seed": 2179798051,
+        "demand_group": "e7db30f7fd0563e7b989ea877746e1574628fc70cbcb8b86661490eced589210",
+        "episode": 38,
+        "episode_index": 7,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_online_meso_noincident_noprior_20261007/episodes/online/episode_000038.npz",
+        "start": 30
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/67671df65d573c88e479e395f8bbe9f928faccc2a1ce9c596faaa8fba1085c92.npz",
+        "condition_index": 23,
+        "condition_seed": 3719743131,
+        "demand_group": "e7db30f7fd0563e7b989ea877746e1574628fc70cbcb8b86661490eced589210",
+        "episode": 38,
+        "episode_index": 7,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_online_meso_noincident_noprior_20261007/episodes/online/episode_000038.npz",
+        "start": 79
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/b5d247a4f549e8a2acd3d51aec57dfb58e05472a074f2c33644b9aa9ebd6266c.npz",
+        "condition_index": 24,
+        "condition_seed": 2737649151,
+        "demand_group": "cfd8797b8d97250741bc22bead05fd0d35a7609a0fc1fdeb2c10ad9ec04f6e41",
+        "episode": 3581,
+        "episode_index": 31,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_003581.npz",
+        "start": 28
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/b5d247a4f549e8a2acd3d51aec57dfb58e05472a074f2c33644b9aa9ebd6266c.npz",
+        "condition_index": 25,
+        "condition_seed": 957956973,
+        "demand_group": "cfd8797b8d97250741bc22bead05fd0d35a7609a0fc1fdeb2c10ad9ec04f6e41",
+        "episode": 3581,
+        "episode_index": 31,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/online_ac/episodes/train/episode_003581.npz",
+        "start": 73
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/84cf8e26d4233684106270f0685aa4f6159ab405ddb4aeeb950eb5adbfb6d963.npz",
+        "condition_index": 26,
+        "condition_seed": 3326577602,
+        "demand_group": "3ba987c0381fea55b21eca4def8cb89865fefa61fff6eaa3183b9b1aab1ed369",
+        "episode": 3293,
+        "episode_index": 9,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_003293.npz",
+        "start": 30
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/84cf8e26d4233684106270f0685aa4f6159ab405ddb4aeeb950eb5adbfb6d963.npz",
+        "condition_index": 27,
+        "condition_seed": 3103887295,
+        "demand_group": "3ba987c0381fea55b21eca4def8cb89865fefa61fff6eaa3183b9b1aab1ed369",
+        "episode": 3293,
+        "episode_index": 9,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/ippo/episodes/train/episode_003293.npz",
+        "start": 79
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/fb25dc4323ac229f122837cde715aa1a1bb3c3460c731a6d1137f8a4659dc5df.npz",
+        "condition_index": 28,
+        "condition_seed": 3627776129,
+        "demand_group": "cf4929a7bd3aa665945e0879b8c4ef7b731f48765941054663f6063c6aeb102b",
+        "episode": 2369,
+        "episode_index": 22,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_002369.npz",
+        "start": 16
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/fb25dc4323ac229f122837cde715aa1a1bb3c3460c731a6d1137f8a4659dc5df.npz",
+        "condition_index": 29,
+        "condition_seed": 739944911,
+        "demand_group": "cf4929a7bd3aa665945e0879b8c4ef7b731f48765941054663f6063c6aeb102b",
+        "episode": 2369,
+        "episode_index": 22,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/dta/episodes/train/episode_002369.npz",
+        "start": 42
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/4ff171e0152907906b03c87da0f842a652e9177b5af380381a04670c2dbd0fe3.npz",
+        "condition_index": 30,
+        "condition_seed": 695481470,
+        "demand_group": "221442d3632bcde68c5fbad1402e02eaead5868c8eead53c6e021b6f45e5757b",
+        "episode": 2358,
+        "episode_index": 2,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac/episodes/train/episode_002358.npz",
+        "start": 30
+      },
+      {
+        "cache_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/ingolstadt_full_retrain_20261009/data/episodes/4ff171e0152907906b03c87da0f842a652e9177b5af380381a04670c2dbd0fe3.npz",
+        "condition_index": 31,
+        "condition_seed": 3407528153,
+        "demand_group": "221442d3632bcde68c5fbad1402e02eaead5868c8eead53c6e021b6f45e5757b",
+        "episode": 2358,
+        "episode_index": 2,
+        "role": "validation",
+        "source_path": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/city_baselines_noincident_noprior_penalty_5000ep_20261008/ingolstadt_custom/gnac/episodes/train/episode_002358.npz",
+        "start": 79
+      }
+    ],
+    "device": "cuda:0",
+    "head_fixed": true,
+    "hint": "soft-filtered action-independent background",
+    "prior_filter": "output only",
+    "reference": "Z",
+    "reference_hashes": {
+      "B_checkpoint": "8206155513a9a8d0c3e7b35d8e611e56f3e5df6679333b0ebce0d18fbb171ff0",
+      "basis": "a34391d005d5b25160f923dae964d2d4b80d11f2017c52633810ad87e9cc72a2",
+      "checkpoint": "2f63f0b2a5fe18f3a3bd9be27ffd1e63a2755464e7f2944e1227334f0ffe6af6",
+      "normalizers": "665519b1b911baec9767265973c2361ac9ea2acd49e4fb39989ca436ec608b78",
+      "physical_scales": "c3c41f4ca3b2dfd34aa1fc13e76cafed16580cafc508308ef16eb9bb252fa52d",
+      "prior_head": "9d2e128f9830b6167668cdb37de98cd43c4380ad535c3f55248cdcc6a17b2c11",
+      "script": "d6123704b9db743cc2970f68ca909d9144ff8c8c22635d6880b4d20aa319c674",
+      "split": "52ad080ee91003d5e133c155833eb195f56dc4aac794dc0ab94bd145219089ff"
+    },
+    "samples": 8,
+    "selection_split": "validation only",
+    "solver": "euler",
+    "source": "Z+native rank16 graph noise",
+    "source_snapshot": "/home/wangwenrui/shk/UrbanDreamer/urban_dreamer/outputs/source_condition_controls_20261015/v1/source",
+    "steps": 100,
+    "taus": [
+      0.0,
+      0.01,
+      0.1,
+      1.0,
+      10.0,
+      100.0
+    ],
+    "test_read": false,
+    "train_updates": 0
+  }
+}

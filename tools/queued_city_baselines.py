@@ -47,17 +47,40 @@ def write_json(path, value):
     os.replace(temporary, path)
 
 
-def effective_gpu_free_mib(gpu, running, allocation_by_pid, headroom_mib=1024):
+def disk_status(root, manifest):
+    """Guard both hot checkpoints and a configured archive volume."""
+    paths = {'local': root}
+    if manifest.get('archive_storage_root'):
+        paths['archive'] = manifest['archive_storage_root']
+    free, errors = {}, {}
+    for label, path in paths.items():
+        try:
+            free[label] = shutil.disk_usage(path).free / 1024 ** 3
+        except OSError as error:
+            free[label] = 0.
+            errors[label] = str(error)
+    return dict(free_disk_gb=min(free.values()), disk_free_gb_by_volume=free,
+                disk_query_errors=errors)
+
+
+def effective_gpu_free_mib(gpu, running, allocation_by_pid, headroom_mib=1024, reservation_fraction=1.):
     pending = sum(max(0., row['required_gpu_mib'] - allocation_by_pid.get(row['pid'], 0.))
                   for row in running if row.get('gpu_index') == gpu['index'])
-    return max(0., gpu['free_mib'] - headroom_mib - pending)
+    return max(0., gpu['free_mib'] - headroom_mib - reservation_fraction * pending)
 
 
-def choose_gpu(required_mib, gpus, running, allocation_by_pid, headroom_mib=1024):
-    candidates = [(effective_gpu_free_mib(gpu, running, allocation_by_pid, headroom_mib), gpu['index'])
+def choose_gpu(required_mib, gpus, running, allocation_by_pid, headroom_mib=1024, reservation_fraction=1.):
+    candidates = [(effective_gpu_free_mib(gpu, running, allocation_by_pid, headroom_mib,
+                                         reservation_fraction), gpu['index'])
                   for gpu in gpus]
-    fits = [(free, index) for free, index in candidates if free >= required_mib]
+    fits = [(free, index) for free, index in candidates if free >= reservation_fraction * required_mib]
     return max(fits)[1] if fits else None
+
+
+def effective_host_free_mib(available_mib, running_budgets, headroom_mib, reservation_fraction=1.):
+    """Reserve future growth separately from RAM already counted by the OS."""
+    pending = sum(max(0., required - resident) for required, resident in running_budgets)
+    return max(0., available_mib - headroom_mib - reservation_fraction * pending)
 
 
 def failure_kind(log_text, exit_code):
@@ -138,11 +161,14 @@ def apply_admission_overrides(root, manifest, entries, jobs, gpus=None):
     poll = policy.get('poll_seconds', manifest['poll_seconds'])
     margin = policy.get('peak_margin_fraction', .10)
     padding = policy.get('peak_padding_mib', 128)
+    reservation = policy.get('pending_reservation_fraction',manifest.get('pending_reservation_fraction',1.))
     if (not isinstance(budgets, dict) or set(budgets)-set(entries)
             or not isinstance(headroom, (int,float)) or not math.isfinite(headroom) or headroom < 0
             or not isinstance(poll, (int,float)) or not math.isfinite(poll) or poll <= 0
             or not isinstance(margin, (int,float)) or not math.isfinite(margin) or margin < 0
-            or not isinstance(padding, (int,float)) or not math.isfinite(padding) or padding < 0):
+            or not isinstance(padding, (int,float)) or not math.isfinite(padding) or padding < 0
+            or isinstance(reservation,bool) or not isinstance(reservation,(int,float))
+            or not math.isfinite(reservation) or not 0 < reservation <= 1):
         raise ValueError('invalid admission resource overrides')
     if any(not isinstance(value, (int,float)) or not math.isfinite(value) or value <= 0
            or not entries[key].get('required_gpu_mib') for key,value in budgets.items()):
@@ -150,7 +176,7 @@ def apply_admission_overrides(root, manifest, entries, jobs, gpus=None):
     changed = (manifest['gpu_headroom_mib'] != headroom or manifest['poll_seconds'] != poll
                or manifest.get('active_admission_policy') != policy)
     maximum = max((gpu['total_mib'] for gpu in (gpus or [])), default=24576)-headroom
-    manifest.update(gpu_headroom_mib=headroom, poll_seconds=poll)
+    manifest.update(gpu_headroom_mib=headroom, poll_seconds=poll,pending_reservation_fraction=reservation)
     for key, minimum in budgets.items():
         state = jobs[key]
         peak = state.get('observed_peak_mib', 0)
@@ -238,15 +264,17 @@ def host_available_mib():
 
 
 def durable_episode(entry):
-    if entry['method'] == 'shortest_ref':
+    if entry['method'] in {'shortest_ref', 'dynamic_shortest_ref'}:
         return 6 if (Path(entry['output_dir']) / 'results.json').exists() else 0
     from tools.compact_episode_archives import committed_episode
     return committed_episode(entry)
 
 
 def prepare(args):
+    from dataclasses import replace
+    from tools.run_complete_pretrain import export_run_config
     from tools.run_city_baseline_dataset import build_runs, snapshot
-    from urban_dreamer.workflow.config import load_config
+    from urban_dreamer.workflow.config import load_config, _semantic_fingerprint
     from urban_dreamer.traffic.routing import validate_prepared_inputs
     root = args.output_root.resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -260,12 +288,23 @@ def prepare(args):
     (source / 'networks').unlink()  # replace this newly created link with frozen input copies
     (source / 'networks').mkdir()
     inputs = {}
+    routing_mode = getattr(args, 'routing_mode', 'next_hop')
+    methods = tuple(getattr(args, 'methods', None) or METHODS)
+    if len(set(methods)) != len(methods) or set(methods) - set((*LEARNED, 'dta')):
+        raise ValueError('invalid or duplicate baseline methods')
     for city in CITIES:
         destination = source / 'networks' / city
         destination.mkdir()
         for filename in (f'{city}.net.xml', f'od_{city}.txt', 'agents.csv', 'edge_registry.json'):
             shutil.copy2(ROOT / 'networks' / city / filename, destination / filename)
         cfg = load_config(source / 'configs' / f'{city}.toml')
+        if routing_mode == 'current_to_dest':
+            cfg = replace(cfg, simulation=replace(cfg.simulation, routing_mode=routing_mode),
+                run=replace(cfg.run, online_training_episodes=args.episodes))
+            cfg = replace(cfg, semantic_fingerprint=_semantic_fingerprint(**{
+                key:getattr(cfg,key) for key in ('inputs','run','simulation','resources','method','data','codec')}))
+            export_run_config(cfg, source / 'configs' / f'{city}.toml')
+            cfg = load_config(source / 'configs' / f'{city}.toml')
         assert cfg.simulation.traffic_model == 'meso'
         deadline = 30 * math.ceil((cfg.simulation.world_model_intervals_per_episode * 30
             + cfg.simulation.training_completion_buffer_seconds) / 30)
@@ -273,7 +312,14 @@ def prepare(args):
         prepared = validate_prepared_inputs(cfg)
         assert prepared.vehicle_count == {'ingolstadt_custom':1035, 'coulommiers':1811, 'montereau_fault_yonne':1500}[city]
         inputs[city] = prepared.input_hashes
-    settings = argparse.Namespace(cities=CITIES, methods=METHODS, devices=[], episodes=args.episodes,
+    if routing_mode == 'current_to_dest':
+        hashes_path = root / 'source_hashes.json'
+        hashes = json.loads(hashes_path.read_text())
+        for city in CITIES:
+            relative = f'configs/{city}.toml'
+            hashes[relative] = hashlib.sha256((source / relative).read_bytes()).hexdigest()
+        write_json(hashes_path, hashes)
+    settings = argparse.Namespace(cities=CITIES, methods=methods, devices=[], episodes=args.episodes,
         seed=42, checkpoint_every=1, eval_every=100, eval_seeds=3, forbid_revisit=False,
         global_reward_only=True, reward_objective='observed_mean', sp_prior_weight=0., sp_prior_temperature=30.,
         sp_prior_hold_episodes=200, sp_prior_off_episode=1000)
@@ -289,19 +335,34 @@ def prepare(args):
         entry['command'][entry['command'].index('--device') + 1] = entry['device']
         if entry['method'] == 'dta':
             entry['command'][entry['command'].index('--sp-prior-weight') + 1] = '0'
+        if routing_mode == 'current_to_dest' and entry['method'] == 'online_ac':
+            entry['command'][entry['command'].index('--eval-every') + 1] = '20'
+        if routing_mode == 'current_to_dest' and entry['method'] in {'mappo','ippo'}:
+            entry['command'] += ['--score-gauge','pre_head_legal_reference_v1']
+        entry['command'].append('--evaluation-argmax')
+        entry['routing_mode'] = routing_mode
         entry['effective_prior'] = 0.
         entry['launched'] = False
+    references = ('shortest', 'dynamic_shortest') if routing_mode == 'current_to_dest' else ('shortest',)
     for city in CITIES:
-        name = f'{city}_shortest_ref'
-        entries.append(dict(id=name, city=city, method='shortest_ref', device='cpu',
-            episode_budget=6, required_gpu_mib=0, required_host_mib=3072,
-            effective_prior=0., output_dir=str(root / city / 'shortest_ref'),
-            log=str(root / 'logs' / f'{name}.log'), state=str(root / 'processes' / f'{name}.json'),
-            command=[sys.executable, '-u', str(source / 'tools/queued_shortest_reference.py'),
-                     '--config', str(source / 'configs' / f'{city}.toml'),
-                     '--output-dir', str(root / city / 'shortest_ref')], launched=False))
+        for policy in references:
+            name = f'{city}_{policy}_ref'
+            entries.append(dict(id=name, city=city, method=f'{policy}_ref', device='cpu',
+                episode_budget=6, required_gpu_mib=0, required_host_mib=3072,
+                effective_prior=0., output_dir=str(root / city / f'{policy}_ref'),
+                log=str(root / 'logs' / f'{name}.log'), state=str(root / 'processes' / f'{name}.json'),
+                command=[sys.executable, '-u', str(source / 'tools/queued_shortest_reference.py'),
+                         '--config', str(source / 'configs' / f'{city}.toml'),
+                         '--output-dir', str(root / city / f'{policy}_ref'), '--policy', policy], launched=False,
+                routing_mode=routing_mode))
+    if routing_mode == 'current_to_dest':
+        entries.sort(key=lambda entry: (0 if entry['method'] == 'online_ac' else
+            1 if entry['method'].endswith('_ref') else 2, CITIES.index(entry['city'])))
     manifest = dict(created_at=now(), source_snapshot=str(source), input_hashes_by_city=inputs,
-        episode_budget=args.episodes, total_training_episodes=args.episodes * len(CITIES) * len(METHODS),
+        episode_budget=args.episodes, total_training_episodes=args.episodes * len(CITIES) * len(methods),
+        methods=list(methods), routing_mode=routing_mode, evaluation_policy='argmax',
+        evaluation_every_by_method={method:(20 if routing_mode == 'current_to_dest' and method == 'online_ac' else 100)
+                                    for method in methods},
         seed=42, eval_every=100, eval_seeds=3, checkpoint_every=1,
         reward_mode='global_only', global_reward_only=True, reward_objective='observed_mean',
         individual_timeout_penalty=0., forbid_revisit=False,
@@ -316,14 +377,15 @@ def prepare(args):
     jobs = {e['id']: dict(status='queued', attempt=0, required_gpu_mib=e['required_gpu_mib'],
                          observed_peak_mib=0., oom_retries=0, pid=None, next_eligible=0.) for e in entries}
     write_json(root / 'queue_state.json', dict(created_at=now(), jobs=jobs))
-    print(json.dumps(dict(prepared=str(root), training_jobs=len(CITIES) * len(METHODS), references=len(CITIES))), flush=True)
+    print(json.dumps(dict(prepared=str(root), training_jobs=len(CITIES) * len(methods),
+                         references=len(CITIES)*len(references))), flush=True)
 
 
 def recover_output(root, entry, state):
     output = Path(entry['output_dir'])
     if not output.exists() or not any(output.iterdir()):
         return False
-    if entry['method'] == 'shortest_ref':
+    if entry['method'] in {'shortest_ref', 'dynamic_shortest_ref'}:
         return False  # reference evaluator resumes its row ledger itself
     boundary = durable_episode(entry)
     checkpoint = output / ('progress.json' if entry['method'] == 'random' else 'latest.pt')
@@ -371,7 +433,7 @@ def status(root, manifest, ledger, gpus=None, allocations=None, gpu_error=None):
         write_json(Path(entry['state']), row)
     payload = dict(timestamp=now(), controller_pid=ledger.get('controller_pid'),
         reward_mode=manifest['reward_mode'], counts=dict(Counter(r['status'] for r in rows)),
-        free_disk_gb=shutil.disk_usage(root).free / 1024 ** 3, gpus=gpus or [],
+        **disk_status(root, manifest), gpus=gpus or [],
         gpu_query_error=gpu_error, runs=rows)
     write_json(root / 'status.json', payload)
     write_json(root / 'queue_state.json', ledger)
@@ -416,7 +478,7 @@ def run(root):
             boundary = durable_episode(entry)
             archives = len(list((Path(entry['output_dir']) / 'episodes/train').glob('episode_*.npz')))
             complete = boundary >= entry['episode_budget'] and (
-                entry['method'] == 'shortest_ref' or archives == entry['episode_budget'])
+                entry['method'] in {'shortest_ref', 'dynamic_shortest_ref'} or archives == entry['episode_budget'])
             # A live controller also requires successful final evaluation/exit.
             interrupted_for_disk = state.pop('interrupted_for_disk', False)
             if complete and code == 0:
@@ -453,7 +515,7 @@ def run(root):
             ledger.pop('admission_override_error', None)
         except (OSError, ValueError) as error:
             ledger['admission_override_error'] = str(error)
-        free_disk = shutil.disk_usage(root).free / 1024 ** 3
+        free_disk = disk_status(root, manifest)['free_disk_gb']
         if free_disk < manifest['min_free_gb']:
             # Pause only this batch's workers; the independent compactor can
             # finish committed archives and free space before automatic resume.
@@ -461,9 +523,11 @@ def run(root):
                 if state['status']=='running' and owned_alive(state, entries[run_id]):
                     state['interrupted_for_disk'] = True
                     os.kill(state['pid'], signal.SIGTERM)
-        host_free = host_available_mib() - manifest['host_headroom_mib']
-        host_free -= sum(max(0, entries[k]['required_host_mib'] - rss_mib(s['pid']))
-                         for k,s in ledger['jobs'].items() if s['status']=='running')
+        host_reservation = manifest.get('pending_host_reservation_fraction', 1.)
+        host_free = effective_host_free_mib(host_available_mib(),
+            [(entries[k]['required_host_mib'], rss_mib(s['pid']))
+             for k, s in ledger['jobs'].items() if s['status'] == 'running'],
+            manifest['host_headroom_mib'], host_reservation)
         cpu_count = sum(s.get('gpu_index') is None for s in running)
         for entry in manifest['runs']:
             state = ledger['jobs'][entry['id']]
@@ -473,12 +537,12 @@ def run(root):
                 continue
             if free_disk < manifest['min_free_gb']:
                 state['status']='waiting_disk';continue
-            if host_free < entry['required_host_mib']:
+            if host_free < host_reservation * entry['required_host_mib']:
                 state['status']='waiting_host';continue
             gpu_index = None
             if state['required_gpu_mib']:
                 gpu_index = choose_gpu(state['required_gpu_mib'], gpus, running, allocations,
-                                       manifest['gpu_headroom_mib'])
+                                       manifest['gpu_headroom_mib'],manifest.get('pending_reservation_fraction',1.))
                 if gpu_index is None:
                     state['status']='waiting_gpu';continue
             elif cpu_count >= manifest['max_cpu_jobs']:
@@ -503,7 +567,7 @@ def run(root):
                          gpu_index=gpu_index, started_at=now(), attempt_log=str(attempt_log), resume=resume)
             children[entry['id']] = process;logs[entry['id']] = log
             running.append(state)
-            host_free -= entry['required_host_mib']
+            host_free -= host_reservation * entry['required_host_mib']
             cpu_count += int(gpu_index is None)
             status(root, manifest, ledger, gpus, allocations, gpu_error)
             print(json.dumps(dict(started=entry['id'], gpu=gpu_index, resume=resume,
@@ -528,7 +592,7 @@ def launch(root):
     subprocess.run(['/usr/bin/tmux','new-session','-d','-s',manifest['controller_session'],
                     '-c',str(source),shell],check=True)
     compactor = [sys.executable,'-u',str(source/'tools/compact_episode_archives.py'),
-                 '--root',str(root),'--workers','2']
+                 '--root',str(root),'--workers',str(manifest.get('compaction_workers',2))]
     shell = shlex.join(compactor)+' >> '+shlex.quote(str(root/'compaction.log'))+' 2>&1'
     subprocess.run(['/usr/bin/tmux','new-session','-d','-s',manifest['compactor_session'],
                     '-c',str(source),shell],check=True)
@@ -541,6 +605,8 @@ def main():
     parser.add_argument('mode', choices=('prepare','launch','run','status'))
     parser.add_argument('--output-root', type=Path, required=True)
     parser.add_argument('--episodes', type=int, default=5000)
+    parser.add_argument('--routing-mode', choices=('next_hop','current_to_dest'), default='next_hop')
+    parser.add_argument('--methods', nargs='+', choices=(*LEARNED,'dta'), default=None)
     parser.add_argument('--poll-seconds', type=float, default=10)
     parser.add_argument('--gpu-headroom-mib', type=int, default=1024)
     parser.add_argument('--min-free-gb', type=float, default=20)

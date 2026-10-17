@@ -21,6 +21,23 @@ SCHEMA_VERSION = 2
 ACTION_SEMANTICS = {"event": "branch-only", "microstep": "all-next-hop"}
 
 
+def archive_routing_mode(metadata: dict[str, Any]) -> str:
+    """Resolve policy provenance while retaining the event model's turn format."""
+    modes = []
+    if "routing_mode" in metadata:
+        modes.append(metadata["routing_mode"])
+    for name in ("config", "resolved_config"):
+        snapshot = metadata.get(name)
+        if isinstance(snapshot, dict) and isinstance(snapshot.get("simulation"), dict):
+            modes.append(snapshot["simulation"].get("routing_mode", "next_hop"))
+    mode = modes[0] if modes else "next_hop"
+    if mode not in ("next_hop", "current_to_dest") or any(value != mode for value in modes):
+        raise ValueError("archive routing mode provenance mismatch")
+    if mode == "current_to_dest" and metadata.get("session_protocol") != "event":
+        raise ValueError("current_to_dest archives require event session protocol")
+    return mode
+
+
 def archive_physics_identity(metadata: dict[str, Any], *, simulation=None) -> dict[str, Any]:
     """Resolve physics provenance; archives predating model fields are micro.
 
@@ -106,6 +123,13 @@ class EpisodeArchive:
         if self.metadata.get("action_semantics", semantics) != semantics:
             raise ValueError("action_semantics does not match session_protocol")
         self.metadata["action_semantics"] = semantics
+        routing_mode = archive_routing_mode(self.metadata)
+        policy_semantics = "periodic-current-to-dest" if routing_mode == "current_to_dest" else semantics
+        if self.metadata.get("policy_action_semantics", policy_semantics) != policy_semantics:
+            raise ValueError("policy action semantics do not match routing mode")
+        if routing_mode == "current_to_dest":
+            self.metadata["routing_mode"] = routing_mode
+            self.metadata["policy_action_semantics"] = policy_semantics
         physics = archive_physics_identity(self.metadata)
         if physics['traffic_model'] == 'meso':
             self.metadata['physics_identity'] = physics
@@ -113,6 +137,7 @@ class EpisodeArchive:
         self._flows: list[np.ndarray] = []
         self._windows: list[dict[str, Any]] = []
         self._events: list[dict[str, Any]] = []
+        self._policy_decisions: list[dict[str, Any]] = []
 
     def _state(self, state: dict[str, Any], shape: tuple[int, ...] | None = None):
         flow = _flow(state["flow"], shape)
@@ -182,7 +207,8 @@ class EpisodeArchive:
         events, reconstructed = [], np.zeros(edges, dtype=np.uint32)
         vehicle_ids = {v["vehicle_id"] for v in state["vehicles"]}
         destinations = {v['vehicle_id']: v['destination_edge'] for v in self._states[0]['vehicles']}
-        for decision in result.decisions:
+        conditioning = getattr(result, "conditioning_decisions", None)
+        for decision in result.decisions if conditioning is None else conditioning:
             row = to_plain_state(decision)
             if (row["vehicle_id"] not in vehicle_ids or not 0 <= row["current_edge"] < edges
                     or not 0 <= row["next_edge"] < edges
@@ -195,9 +221,20 @@ class EpisodeArchive:
             reconstructed[row["next_edge"]] += 1
         if not np.array_equal(actions, reconstructed):
             raise ValueError("action counts do not match successful decisions")
+        policy_decisions = []
+        for decision in result.decisions:
+            row = to_plain_state(decision)
+            if (row["vehicle_id"] not in vehicle_ids or not 0 <= row["current_edge"] < edges
+                    or not 0 <= row["next_edge"] < edges
+                    or not start <= row["decision_time"] < end):
+                raise ValueError("policy decision must belong to a known vehicle, edge and half-open window")
+            row["window_index"] = len(self._windows)
+            row["destination_edge"] = destinations[row["vehicle_id"]]
+            policy_decisions.append(row)
         self._windows.append({"start": start, "end": end, "actions": actions,
                               "departures": departures, "exposure": exposure})
         self._events.extend(events)
+        self._policy_decisions.extend(policy_decisions)
         self._states.append(state)
         self._flows.append(flow)
 
@@ -233,6 +270,8 @@ class EpisodeArchive:
                       time=np.asarray([state["time"] for state in self._states], dtype=np.float64),
                       active_vehicle_seconds=np.asarray([row["exposure"] for row in self._windows], dtype=np.float64),
                       terminated=terminal, truncated=truncated)
+        if archive_routing_mode(self.metadata) == "current_to_dest":
+            arrays["policy_decisions_json"] = _json_array(self._policy_decisions)
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():
@@ -260,6 +299,9 @@ def read_episode_archive(path: Path, *, expected_session_protocol: str | None = 
         result.update(_decode(archive["summary_json"]))
         result["states"] = _decode(archive["states_json"])
         result["decisions"] = _decode(archive["decisions_json"])
+        result["policy_decisions"] = (_decode(archive["policy_decisions_json"])
+                                       if "policy_decisions_json" in archive.files
+                                       else result["decisions"])
     if result["schema_version"] not in {1, SCHEMA_VERSION}:
         raise ValueError("unsupported episode archive version")
     protocol = result["metadata"]["session_protocol"]
@@ -268,6 +310,7 @@ def read_episode_archive(path: Path, *, expected_session_protocol: str | None = 
     if expected_session_protocol is not None and expected_session_protocol != protocol:
         raise ValueError(f"session protocol mismatch: expected {expected_session_protocol}, found {protocol}")
     archive_physics_identity(result['metadata'])
+    archive_routing_mode(result['metadata'])
     # Old archives stored successful next-hop decisions. Preserve every row,
     # associating its destination through the complete initial vehicle table.
     destinations = {v['vehicle_id']: v['destination_edge'] for v in result['states'][0]['vehicles']}

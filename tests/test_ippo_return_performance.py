@@ -6,7 +6,7 @@ import pytest
 import torch
 
 from urban_dreamer.learning.baselines.common import global_reward_integral
-from urban_dreamer.models.policy import lambda_return
+from urban_dreamer.models.policy import DEFAULT_LAMBDA
 
 
 def reference_targets(rows, values, windows, deadline):
@@ -20,10 +20,14 @@ def reference_targets(rows, values, windows, deadline):
         bounds = [float(rows[index]['time']) for index in indices] + [end]
         rewards = torch.tensor([integrated(b) - integrated(a)
                                 for a, b in zip(bounds, bounds[1:])], device=values.device)
-        terminal = torch.zeros(len(indices), dtype=torch.bool, device=values.device)
-        terminal[-1] = True
-        targets[indices] = lambda_return(rewards, torch.cat((values[indices[1:]], values.new_zeros(1))),
-                                          terminal=terminal)
+        # Independent scalar reference: traces decay per physical 30 seconds,
+        # with no extra decay for duplicate event timestamps.
+        running = rewards[-1]
+        targets[indices[-1]] = running
+        for offset in reversed(range(len(indices) - 1)):
+            trace = values.new_tensor(DEFAULT_LAMBDA ** ((bounds[offset + 1] - bounds[offset]) / 30.))
+            running = rewards[offset] + (1. - trace) * values[indices[offset + 1]] + trace * running
+            targets[indices[offset]] = running
     return targets
 
 

@@ -23,16 +23,17 @@ if str(ROOT) not in sys.path:
 from urban_dreamer.learning.observations import build_actor_observations
 from urban_dreamer.learning.sumo_sampling import resolve_session_factory
 from urban_dreamer.learning.baselines.common import (EpisodeRunner, resolve_collection_settings,
-    accounting_context, reward_objective, reward_context_dim, evaluation_rng, evaluation_policy_label)
+    accounting_context, reward_objective, reward_context_dim, evaluation_rng, evaluation_policy_label,
+    build_collection_candidates)
 from urban_dreamer.learning.baselines.collection_policy import ActorMirror
-from urban_dreamer.learning.entropy_schedule import entropy_schedule_profile
+from urban_dreamer.learning.entropy_schedule import entropy_schedule_profile, entropy_schedule_episodes
 from urban_dreamer.models.policy import (NextHopActor,
     individual_actor_advantage, lambda_return, set_shortest_path_prior,
-    shortest_path_prior_weight)
+    shortest_path_prior_weight, population_scaled_entropy)
 from urban_dreamer.traffic.environment import SumoSession
 from urban_dreamer.traffic.demand import PoissonDemand
 from urban_dreamer.traffic.routing import validate_prepared_inputs
-from urban_dreamer.traffic.topology import NextHopCandidates, load_traffic_topology
+from urban_dreamer.traffic.topology import load_traffic_topology
 from urban_dreamer.traffic.simulation_settings import physics_identity
 from urban_dreamer.workflow.config import load_config
 
@@ -63,9 +64,7 @@ def actor_prior_metrics(actor):
 def set_episode_entropy(runner, episode):
     profile = entropy_schedule_profile(runner.config.method,
         completed_episodes=max(0, int(episode) - 1),
-        total_episodes=max(1, int(getattr(runner.args, 'episodes', 5000))))
-    # Historical real AC used a fixed coefficient, even with population-mode
-    # mainline configs. Preserve that behavior for old experiment snapshots.
+        total_episodes=entropy_schedule_episodes(runner.args))
     coefficient = profile['coefficient'] if profile['mode'] in {'annealed', 'off'} else .002
     runner.entropy_coefficient = coefficient
     runner.entropy_profile = {**profile, 'coefficient': coefficient}
@@ -118,9 +117,8 @@ class RealActorCritic:
             duration_seconds=self.config.simulation.demand_duration_seconds)
         self.network = self.topology.network
         self.n = len(self.topology.vehicles)
-        self.candidates = NextHopCandidates(self.network,
-            traffic_model=self.config.simulation.traffic_model, **(
-            {'forbid_revisit': True} if getattr(args, 'forbid_revisit', False) else {}))
+        self.candidates = build_collection_candidates(self.network, self.config.simulation,
+            forbid_revisit=bool(getattr(args, 'forbid_revisit', False)))
         self.session_factory = resolve_session_factory(getattr(args, 'session', 'microstep'),
                                                        float(getattr(args, 'step_seconds', 1.)),
                                                        getattr(args, 'backend', 'traci'),
@@ -190,6 +188,8 @@ class RealActorCritic:
             if getattr(self.args, 'collection_device', None) is not None:
                 provenance['collection_device'] = str(self._collection_mirror.device)
             provenance.update(prior_metrics)
+            if getattr(self.config.simulation, 'routing_mode', 'next_hop') == 'current_to_dest':
+                provenance['config'] = shared['config']
             if not self.n:
                 provenance.update(padded_empty_episode=True, physical_simulation_end_seconds=0.)
             return dict(provenance,
@@ -248,17 +248,28 @@ class RealActorCritic:
         critic_seconds = time.monotonic() - critic_started
         actor_started = time.monotonic()
         actor_loss_value, actor_gradient_value = 0., 0.
+        actor_metrics = dict(event_advantage_std=0., actor_advantage_std=0.,
+            actor_advantage_clipped_fraction=0., actor_parameter_update_norm=0.,
+            policy_logit_spread_mean=0.)
+        entropy_metrics = {}
         if rows:
             event_windows = torch.tensor([r['window'] for r in rows], device=self.device)
-            advantage = individual_actor_advantage(global_advantage[event_windows],
-                (torch.zeros(len(rows), device=self.device) if getattr(self.args, 'global_reward_only', True)
-                 else self.tensor([r.get('timeout_return', 0.) for r in rows])))
+            event_advantage = global_advantage[event_windows]
+            timeout_returns = (torch.zeros(len(rows), device=self.device)
+                if getattr(self.args, 'global_reward_only', True)
+                else self.tensor([r.get('timeout_return', 0.) for r in rows]))
+            advantage = individual_actor_advantage(event_advantage, timeout_returns)
             features = self.tensor(np.stack([r['features'] for r in rows]))
             mask = torch.as_tensor(np.stack([r['mask'] for r in rows]), device=self.device)
             actions = torch.tensor([r['action'] for r in rows], device=self.device)
-            distribution = Categorical(logits=self.actor.forward_logits(features, mask))
+            logits = self.actor.forward_logits(features, mask)
+            distribution = Categorical(logits=logits)
             entropy = distribution.entropy()
-            actor_loss = -(distribution.log_prob(actions) * advantage + self.entropy_coefficient * entropy).mean()
+            populations = torch.full_like(entropy, self.n) if self.entropy_profile['mode'] == 'population' else torch.ones_like(entropy)
+            entropy_bonus, entropy_stats = population_scaled_entropy(entropy, populations,
+                event_advantage, base_coef=self.entropy_coefficient, mode=self.entropy_profile['mode'])
+            actor_loss = -(distribution.log_prob(actions) * advantage + entropy_bonus).mean()
+            before_actor = [parameter.detach().clone() for parameter in self.actor.parameters()]
             self.actor_optimizer.zero_grad(set_to_none=True)
             actor_loss.backward()
             actor_gradient = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 10.)
@@ -266,6 +277,16 @@ class RealActorCritic:
                 raise RuntimeError('non-finite actor gradient')
             self.actor_optimizer.step()
             actor_loss_value, actor_gradient_value = float(actor_loss.detach()), float(actor_gradient)
+            with torch.no_grad():
+                unclipped = event_advantage / event_advantage.std(unbiased=False).clamp_min(1.) + timeout_returns
+                update_norm = torch.linalg.vector_norm(torch.stack([
+                    torch.linalg.vector_norm(parameter.detach() - previous)
+                    for parameter, previous in zip(self.actor.parameters(), before_actor)]))
+                actor_metrics.update(event_advantage_std=float(event_advantage.std(unbiased=False)),
+                    actor_advantage_std=float(advantage.std(unbiased=False)),
+                    actor_advantage_clipped_fraction=float((unclipped.abs() > 2.5).float().mean()),
+                    actor_parameter_update_norm=float(update_norm))
+                entropy_metrics = {key: float(value) for key, value in entropy_stats.items()}
         actor_seconds = time.monotonic() - actor_started
         critic_started = time.monotonic()
         global_loss = F.mse_loss(global_values, global_targets)
@@ -284,12 +305,21 @@ class RealActorCritic:
             legal_count = mask.sum(-1)
             multi = legal_count >= 2
             if bool(multi.any()):
+                legal_logits = logits.detach()[multi]
+                legal_mask = mask[multi]
+                actor_metrics['policy_logit_spread_mean'] = float((
+                    legal_logits.masked_fill(~legal_mask, -torch.inf).amax(-1)
+                    - legal_logits.masked_fill(~legal_mask, torch.inf).amin(-1)).mean())
                 distribution_metrics = dict(policy_entropy_mean=float(entropy.detach()[multi].mean()),
                     normalized_policy_entropy_mean=float((entropy.detach()[multi] / legal_count[multi].float().log()).mean()),
                     max_action_probability_mean=float(distribution.probs.detach().amax(-1)[multi].mean()))
+        adam_steps = [state['step'].detach().cpu() for state in self.actor_optimizer.state.values() if 'step' in state]
         return dict(actor_loss=actor_loss_value, actor_gradient_norm=actor_gradient_value,
+            actor_optimizer_steps=int(torch.stack(adam_steps).max()) if adam_steps else 0,
+            **actor_metrics, **entropy_metrics,
             actor_entropy_mode=self.entropy_profile['mode'], entropy_coefficient=self.entropy_coefficient,
-            entropy_schedule_progress=self.entropy_profile['progress'], **distribution_metrics,
+            entropy_schedule_progress=self.entropy_profile['progress'],
+            entropy_schedule_total_episodes=self.entropy_profile['total_episodes'], **distribution_metrics,
             global_advantage_std=float(global_advantage.std(unbiased=False)),
             global_critic_loss=float(global_loss.detach()), global_critic_gradient_norm=float(global_gradient),
             global_explained_variance=float(global_ev), actor_update_seconds=actor_seconds,
@@ -317,7 +347,8 @@ class RealActorCritic:
             raise ValueError('experiment checkpoint mismatch')
         if state.get('physics', {'traffic_model': 'micro'}) != physics_identity(self.config.simulation):
             raise ValueError('experiment checkpoint physics mismatch')
-        if self.config.method.actor_entropy_mode == 'annealed' and state['args'].get('episodes') != getattr(self.args, 'episodes', None):
+        if (self.config.method.actor_entropy_mode == 'annealed'
+                and entropy_schedule_episodes(state['args']) != entropy_schedule_episodes(self.args)):
             raise ValueError('resume changed entropy schedule episode budget')
         for key in ('seed', 'vehicle_limit', 'actor_lr', 'global_critic_lr', 'session', 'step_seconds', 'backend'):
             if state['args'][key] != getattr(self.args, key):
@@ -411,6 +442,8 @@ def main(argv=None):
     parser.add_argument('--config', type=Path, default=ROOT / 'configs/toy_cross_bottleneck.toml')
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--episodes', type=int, default=150)
+    parser.add_argument('--entropy-schedule-episodes', type=int, default=None,
+        help='Fixed entropy annealing horizon; defaults to --episodes, independently of the stop budget')
     parser.add_argument('--eval-every', type=int, default=10)
     parser.add_argument('--eval-seeds', type=int, default=3)
     parser.add_argument('--evaluation-temperature', type=float, default=.2)
@@ -451,6 +484,8 @@ def main(argv=None):
     parser.add_argument('--global-reward-only', action=argparse.BooleanOptionalAction, default=True,
                         help='Use only the shared global reward; --no-global-reward-only explicitly selects legacy timeout shaping')
     args = parser.parse_args(argv)
+    if args.entropy_schedule_episodes is not None and args.entropy_schedule_episodes < 1:
+        parser.error('entropy-schedule-episodes must be a positive integer')
     try:
         actor_evaluation_label = evaluation_policy_label(args.evaluation_temperature, deterministic=args.evaluation_argmax)
     except ValueError as error:

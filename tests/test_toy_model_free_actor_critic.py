@@ -258,11 +258,17 @@ def test_episode_demand_is_reproducible_and_reference_topology_immutable(tmp_pat
         travel_times = {}
         microstep_seconds = 1.
         metrics = {'microsteps': 0}
-        def __init__(self, config, prepared, topology): seen.append(topology)
+        def __init__(self, config, prepared, topology):
+            seen.append(topology)
+            self.topology = topology
         def __enter__(self): return self
         def __exit__(self, *unused): pass
         def reset(self):
-            return dict(time=0., flow=runner.network.extract_flow({}), active_vehicle_count=0, vehicles=[])
+            return dict(time=0., flow=runner.network.extract_flow({}), active_vehicle_count=0,
+                        vehicles=[dict(vehicle_id=v.vehicle_id, departed=False, arrived=False,
+                                       destination_edge=runner.network.edge_to_index[
+                                           runner.topology.destinations[v.destination_index]])
+                                  for v in self.topology.vehicles])
     monkeypatch.setattr(runner_module, 'SumoSession', EmptySession)
     _, first = runner.run_episode(policy='deterministic', seed=10042)
     _, second = runner.run_episode(policy='random', seed=10042)

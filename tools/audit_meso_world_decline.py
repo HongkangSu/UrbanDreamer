@@ -122,6 +122,7 @@ def main():
              prior_filter_strength=getattr(config.method, 'prior_filter_strength', 10.0),
              prior_action_conditioned=getattr(config.method, 'prior_action_conditioned', True),
              prior_filter_input=getattr(config.method, 'prior_filter_input', False),prior_noise_scale=config.method.prior_noise_scale,
+             prior_usage=getattr(config.method, 'prior_usage', 'source_reference'),
              event_protocol=True,codec_speed_positive=config.codec.speed_positive).to(device)
         state=payload['training_state']['models']['world_model']
         model.load_state_dict(state);model.eval().requires_grad_(False)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from numbers import Integral
 from typing import TYPE_CHECKING
 
@@ -15,6 +16,21 @@ SCHEDULE_FIELDS = (
     'actor_entropy_hold_fraction',
     'actor_entropy_end_fraction',
 )
+
+
+def entropy_schedule_episodes(args) -> int:
+    """Keep the annealing horizon independent of an extended stop budget.
+
+    Old checkpoints have no override and use their saved episode budget.
+    Zero-episode evaluation runs still require a positive schedule horizon.
+    """
+    get = args.get if isinstance(args, Mapping) else lambda key, default=None: getattr(args, key, default)
+    override = get('entropy_schedule_episodes')
+    if override is not None:
+        if isinstance(override, bool) or not isinstance(override, Integral) or override < 1:
+            raise ValueError('entropy_schedule_episodes must be a positive integer')
+        return int(override)
+    return max(1, int(get('episodes', 5000)))
 
 
 def validate_entropy_schedule_settings(method_config: MethodConfig) -> None:
@@ -41,8 +57,8 @@ def entropy_schedule_profile(
 ) -> dict[str, str | float | int]:
     """Return the coefficient for the next update without changing policy logits.
 
-    Episode counts use the run's full budget, including episodes restored from a
-    checkpoint. All updates within one episode receive the same coefficient.
+    Episode counts use the fixed annealing horizon, including episodes restored
+    from a checkpoint. All updates within one episode receive the same coefficient.
     ``annealed`` holds the initial coefficient, then follows a cosine decay to
     the final floor. Legacy and population modes retain the historical base
     coefficient; population scaling is applied separately by the loss helper.

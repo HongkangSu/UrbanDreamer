@@ -70,6 +70,7 @@ def test_restart_defaults_disable_prior_without_history_mask(monkeypatch, tmp_pa
 def test_legacy_missing_prior_fields_remain_zero():
     assert ac.PRIOR_DEFAULTS['sp_prior_weight'] == 0.
     assert baseline.PRIOR_DEFAULTS['sp_prior_weight'] == 0.
-    baseline.validate_prior_resume({}, SimpleNamespace(**baseline.PRIOR_DEFAULTS))
+    legacy = dict(baseline.PRIOR_DEFAULTS, reward_objective='legacy_exposure')
+    baseline.validate_prior_resume({}, SimpleNamespace(**legacy))
     with pytest.raises(ValueError, match='sp_prior_weight'):
-        baseline.validate_prior_resume({}, SimpleNamespace(**(baseline.PRIOR_DEFAULTS | {'sp_prior_weight': 1.})))
+        baseline.validate_prior_resume({}, SimpleNamespace(**(legacy | {'sp_prior_weight': 1.})))

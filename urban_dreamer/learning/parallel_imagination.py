@@ -17,12 +17,11 @@ from torch.nn import functional as F
 
 from .action_events import pack_action_events
 from .imagination import advance_imagined_window, clip_road_speed_fractions
-from .observations import build_actor_observations, prepare_actor_window
+from .observations import build_actor_observations, prepare_actor_window, selected_decisions
 from ..models.event_critic import (EventActionCritic, build_event_q_inputs,
                                   detached_counterfactual_baseline)
 from ..models.policy import NextHopActor, lambda_return, set_shortest_path_prior
 from ..models.world_model import EventActionEncoder
-from ..traffic.environment import NextHopDecision
 from .global_reward import causal_context
 from .critic_budget import remaining_cost_budget
 
@@ -101,8 +100,7 @@ def _collect_window(task):
         probs = logits.softmax(-1)
         selected = torch.multinomial(probs, 1, generator=generator).squeeze(-1)
         choices = selected.tolist()
-        decisions = [NextHopDecision(str(state['vehicle_id']), int(state['current_edge']),
-            int(observation.edge_indices[i, choices[i]]), float(now)) for i, state in enumerate(pending)]
+        decisions = selected_decisions(pending, observation, choices, now)
         groups.append(dict(vehicle_id=[str(state['vehicle_id']) for state in pending],
             event_index=list(range(event_count, event_count + len(pending))), decision_time=float(now),
             budget=remaining_cost_budget(now, deadline, sum(not state['arrived'] for state in states), population)))
@@ -127,9 +125,11 @@ def _collect_window(task):
         rng=generator.get_state().numpy().copy(),
         context=_context(states, result.end_time, deadline, population,
                          cumulative_seconds + result.active_vehicle_seconds))
+    if result.action_events:
+        output['event_count'] = max(event_count, result.action_events[-1].event_index + 1)
     if groups:
         features, mask, selected = torch.cat(observations), torch.cat(masks), torch.cat(selections)
-        events = result.action_events
+        events = result.action_events if result.policy_events is None else result.policy_events
         sparse = pack_action_events([[events]], window_starts=[[task['start']]])
         q_features = build_event_q_inputs(worker.world, z=torch.from_numpy(task['latent'])[None],
             observations=features, candidate_edges=torch.from_numpy(np.concatenate(edges)), mask=mask,

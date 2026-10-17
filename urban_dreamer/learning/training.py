@@ -22,7 +22,6 @@ import torch.nn.functional as F
 from ..workflow.config import MainlineConfig
 from .entropy_schedule import entropy_schedule_profile
 from .critic_budget import remaining_cost_budget
-from ..traffic.environment import NextHopDecision
 from ..traffic.demand import PoissonDemand, demand_identity
 from ..traffic.routing import PreparedInputs
 from ..traffic.topology import NextHopCandidates, TrafficTopology
@@ -30,12 +29,15 @@ from ..models.policy import (CentralizedLatentValueCritic, NextHopActor, lambda_
     attach_timeout_penalties, individual_actor_advantage, population_scaled_entropy,
     set_shortest_path_prior, shortest_path_prior_weight)
 from ..models.world_model import FLOW_LATENT_DIM, UrbanDreamerWorldModel, independent_transition_fm_loss, recursive_fm_loss
-from .observations import build_actor_observations, prepare_actor_window, PreparedActorWindow
+from .observations import (build_actor_observations, prepare_actor_window, PreparedActorWindow,
+                           selected_decisions)
 from .sumo_sampling import SumoEpisodeSampler, resolve_session_factory
 from .imagination import advance_imagined_window, clip_road_speed_fractions
 from .replay import MacroTransition, ReplayBuffer
 from .global_reward import REWARD_CONTRACT, REWARD_SCALE, causal_context, observed_mean_seconds
 from .action_events import ActionEvent, pack_action_events
+from .routing_evaluation_metrics import (DiversionCost, all_demand_censored_metrics,
+    DIVERSION_COST_DEFINITION, ALL_DEMAND_CENSORED_DEFINITION)
 from .episode_archive import EpisodeArchive
 from .offline_data import OfflineEpisodeDataset
 from .cohort_targets import prepare_transition_targets, prepare_cohort_batch
@@ -140,6 +142,9 @@ class MainlineTrainer:
         self.total_vehicle_count = len(topology.vehicles)
         self.candidates = NextHopCandidates(self.network,
             traffic_model=config.simulation.traffic_model)
+        if getattr(config.simulation, 'routing_mode', 'next_hop') == 'current_to_dest':
+            from ..traffic.route_candidates import RouteCandidates
+            self.candidates = RouteCandidates(self.network, traffic_model=config.simulation.traffic_model)
         self.microstep_seconds = 1.0
         self._session_factory = _session_factory
         self._next_environment_episode = 0
@@ -152,6 +157,7 @@ class MainlineTrainer:
             prior_filter_strength=getattr(config.method, 'prior_filter_strength', 10.0),
             prior_action_conditioned=getattr(config.method, 'prior_action_conditioned', True),
             prior_filter_input=getattr(config.method, 'prior_filter_input', False),
+            prior_usage=getattr(config.method, 'prior_usage', 'source_reference'),
             codec_speed_positive=config.codec.speed_positive).to(self.device)
         self.actor = NextHopActor().to(self.device)
         self.evaluation_temperature = None
@@ -638,8 +644,7 @@ class MainlineTrainer:
                 deterministic=mode == 'evaluation' and temperature is None,
                 temperature=1. if temperature is None else temperature, **prior_kwargs)
         indices = selection.candidate_index.cpu().tolist()
-        return [NextHopDecision(str(state['vehicle_id']), int(state['current_edge']),
-            int(observations.edge_indices[i, indices[i]]), timestamp) for i, state in enumerate(states)]
+        return selected_decisions(states, observations, indices, timestamp)
 
     def _episode_step_limit(self, mode):
         simulation = self.config.simulation
@@ -690,7 +695,9 @@ class MainlineTrainer:
         started = time.monotonic()
         transitions = []
         events = 0
+        policy_decision_count = 0
         exposure = 0.
+        diversion_cost = DiversionCost(self.candidates) if evaluation else None
         with SumoEpisodeSampler(session=session, candidates=self.candidates,
                 deadline_seconds=self._episode_end_time(mode), total_vehicle_count=total_vehicle_count,
                 context_mode='observation', sort_pending=True, pad_empty=False, advance_empty=True,
@@ -710,9 +717,13 @@ class MainlineTrainer:
                 sp_prior_schedule_episode=int(self.metrics['online_episodes_completed']) + 1,
                 evaluation_policy=policy_protocol['archive_policy'] if evaluation else None,
                 evaluation_temperature=policy_protocol['temperature'] if evaluation else None,
+                **(dict(diversion_cost_definition=DIVERSION_COST_DEFINITION,
+                        all_demand_censored_definition=ALL_DEMAND_CENSORED_DEFINITION) if evaluation else {}),
                 evaluation_action_seed=(policy_protocol['action_seed_base'] + episode_index) if evaluation else None,
                 input_hashes=self.prepared_inputs.input_hashes, edge_ids=list(self.network.edge_ids),
                 total_vehicle_count=total_vehicle_count, session_protocol='event',
+                **({'routing_mode': 'current_to_dest'}
+                   if getattr(self.config.simulation, 'routing_mode', 'next_hop') == 'current_to_dest' else {}),
                 step_seconds=1., backend=self.config.simulation.backend,
                 config=session_config.resolved_snapshot(),
                 realized_demand=[asdict(vehicle) for vehicle in episode_topology.vehicles],
@@ -740,13 +751,19 @@ class MainlineTrainer:
                     mode=mode, actor=collection_actor, observations=observations)
             for sampled in sampler.windows(select_observed, before_window=before_window):
                 window, step = sampled.result, sampled.index
+                conditioning = getattr(window, 'conditioning_decisions', None)
+                if conditioning is None:
+                    conditioning = window.decisions
                 window_events = tuple(ActionEvent(str(decision.vehicle_id), events + index,
                     float(decision.decision_time), int(decision.current_edge), int(decision.next_edge),
-                    destinations[str(decision.vehicle_id)]) for index, decision in enumerate(window.decisions))
+                    destinations[str(decision.vehicle_id)]) for index, decision in enumerate(conditioning))
                 archive.append(window)
+                if diversion_cost is not None:
+                    diversion_cost.add(conditioning, destinations)
                 state = window.next_state
                 exposure += window.active_vehicle_seconds
-                events += len(window.decisions)
+                events += len(conditioning)
+                policy_decision_count += len(window.decisions)
                 transitions.append(MacroTransition(flow=start_inputs['flow'], action=window.action_counts / denominator,
                     departure=window.departure_counts / denominator, context=start_inputs['context'], next_flow=state['flow'],
                     active_vehicle_fraction=float(np.clip(window.active_vehicle_seconds / (denominator * 30.), 0., 1.)),
@@ -796,6 +813,16 @@ class MainlineTrainer:
                 f'{mode}_microstep_seconds': float(session.microstep_seconds),
                 f'{mode}_microsteps': float(session.metrics["microsteps"]),
                 f'{mode}_t_all': travel_minutes}
+            if evaluation:
+                evaluation_metrics = diversion_cost.metrics(sampler.accounting.started_count)
+                evaluation_metrics.update(all_demand_censored_metrics(
+                    episode_topology.vehicles,
+                    [dict(vehicle, arrival_time=observed_arrivals[str(vehicle['vehicle_id'])])
+                     if vehicle['arrived'] else vehicle for vehicle in state['vehicles']],
+                    min(float(state['time']), self._episode_end_time(mode))))
+                metrics.update({f'evaluation_{key}': value for key, value in evaluation_metrics.items()})
+            if getattr(self.config.simulation, 'routing_mode', 'next_hop') == 'current_to_dest':
+                metrics[f'{mode}_policy_decisions'] = float(policy_decision_count)
             archive.save(self.config.run.output_dir / 'episodes' / mode / f'episode_{episode_index:06d}.npz',
                 metrics=metrics, travel_times=durations, completed=complete,
                 deadline_seconds=self._episode_end_time(mode))
@@ -1189,11 +1216,7 @@ class MainlineTrainer:
                     probabilities = logits.softmax(dim=-1)
                     selected = torch.multinomial(probabilities, 1).squeeze(-1)
                 selected_host = selected.detach().cpu().tolist()
-                decisions = []
-                for i, state in enumerate(events):
-                    decision = NextHopDecision(str(state['vehicle_id']), int(state['current_edge']),
-                        int(observations.edge_indices[i, selected_host[i]]), float(now))
-                    decisions.append(decision)
+                decisions = selected_decisions(events, observations, selected_host, now)
                 if critic_only:
                     event_count += len(events)
                     return decisions
@@ -1219,7 +1242,10 @@ class MainlineTrainer:
                 traffic_model=getattr(self.config.simulation, 'traffic_model', 'micro'),
                 vehicle_max_speed_mps=self.config.simulation.vehicle_max_speed_mps,
                 stop_when_empty=True)
-            self._complete_window_event_q(groups[group_start:], result.action_events, latent, window_start)
+            policy_events = (result.action_events if result.policy_events is None else result.policy_events)
+            self._complete_window_event_q(groups[group_start:], policy_events, latent, window_start)
+            if result.action_events:
+                event_count = max(event_count, result.action_events[-1].event_index + 1)
             full_window = abs(result.end_time - (timestamp + WORLD_MODEL_INTERVAL_SECONDS)) <= 1e-7
             with torch.no_grad():
                 # A terminal partial tail has physical cost but no fictitious

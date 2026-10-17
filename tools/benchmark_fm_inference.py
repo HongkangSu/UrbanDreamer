@@ -86,6 +86,7 @@ def main():
         prior_filter_strength=getattr(config.method, 'prior_filter_strength', 10.0),
         prior_action_conditioned=getattr(config.method, 'prior_action_conditioned', True),
         prior_filter_input=getattr(config.method, 'prior_filter_input', False),prior_noise_scale=config.method.prior_noise_scale,
+        prior_usage=getattr(config.method, 'prior_usage', 'source_reference'),
         codec_speed_positive=config.codec.speed_positive).to(device).eval().requires_grad_(False)
     payload=torch.load(args.source/'source_checkpoint.pt',map_location='cpu',weights_only=True)
     model.load_state_dict(payload['training_state']['models']['world_model']);del payload

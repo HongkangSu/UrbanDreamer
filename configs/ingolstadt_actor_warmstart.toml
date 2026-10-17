@@ -16,6 +16,8 @@ evaluation_episodes = 5
 codec_pretraining_epochs = 10
 
 [simulation]
+# K=4 current-to-destination route actions at global 30-second boundaries.
+routing_mode = "current_to_dest"
 vehicle_max_speed_mps = 40.0
 world_model_intervals_per_episode = 60
 episode_wall_timeout_seconds = 3600.0
@@ -61,9 +63,10 @@ imagination_time_budget_seconds = 0.0
 [method]
 # State-only background prior; FM retains action conditioning.
 prior_filter = "soft"
-prior_filter_strength = 10.0
+prior_filter_strength = 0.1
 prior_action_conditioned = false
 prior_filter_input = false
+prior_usage = "condition_only"
 low_frequency_rank = 16
 prior_noise_scale = 0.1
 prior_loss_weight = 0.1

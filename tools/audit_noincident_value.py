@@ -20,7 +20,7 @@ def main():
  prior_filter=getattr(c.method, 'prior_filter', 'hard'),
  prior_filter_strength=getattr(c.method, 'prior_filter_strength', 10.0),
  prior_action_conditioned=getattr(c.method, 'prior_action_conditioned', True),
- prior_filter_input=getattr(c.method, 'prior_filter_input', False),prior_noise_scale=c.method.prior_noise_scale,event_protocol=True,codec_speed_positive=c.codec.speed_positive)
+ prior_filter_input=getattr(c.method, 'prior_filter_input', False), prior_usage=getattr(c.method, 'prior_usage', 'source_reference'),prior_noise_scale=c.method.prior_noise_scale,event_protocol=True,codec_speed_positive=c.codec.speed_positive)
  wm.load_state_dict(p['training_state']['models']['world_model']);v=CentralizedLatentValueCritic();v.load_state_dict(p['training_state']['models']['latent_critic']);wm.eval().requires_grad_(False);v.eval().requires_grad_(False)
  rows=[]
  for episode in [74,124,424,484]:

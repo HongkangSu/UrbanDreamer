@@ -19,7 +19,8 @@ def setup(tmp_path):
     config = load_config(Path(__file__).parents[1] / 'configs/toy_cross_bottleneck.toml')
     # This fixture exercises historical microscopic archives and manifests.
     # Shipped profiles now select MESO; keep legacy compatibility explicit.
-    config = replace(config, simulation=replace(config.simulation, traffic_model='micro', backend='traci'),
+    config = replace(config, simulation=replace(config.simulation, traffic_model='micro', backend='traci',
+                     routing_mode='next_hop'),
                      run=replace(config.run, output_dir=tmp_path / 'output'),
                      data=DataConfig((tmp_path / 'archives',), 2))
     network = SimpleNamespace(edge_ids=('0', '1', '2'), edge_count=3,

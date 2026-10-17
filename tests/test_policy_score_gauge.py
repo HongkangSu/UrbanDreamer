@@ -194,16 +194,16 @@ def test_unsupported_gauge_is_rejected():
 
 
 @pytest.mark.parametrize('cls', [MappoMethod, IppoMethod])
-def test_legacy_protocol_is_unchanged_and_gauge_requires_explicit_migration(cls):
+def test_gauge_requires_explicit_migration_under_stable_ppo_protocol(cls):
     args = SimpleNamespace(seed=42, actor_lr=3e-4, critic_lr=3e-4)
     runner = SimpleNamespace(device=torch.device('cpu'), network=SimpleNamespace(edge_count=2))
     legacy = cls(args, runner)
     explicit_legacy = cls(SimpleNamespace(**vars(args), score_gauge='legacy'), runner)
     stable = cls(SimpleNamespace(**vars(args), score_gauge=GAUGE), runner)
     assert legacy.learning_protocol() == explicit_legacy.learning_protocol()
-    assert legacy.learning_protocol()['version'] == 2
+    assert legacy.learning_protocol()['version'] == 7
     assert 'score_gauge' not in legacy.learning_protocol()
-    assert stable.learning_protocol()['version'] == 4
+    assert stable.learning_protocol()['version'] == 7
     assert stable.learning_protocol()['score_gauge'] == GAUGE
     state = deepcopy(legacy.state_dict())
     before = deepcopy(stable.actor.state_dict())

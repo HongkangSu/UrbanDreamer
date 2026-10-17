@@ -5,12 +5,13 @@ The policy side is the global-only variant of the reference actor-critic
 advantages from ``common.GlobalTrafficCritic``). The default shared reward is
 -delta(C/max(B,1))/60; individual timeout shaping is an explicit legacy mode. A 5-member probabilistic ensemble predicts the one-window flow
 delta N(delta_flow; mean, var) and the global window reward from (flow, action,
-departure, context). Each episode branches k=2 imagined windows from M=16
+departure, context). Each episode branches k=1 imagined window from M=4
 observed window seeds through the identity-preserving physical imagination
 (``advance_imagined_window``); the imagined window sequence is scored by the
 global critic without fitting it (``global_critic_update(..., update=False)``),
-and the resulting imagined decision rows are mixed 1:1 with real rows in every
-policy update, the MBPO model-augmented batch scheme.
+and the resulting fresh imagined decision rows are mixed with real rows in a
+single on-policy actor update. Model transitions remain replayable; sampled
+actor actions and their old advantages do not.
 """
 from __future__ import annotations
 
@@ -24,9 +25,9 @@ from torch import nn
 import torch.nn.functional as F
 
 from ...models.policy import attach_timeout_penalties, NextHopActor
-from ...traffic.environment import NextHopDecision, safe_microstep_seconds
+from ...traffic.environment import safe_microstep_seconds
 from ..imagination import advance_imagined_window, clip_road_speed_fractions
-from ..observations import build_actor_observations, prepare_actor_window
+from ..observations import build_actor_observations, prepare_actor_window, selected_decisions
 from . import METHODS
 from ..global_reward import causal_context
 from .common import reward_objective, window_accounting, reward_context_dim, GlobalTrafficCritic, global_critic_update, policy_gradient_step
@@ -36,18 +37,18 @@ WINDOW_SECONDS = 30.0
 HIDDEN_DIM = 256
 
 ENSEMBLE_SIZE = 5
-MODEL_TRAIN_ROUNDS = 4
+MODEL_TRAIN_ROUNDS = 2
 MODEL_BATCH_SIZE = 64
 MODEL_BUFFER_EPISODES = 200
 MODEL_LR = 3e-4
 LOGVAR_MIN = -8.0
 LOGVAR_MAX = 2.0
 
-ROLLOUT_SEEDS = 16
-ROLLOUT_LENGTH = 2
+ROLLOUT_SEEDS = 4
+ROLLOUT_LENGTH = 1
 MODEL_ROWS_LIMIT = 40000
 MODEL_ROWS_CHECKPOINT = 5000
-POLICY_UPDATES_PER_EPISODE = 4
+POLICY_UPDATES_PER_EPISODE = 1
 
 GRAD_CLIP = 10.0
 
@@ -63,6 +64,12 @@ class EnsembleMember(nn.Module):
             nn.Linear(flat + 2 * self.edge_count + context_dim, HIDDEN_DIM), nn.Tanh(),
             nn.Linear(HIDDEN_DIM, HIDDEN_DIM), nn.Tanh())
         self.head = nn.Linear(HIDDEN_DIM, 2 * flat + 1)
+        # Start near persistence rather than injecting unit-variance flow noise
+        # into the first actor updates (observed deltas are usually small).
+        nn.init.zeros_(self.head.weight)
+        nn.init.zeros_(self.head.bias)
+        with torch.no_grad():
+            self.head.bias[flat:2 * flat].fill_(-6.)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         raw = self.head(self.trunk(x))
@@ -88,6 +95,9 @@ class MbpoMethod:
         if args is None or runner is None:
             raise NotImplementedError('method not implemented yet')
         self.args, self.runner = args, runner
+        for name, default in (('mbpo_model_train_rounds', MODEL_TRAIN_ROUNDS),
+                              ('mbpo_rollout_seeds', ROLLOUT_SEEDS), ('mbpo_rollout_length', ROLLOUT_LENGTH)):
+            self._budget(name, default)
         self.device = runner.device
         self.network = runner.network
         self.candidates = runner.candidates
@@ -97,10 +107,12 @@ class MbpoMethod:
         self.traffic_model = runner.config.simulation.traffic_model
         lengths = tuple(self.network.external_lane_lengths_m.values()) \
             or self.network.lengths_m[self.network.passenger_allowed]
-        self.microstep_seconds = (float(args.step_seconds) if self.traffic_model == 'meso'
+        self.route_mode = getattr(self.candidates, 'routing_mode', 'next_hop') == 'current_to_dest'
+        self.microstep_seconds = (1. if self.route_mode else float(args.step_seconds) if self.traffic_model == 'meso'
             else safe_microstep_seconds(lengths, self.vehicle_max_speed))
         self.speed_limits = np.asarray(self.network.speed_limits_mps, dtype=np.float64)
         self.actor = NextHopActor().to(self.device)
+        self.actor.score_gauge = 'pre_head_legal_reference_v1'
         # The added global critic must not change actor initialization (reference parity).
         with torch.random.fork_rng(devices=[]):
             torch.manual_seed(args.seed + 73861)
@@ -114,6 +126,12 @@ class MbpoMethod:
         self.model_rows: deque = deque(maxlen=MODEL_ROWS_LIMIT)
         self.model_rows_prior_weight = 0.
         self.rng = np.random.default_rng(args.seed + 911519)
+
+    def _budget(self, name, default):
+        value = getattr(self.args, name, default)
+        if isinstance(value, bool) or not isinstance(value, (int, np.integer)) or value < 1:
+            raise ValueError(f'{name} must be a positive integer')
+        return int(value)
 
     # --------------------------------------------------------------- policy
     def select(self, vehicles, actor_obs, frozen_flow, now, *, explore=True, temperature=1., sample_actions=None):
@@ -133,6 +151,9 @@ class MbpoMethod:
     # ------------------------------------------------------------ episode hook
     def on_episode(self, rows, windows, *, episode):
         learning_started = time.monotonic()
+        # REINFORCE has no behavior-policy correction. Reusing last episode's
+        # synthetic actions/advantages after an actor update is off-policy.
+        self.model_rows.clear()
         self._sync_model_rows_prior()
         if not windows:
             return dict(model_nll=0., reward_loss=0., global_critic_loss=0., actor_loss=0.,
@@ -174,7 +195,7 @@ class MbpoMethod:
             return dict(model_nll=0., reward_loss=0.)
         self.ensemble.train()
         nlls, reward_losses = [], []
-        for _ in range(MODEL_TRAIN_ROUNDS):
+        for _ in range(self._budget('mbpo_model_train_rounds', MODEL_TRAIN_ROUNDS)):
             self.model_optimizer.zero_grad(set_to_none=True)
             round_nll = round_reward = 0.
             for member in self.ensemble:
@@ -185,7 +206,7 @@ class MbpoMethod:
                 reward = torch.as_tensor([pick['reward'] for pick in picks], dtype=torch.float32, device=self.device)
                 mean, logvar, predicted = member(x)
                 nll = (0.5 * (logvar + (delta - mean) ** 2 / torch.exp(logvar))).mean()
-                reward_loss = F.mse_loss(predicted, reward)
+                reward_loss = F.smooth_l1_loss(predicted, reward)
                 (nll + reward_loss).backward()
                 round_nll += float(nll.detach())
                 round_reward += float(reward_loss.detach())
@@ -242,51 +263,61 @@ class MbpoMethod:
             return []
         flow = np.asarray(window['flow'], dtype=np.float32).copy()
         timestamp = float(window['time'])
+        if timestamp >= self.deadline:
+            return []
         started_count, cumulative_seconds = (window_accounting(window)
             if reward_objective(self.args) != 'legacy_exposure' else (population, 0.))
         rows, imagined_windows = [], []
-        for step in range(ROLLOUT_LENGTH):
+        for step in range(self._budget('mbpo_rollout_length', ROLLOUT_LENGTH)):
+            duration = min(WINDOW_SECONDS, self.deadline - timestamp)
             context = self._context(states, timestamp, population,
                 started_count=started_count, cumulative_seconds=cumulative_seconds)
             obs = self._global_obs(flow, context)
             actor_window = prepare_actor_window(flow[:, [2, 1]], self.edge_count)
 
             def decide(pending, frozen, now):
+                # Real observed-mean collection refreshes these two actor
+                # features at each physical event, including arrivals in-window.
+                actor_context = (self._context(states, now, population,
+                    started_count=started_count, cumulative_seconds=cumulative_seconds)
+                    if reward_objective(self.args) == 'observed_mean' else context)
                 actor_obs = build_actor_observations(
                     policy_edge_features=actor_window,
                     vehicle_states=pending, candidates=self.candidates,
-                    episode_progress=float(context[0]), active_vehicle_fraction=float(context[1]))
+                    episode_progress=float(actor_context[0]), active_vehicle_fraction=float(actor_context[1]))
                 with torch.no_grad():
                     selection = self.actor.sample_action(
                         torch.as_tensor(actor_obs.features, dtype=torch.float32, device=self.device),
                         torch.as_tensor(actor_obs.mask, device=self.device))
                 indices = selection.candidate_index.cpu().tolist()
-                decisions = []
                 for i, state in enumerate(pending):
                     rows.append(dict(vehicle_id=str(state['vehicle_id']), rollout=rollout, window=step,
                         features=actor_obs.features[i].copy(), mask=actor_obs.mask[i].copy(),
                         action=int(indices[i]), current_edge=int(state['current_edge']),
                         sp_prior_weight=float(getattr(self.actor, 'prior_weight', 0.)),
                         edge_indices=actor_obs.edge_indices[i].copy()))
-                    decisions.append(NextHopDecision(str(state['vehicle_id']), int(state['current_edge']),
-                        int(actor_obs.edge_indices[i, indices[i]]), float(now)))
-                return decisions
+                    if actor_obs.routes is not None:
+                        rows[-1]['candidate_routes'] = actor_obs.routes[i]
+                return selected_decisions(pending, actor_obs, indices, now)
 
             result = advance_imagined_window(states, candidates=self.candidates,
                 edge_speeds_mps=self._speeds(flow), frozen_flow=flow, start_time=timestamp,
-                total_vehicle_count=population, decide=decide, observation_step_seconds=self.microstep_seconds,
+                total_vehicle_count=population, decide=decide, interval_seconds=duration,
+                observation_step_seconds=self.microstep_seconds,
                 vehicle_max_speed_mps=self.vehicle_max_speed, traffic_model=self.traffic_model,
-                session_protocol='event' if self.traffic_model == 'meso' else 'legacy')
+                session_protocol='event' if self.traffic_model == 'meso' or self.route_mode else 'legacy')
             cumulative_seconds += float(getattr(result, 'active_vehicle_seconds', 0.) if reward_objective(self.args) == 'legacy_exposure'
                                         else result.active_vehicle_seconds)
-            next_timestamp = timestamp + WINDOW_SECONDS
-            terminal = next_timestamp >= self.deadline or self._active_count(states) == 0
+            next_timestamp = timestamp + duration
+            # Emptying the sampled cohort does not end the full traffic
+            # episode; truncate with a value bootstrap until its deadline.
+            terminal = next_timestamp >= self.deadline
             flow, reward = self._predict_transition(flow, result.action, result.departure, context)
             imagined_windows.append(dict(obs=obs, reward=reward, terminal=bool(terminal),
                 next_obs=self._global_obs(flow, self._context(states, next_timestamp, population,
                     started_count=started_count, cumulative_seconds=cumulative_seconds))))
             timestamp = next_timestamp
-            if terminal:
+            if terminal or self._active_count(states) == 0:
                 break
         failed_ids = {str(state['vehicle_id']) for state in states if not state.get('arrived')} \
             if timestamp >= self.deadline else set()
@@ -311,7 +342,8 @@ class MbpoMethod:
         if not seeds:
             return 0
         count = 0
-        for rollout, pick in enumerate(self.rng.integers(len(seeds), size=min(ROLLOUT_SEEDS, len(seeds)))):
+        seed_count = self._budget('mbpo_rollout_seeds', ROLLOUT_SEEDS)
+        for rollout, pick in enumerate(self.rng.choice(len(seeds), size=min(seed_count, len(seeds)), replace=False)):
             rows = self._rollout_from_seed(seeds[int(pick)], rollout)
             self.model_rows.extend(rows)
             count += len(rows)
@@ -345,27 +377,49 @@ class MbpoMethod:
                 actor_parameters=self.actor.parameters(), actor_optimizer=self.actor_optimizer,
                 rows=batch_rows, advantages=batch_advantages,
                 entropy_coef=self.entropy_coef,
+                normalize_global_advantages=getattr(self.args, 'global_reward_only', True),
+                minibatch_size=512,
                 include_individual_timeout=not getattr(self.args, 'global_reward_only', True)))
         return dict(actor_loss=float(np.mean([entry['actor_loss'] for entry in updates])) if updates else 0.)
+
+    def learning_protocol(self):
+        return dict(version=3,
+            model_train_rounds=self._budget('mbpo_model_train_rounds', MODEL_TRAIN_ROUNDS),
+            rollout_seeds=self._budget('mbpo_rollout_seeds', ROLLOUT_SEEDS),
+            horizon_windows=self._budget('mbpo_rollout_length', ROLLOUT_LENGTH),
+            actor_updates=1, synthetic_actor_replay=False,
+            score_gauge=self.actor.score_gauge, actor_minibatch_size=512,
+            global_actor_advantage=('centered_std_v1' if getattr(self.args, 'global_reward_only', True)
+                                    else 'legacy_uncentered_v1'),
+            global_actor_std_floor=1e-6, global_actor_singleton='critic_advantage_div_abs_floor1',
+            actor_context='event_observed_mean', deadline_clipped_imagination=True,
+            checkpoint_model_replay=True)
 
     # ------------------------------------------------------------- checkpoint
     def state_dict(self):
         return dict(actor=self.actor.state_dict(), global_critic=self.global_critic.state_dict(),
+            learning_protocol=self.learning_protocol(),
             ensemble=self.ensemble.state_dict(),
             actor_optimizer=self.actor_optimizer.state_dict(),
             global_optimizer=self.global_optimizer.state_dict(),
             model_optimizer=self.model_optimizer.state_dict(),
+            window_replay=list(self.window_buffer),
             model_rows=list(self.model_rows)[-MODEL_ROWS_CHECKPOINT:],
             model_rows_prior_weight=self.model_rows_prior_weight,
             rng=copy.deepcopy(self.rng.bit_generator.state))
 
     def load_state_dict(self, state):
+        if state.get('learning_protocol') != self.learning_protocol():
+            raise ValueError('MBPO learning protocol changed; start a fresh run instead of continuing '
+                             'legacy synthetic actor replay or a different rollout budget')
         self.actor.load_state_dict(state['actor'])
         self.global_critic.load_state_dict(state['global_critic'])
         self.ensemble.load_state_dict(state['ensemble'])
         self.actor_optimizer.load_state_dict(state['actor_optimizer'])
         self.global_optimizer.load_state_dict(state['global_optimizer'])
         self.model_optimizer.load_state_dict(state['model_optimizer'])
+        self.window_buffer.clear()
+        self.window_buffer.extend(copy.deepcopy(state['window_replay']))
         self.model_rows.clear()
         # Older checkpoints carried unused full-network flow per imagined event.
         self.model_rows.extend(copy.deepcopy({key: value for key, value in row.items() if key != 'flow'})

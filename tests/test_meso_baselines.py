@@ -15,6 +15,7 @@ from urban_dreamer.learning.baselines import build_method, common
 from urban_dreamer.learning.baselines.dreamer import DreamerMethod
 from urban_dreamer.learning.baselines.mbpo import MbpoMethod
 from urban_dreamer.learning.episode_archive import read_episode_archive
+from urban_dreamer.learning.global_reward import causal_context
 from urban_dreamer.learning.replay import MacroTransition
 from urban_dreamer.traffic.event_session import SumoEventSession
 from urban_dreamer.traffic.simulation_settings import physics_identity
@@ -37,11 +38,11 @@ def meso_config(tmp_path):
     # Make the fixture independent of whether shipped configs have been migrated yet.
     simulation_lines = text.split('[simulation]\n', 1)
     body = simulation_lines[1]
-    for key in ('traffic_model', 'meso_junction_control', 'meso_lane_queue', 'meso_multi_queue',
+    for key in ('routing_mode', 'traffic_model', 'meso_junction_control', 'meso_lane_queue', 'meso_multi_queue',
                 'meso_edge_length_m', 'meso_interpolate_positions'):
         body = '\n'.join(line for line in body.split('\n') if not line.startswith(key + ' ='))
     body = body.replace('backend = "traci"', 'backend = "libsumo"')
-    text = simulation_lines[0] + '[simulation]\ntraffic_model = "meso"\n' + body
+    text = simulation_lines[0] + '[simulation]\nrouting_mode = "next_hop"\ntraffic_model = "meso"\n' + body
     path = tmp_path / 'meso.toml'
     path.write_text(text)
     return path
@@ -123,25 +124,31 @@ def test_model_based_rollouts_receive_configured_physics(meso_config, tmp_path, 
         in_junction=False, junction_remaining_distance=0., junction_speed=1.)
     flow = runner.network.extract_flow({})
     timestamp = runner.deadline - 30.
+    context = causal_context(timestamp=timestamp, deadline=runner.deadline,
+        active_count=1, started_count=1, cumulative_seconds=timestamp)
     captured = []
 
     def advance(states, **kwargs):
         captured.append(kwargs)
         return SimpleNamespace(action=np.zeros(runner.network.edge_count),
-            departure=np.zeros(runner.network.edge_count))
+            departure=np.zeros(runner.network.edge_count), active_vehicle_seconds=30.)
 
     implementation = __import__(f'urban_dreamer.learning.baselines.{name}', fromlist=['advance_imagined_window'])
     monkeypatch.setattr(implementation, 'advance_imagined_window', advance)
     if name == 'dreamer':
         transition = MacroTransition(flow=flow, next_flow=flow, action=np.zeros(runner.network.edge_count),
-            departure=np.zeros(runner.network.edge_count), context=np.array([timestamp / runner.deadline, 1.]),
+            departure=np.zeros(runner.network.edge_count), context=context,
             active_vehicle_fraction=1., vehicles=(state,), time=timestamp,
-            terminal=False, episode=0, step_index=0)
+            terminal=False, episode=0, step_index=0, started_count=1,
+            cumulative_vehicle_seconds=timestamp, next_started_count=1,
+            next_cumulative_vehicle_seconds=timestamp + 30.)
         method.seed_buffer.append_episode([transition], total_vehicle_count=1, total_travel_minutes=1.)
         monkeypatch.setattr(method, '_decode_flow', lambda h, z: flow.copy())
         method._imagine_rollout(0)
     else:
-        method._rollout_from_seed(dict(flow=flow, vehicles=(state,), time=timestamp, total_vehicle_count=1), 0)
+        method._rollout_from_seed(dict(flow=flow, vehicles=(state,), time=timestamp,
+            total_vehicle_count=1, context=context, started_vehicle_count=1,
+            cumulative_vehicle_seconds=timestamp), 0)
     assert captured
     assert captured[0]['traffic_model'] == traffic_model
     assert captured[0]['session_protocol'] == ('event' if traffic_model == 'meso' else 'legacy')

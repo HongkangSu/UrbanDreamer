@@ -14,7 +14,7 @@ import numpy as np
 from .topology import NextHopCandidates
 from ..learning.global_reward import RewardAccounting
 
-__all__ = ["NextHopDecision", "SumoSession", "EnvironmentContractError",
+__all__ = ["NextHopDecision", "RouteDecision", "SumoSession", "EnvironmentContractError",
            "SessionClosedError", "WindowResult", "build_session_factory", "safe_microstep_seconds", "to_plain_state"]
 
 
@@ -62,6 +62,13 @@ class NextHopDecision:
 
 
 @dataclass(frozen=True)
+class RouteDecision(NextHopDecision):
+    """A selected complete suffix; next_edge retains its physical turn meaning."""
+
+    route: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class WindowResult:
     decisions: tuple[NextHopDecision, ...]
     action_counts: np.ndarray
@@ -70,6 +77,7 @@ class WindowResult:
     next_state: dict[str, Any]
     start_time: float
     end_time: float
+    conditioning_decisions: tuple[NextHopDecision, ...] | None = None
 
 
 def safe_microstep_seconds(lengths: Sequence[float], max_speed: float) -> float:

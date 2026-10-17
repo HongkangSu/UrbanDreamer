@@ -92,9 +92,14 @@ def test_archive_records_actual_default_argmax_evaluation_protocol(tmp_path):
     trainer = make_trainer(tmp_path)
     trainer.demand = fixed_demand(trainer, lambda **kwargs: trainer.topology.vehicles[:1])
     trainer._session_factory = _complete_demand_session(trainer, [])
-    trainer._run_episode(mode='evaluation', episode_index=0)
+    collected = trainer._run_episode(mode='evaluation', episode_index=0)
+    assert collected.metrics['evaluation_all_demand_censored_att_seconds'] == 30.
+    assert collected.metrics['evaluation_all_demand_vehicle_count'] == 1
+    assert collected.metrics['evaluation_branch_freeflow_excess_seconds_total'] == 0.
     with np.load(tmp_path / 'episodes' / 'evaluation' / 'episode_000000.npz', allow_pickle=False) as archive:
         metadata = json.loads(archive['summary_json'].tobytes().decode())['metadata']
+    assert 'scheduled departure' in metadata['all_demand_censored_definition']
+    assert 'realized edge decisions' in metadata['diversion_cost_definition']
     assert metadata['evaluation_policy'] == 'zero_prior_argmax'
     assert metadata['evaluation_temperature'] is None
     assert metadata['evaluation_action_seed'] == trainer.config.method.evaluation_demand_seed + 1000003
@@ -112,3 +117,24 @@ def test_resume_rejects_changed_evaluation_policy_before_training(tmp_path):
     with pytest.raises(ValueError, match='protocol/source identity'):
         resumed.resume()
     assert not trainer.train_calls
+
+
+def test_diversion_charges_realized_turns_not_unexecuted_route_proposals(tmp_path):
+    trainer = make_trainer(tmp_path)
+    trainer.demand = fixed_demand(trainer, lambda **kwargs: trainer.topology.vehicles[:1])
+    factory = _complete_demand_session(trainer, [])
+    def session_factory(**kwargs):
+        session = factory(**kwargs)
+        advance = session.advance_window
+        def advance_window(callback):
+            result = advance(callback)
+            assert len(result.decisions) == 1  # A proposed route without a realized turn.
+            result.conditioning_decisions = ()
+            result.action_counts[:] = 0.
+            return result
+        session.advance_window = advance_window
+        return session
+    trainer._session_factory = session_factory
+    collected = trainer._run_episode(mode='evaluation', episode_index=0)
+    assert collected.metrics['evaluation_diversion_decision_count'] == 0
+    assert collected.metrics['evaluation_branch_freeflow_excess_seconds_total'] == 0.

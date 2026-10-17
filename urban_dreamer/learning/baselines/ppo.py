@@ -25,15 +25,18 @@ from . import METHODS
 from .common import reward_context_dim, GlobalTrafficCritic, global_reward_integral
 
 
-def _local_lambda_targets(rows, values, windows, *, deadline):
+def _local_lambda_targets(rows, values, windows, *, deadline, trace_seconds=30.):
     """Compute detached asynchronous returns without per-event CUDA synchronizations.
 
     Only global window rewards contribute. A vehicle's final decision includes
     the team episode tail, including costs after that vehicle has arrived.
-    Preserve stable timestamp ordering when multiple events share a timestamp.
+    Trace decay follows elapsed physical time, in 30-second macro-window units,
+    rather than how many routing/forced events happen before a future reward.
     """
     if not rows:
         return torch.empty_like(values)
+    if not math.isfinite(trace_seconds) or trace_seconds <= 0:
+        raise ValueError('IPPO trace_seconds must be finite and positive')
     integrated, episode_end = global_reward_integral(windows, deadline=deadline)
     times = np.asarray([float(row['time']) for row in rows], dtype=np.float64)
     cumulative = integrated(times)
@@ -44,24 +47,30 @@ def _local_lambda_targets(rows, values, windows, *, deadline):
     host_values = values.detach().cpu().numpy()
     targets = np.empty_like(host_values)
     scalar = host_values.dtype.type
-    gamma, lam, one_minus_lam = map(scalar, (DEFAULT_GAMMA, DEFAULT_LAMBDA, 1. - DEFAULT_LAMBDA))
+    gamma = scalar(DEFAULT_GAMMA)
     for indices in trajectories.values():
         indices.sort(key=times.__getitem__)
         rewards = np.diff(np.append(cumulative[indices], tail)).astype(host_values.dtype)
         running = rewards[-1]
         targets[indices[-1]] = running
         for offset in range(len(indices) - 2, -1, -1):
+            elapsed = times[indices[offset + 1]] - times[indices[offset]]
+            lam = scalar(DEFAULT_LAMBDA ** (elapsed / trace_seconds))
             running = rewards[offset] + gamma * (
-                one_minus_lam * host_values[indices[offset + 1]] + lam * running)
+                (scalar(1.) - lam) * host_values[indices[offset + 1]] + lam * running)
             targets[indices[offset]] = running
     return torch.as_tensor(targets, dtype=values.dtype, device=values.device)
 
 
 def clipped_policy_loss(log_prob, old_log_prob, advantage, *, clip=0.2):
     """PPO's pessimistic clipped surrogate, with the behavior policy frozen."""
-    ratio = (log_prob - old_log_prob.detach()).exp()
-    return -torch.minimum(ratio * advantage.detach(),
-                          ratio.clamp(1. - clip, 1. + clip) * advantage.detach()).mean()
+    advantage = advantage.detach()
+    log_ratio = log_prob - old_log_prob.detach()
+    # Clip before exp: a large ratio on a positive/zero advantage has a finite
+    # objective, but exp followed by minimum gives an inf * 0 gradient (NaN).
+    pessimistic_log_ratio = torch.where(advantage >= 0.,
+        log_ratio.clamp_max(math.log1p(clip)), log_ratio.clamp_min(math.log1p(-clip)))
+    return -(pessimistic_log_ratio.exp() * advantage).mean()
 
 
 def normalize_advantages(advantages, *, std_floor):
@@ -110,6 +119,10 @@ class RoutingPpoMethod:
         self.ppo_epochs = getattr(args, 'ppo_epochs', 4)
         self.minibatch_size = getattr(args, 'ppo_minibatch_size', 512)
         self.target_kl = getattr(args, 'ppo_target_kl', .01)
+        self.max_policy_kl = getattr(args, 'ppo_max_policy_kl', None)
+        if self.max_policy_kl is None:
+            self.max_policy_kl = 10. * self.target_kl
+        self.max_backtracks = getattr(args, 'ppo_max_backtracks', 3)
         self.advantage_std_floor = getattr(args, 'ppo_advantage_std_floor', 1e-6)
         self.critic_epochs = getattr(args, 'ppo_critic_epochs', None)
         if self.critic_epochs is None:
@@ -127,6 +140,10 @@ class RoutingPpoMethod:
             raise ValueError('PPO critic_min_epochs must not exceed critic_epochs')
         if not math.isfinite(self.target_kl) or self.target_kl < 0:
             raise ValueError('PPO target_kl must be finite and nonnegative (0 disables stopping)')
+        if not math.isfinite(self.max_policy_kl) or self.max_policy_kl < 0:
+            raise ValueError('PPO max_policy_kl must be finite and nonnegative')
+        if isinstance(self.max_backtracks, bool) or not isinstance(self.max_backtracks, int) or self.max_backtracks < 0:
+            raise ValueError('PPO max_backtracks must be a nonnegative integer')
         if not math.isfinite(self.advantage_std_floor) or self.advantage_std_floor <= 0:
             raise ValueError('PPO advantage std floor must be finite and positive')
         self.actor = NextHopActor().to(self.device)
@@ -136,7 +153,8 @@ class RoutingPpoMethod:
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=args.actor_lr)
         with torch.random.fork_rng(devices=[]):
             torch.manual_seed(args.seed + 73861)
-            self.critic = (GlobalTrafficCritic(runner.network.edge_count, reward_context_dim(args)) if self.centralized
+            self.critic = (GlobalTrafficCritic(runner.network.edge_count, reward_context_dim(args),
+                              normalize_hidden=True, center_free_flow=True) if self.centralized
                            else LocalEventCritic()).to(self.device)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=args.critic_lr)
         # Keep the centralized critic discoverable through the existing baseline interface.
@@ -206,6 +224,15 @@ class RoutingPpoMethod:
                 reward_mode='global_with_individual_timeout')
         if self.actor.score_gauge != 'legacy':
             protocol.update(version=4, score_gauge=self.actor.score_gauge)
+        protocol.update(version=7, actor_rows='multiple_legal_candidates',
+                        kl_check='post_epoch_full_rollout_accept_or_restore_actor_and_adam',
+                        max_policy_kl=self.max_policy_kl, max_backtracks=self.max_backtracks,
+                        backtrack_factor=.5, actor_zero_gradient='skip_adam',
+                        critic_conditioning='freeflow_centered_layernorm' if self.centralized else 'local_candidate_pool',
+                        trace_clock='macro_windows' if self.centralized else 'physical_elapsed_seconds',
+                        trace_seconds=30.,
+                        actor_zero_objective='skip_each_minibatch',
+                        policy_surrogate='sign_clipped_log_ratio')
         return protocol
 
     def _actor_advantages(self, advantages, rows):
@@ -219,6 +246,51 @@ class RoutingPpoMethod:
     def _all_logits(self, features, mask):
         return torch.cat([self.actor.forward_logits(features[start:start + self.minibatch_size],
             mask[start:start + self.minibatch_size]) for start in range(0, len(features), self.minibatch_size)])
+
+    @torch.no_grad()
+    def _behavior_distribution(self, rows, features, mask, actions, old_log_prob):
+        """Check behavior on its original actor, device and collection batches."""
+        collector = getattr(self, 'collection_policy', None)
+        if collector is None:
+            distribution = Categorical(logits=self._all_logits(features, mask))
+            expected = distribution.log_prob(actions)
+            observed = old_log_prob
+        else:
+            actor = collector.proxy.actor
+            if actor is not self.actor:
+                learner_state, collector_state = self.actor.state_dict(), actor.state_dict()
+                if (learner_state.keys() != collector_state.keys() or any(
+                        value.dtype != collector_state[name].dtype
+                        or not torch.equal(value.detach().to(collector_state[name].device), collector_state[name])
+                        for name, value in learner_state.items())):
+                    raise ValueError('PPO collector actor tensors do not match the frozen learner')
+            if (actor.training != self.actor.training or any(
+                    getattr(actor, name, default) != getattr(self.actor, name, default)
+                    for name, default in (('prior_weight', 0.), ('prior_temperature_seconds', 30.),
+                                          ('score_gauge', 'legacy')))):
+                raise ValueError('PPO collector actor prior or score gauge does not match the frozen learner')
+            device = collector.device
+            collector_features, collector_mask = features.to(device), mask.to(device)
+            collector_actions, observed = actions.to(device), old_log_prob.to(device)
+            normalized_logits, expected = [], []
+            begin = 0
+            while begin < len(rows):
+                key = (rows[begin]['window'], rows[begin]['time'])
+                end = begin + 1
+                while end < len(rows) and (rows[end]['window'], rows[end]['time']) == key:
+                    end += 1
+                batch = Categorical(logits=actor.forward_logits(
+                    collector_features[begin:end], collector_mask[begin:end]))
+                normalized_logits.append(batch.logits)
+                expected.append(batch.log_prob(collector_actions[begin:end]))
+                begin = end
+            expected = torch.cat(expected)
+            # Transfer log probabilities rather than underflowed probabilities:
+            # legal rare actions retain finite logits and illegal slots stay -inf.
+            distribution = Categorical(logits=torch.cat(normalized_logits).to(self.device))
+        if not torch.allclose(expected, observed, atol=1e-4, rtol=1e-5):
+            raise ValueError('PPO collected behavior probabilities do not match the frozen actor')
+        return distribution
 
     @torch.no_grad()
     def _critic_prediction(self, inputs):
@@ -284,6 +356,96 @@ class RoutingPpoMethod:
             clip_fraction=float(((ratio < 1. - self.clip) | (ratio > 1. + self.clip)).float().mean()),
             policy_entropy=float(current.entropy().mean()))
 
+    def _within_policy_budget(self, statistics):
+        return (all(math.isfinite(value) for value in statistics.values())
+            and (self.target_kl == 0 or statistics['policy_kl'] <= self.target_kl)
+            and (self.max_policy_kl == 0 or statistics['policy_kl_max'] <= self.max_policy_kl))
+
+    def _fit_actor(self, features, mask, actions, old_log_prob, old_distribution, advantages):
+        """Accept bounded epochs; rejected proposals restore weights and Adam.
+
+        Full-rollout checks occur once per attempted epoch, not per minibatch.
+        Each retry reuses its permutation and halves only that proposal's LR.
+        """
+        count = len(actions)
+        metrics = dict(actor_optimizer_steps=0, actor_attempted_steps=0,
+            actor_epochs_completed=0, actor_rejected_updates=0, actor_backtracks=0,
+            actor_lr_scale=0., actor_zero_gradient_steps=0, kl_early_stopped=False)
+        metrics.update(self._policy_statistics(old_distribution, features, mask, actions, old_log_prob))
+        losses, gradients = [], []
+        if self.entropy_coef == 0. and not bool(advantages.any()):
+            return dict(metrics, actor_loss=0., actor_gradient_norm=0.)
+        base_lrs = [group['lr'] for group in self.actor_optimizer.param_groups]
+        for epoch in range(1, self.ppo_epochs + 1):
+            actor_before = deepcopy(self.actor.state_dict())
+            optimizer_before = deepcopy(self.actor_optimizer.state_dict())
+            batches = torch.randperm(count, device=self.device).split(self.minibatch_size)
+            accepted = False
+            try:
+                for retry in range(self.max_backtracks + 1):
+                    for group, rate in zip(self.actor_optimizer.param_groups, base_lrs):
+                        group['lr'] = rate * .5 ** retry
+                    trial_losses, trial_gradients = [], []
+                    minibatch_stopped = False
+                    for indices in batches:
+                        distribution = Categorical(logits=self.actor.forward_logits(features[indices], mask[indices]))
+                        with torch.no_grad():
+                            delta = torch.where(mask[indices],
+                                old_distribution.logits[indices] - distribution.logits, 0.)
+                            kl = (old_distribution.probs[indices] * delta).sum(-1).clamp_min(0.)
+                        if ((self.target_kl > 0 and float(kl.mean()) > self.target_kl)
+                                or (self.max_policy_kl > 0 and float(kl.max()) > self.max_policy_kl)):
+                            minibatch_stopped = True
+                            break
+                        if self.entropy_coef == 0. and not bool(advantages[indices].any()):
+                            continue
+                        loss = clipped_policy_loss(distribution.log_prob(actions[indices]), old_log_prob[indices],
+                                                   advantages[indices], clip=self.clip)
+                        loss = loss - self.entropy_coef * distribution.entropy().mean()
+                        self.actor_optimizer.zero_grad(set_to_none=True)
+                        loss.backward()
+                        gradient = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.grad_clip)
+                        if not bool(torch.isfinite(gradient)):
+                            raise RuntimeError('non-finite PPO actor gradient')
+                        if float(gradient) == 0.:
+                            metrics['actor_zero_gradient_steps'] += 1
+                            continue
+                        self.actor_optimizer.step()
+                        metrics['actor_attempted_steps'] += 1
+                        trial_losses.append(float(loss.detach()))
+                        trial_gradients.append(float(gradient))
+                    statistics = self._policy_statistics(old_distribution, features, mask, actions, old_log_prob)
+                    if self._within_policy_budget(statistics):
+                        accepted = True
+                        metrics.update(statistics)
+                        metrics['actor_optimizer_steps'] += len(trial_losses)
+                        metrics['actor_epochs_completed'] = epoch
+                        metrics['actor_lr_scale'] = .5 ** retry
+                        losses.extend(trial_losses)
+                        gradients.extend(trial_gradients)
+                        break
+                    self.actor.load_state_dict(actor_before)
+                    # Adam may alias input state tensors on the same device;
+                    # each retry needs its own copy of the frozen snapshot.
+                    self.actor_optimizer.load_state_dict(deepcopy(optimizer_before))
+                    self.actor_optimizer.zero_grad(set_to_none=True)
+                    metrics['actor_rejected_updates'] += 1
+                    if retry < self.max_backtracks:
+                        metrics['actor_backtracks'] += 1
+            except Exception:
+                self.actor.load_state_dict(actor_before)
+                self.actor_optimizer.load_state_dict(deepcopy(optimizer_before))
+                self.actor_optimizer.zero_grad(set_to_none=True)
+                raise
+            finally:
+                for group, rate in zip(self.actor_optimizer.param_groups, base_lrs):
+                    group['lr'] = rate
+            if not accepted or minibatch_stopped:
+                metrics['kl_early_stopped'] = True
+                break
+        return dict(metrics, actor_loss=float(np.mean(losses)) if losses else 0.,
+                    actor_gradient_norm=max(gradients, default=0.))
+
     def on_episode(self, rows, windows, *, episode):
         started = time.monotonic()
         zero = dict(actor_loss=0., actor_gradient_norm=0., critic_loss=0., critic_gradient_norm=0.,
@@ -294,10 +456,13 @@ class RoutingPpoMethod:
                     policy_kl=0., policy_kl_max=0., ratio_min=1., ratio_max=1.,
                     ratio_p01=1., ratio_p99=1., clip_fraction=0., policy_entropy=0.,
                     actor_optimizer_steps=0, actor_epochs_completed=0, kl_early_stopped=False,
+                    actor_attempted_steps=0, actor_rejected_updates=0, actor_backtracks=0,
+                    actor_lr_scale=0., actor_zero_gradient_steps=0,
                     critic_optimizer_steps=0, critic_epochs_completed=0, critic_best_epoch=0,
                     critic_mse_before=0., critic_mse_after=0.,
                     critic_explained_variance_before=0., critic_explained_variance_after=0.,
-                    critic_bias_before=0., critic_bias_after=0., ppo_epochs=self.ppo_epochs)
+                    critic_bias_before=0., critic_bias_after=0., ppo_epochs=self.ppo_epochs,
+                    actor_decision_count=0, forced_decision_count=0)
         if not windows or (not self.centralized and not rows):
             return zero
         if any(float(row.get('sp_prior_weight', self.actor.prior_weight)) != self.actor.prior_weight
@@ -307,6 +472,7 @@ class RoutingPpoMethod:
         if not bool(torch.isfinite(targets).all()):
             raise ValueError('PPO critic targets must be finite')
         metrics = dict(zero)
+        actor_count = 0
         if rows:
             if any('old_log_prob' not in row for row in rows):
                 raise ValueError('PPO needs collected behavior old_log_prob for every decision')
@@ -318,10 +484,24 @@ class RoutingPpoMethod:
                 raise ValueError('PPO behavior log probabilities must be finite')
             # The actor is unchanged during collection. Freeze its COMPLETE legal
             # distribution before either update, not just the sampled probabilities.
-            old_distribution = Categorical(logits=self._all_logits(features, mask))
-            if not torch.allclose(old_distribution.log_prob(actions), old_log_prob, atol=1e-4, rtol=1e-5):
-                raise ValueError('PPO collected behavior probabilities do not match the frozen actor')
-            normalized = self._actor_advantages(advantages, rows)
+            old_distribution = self._behavior_distribution(rows, features, mask, actions, old_log_prob)
+            # Forced routes have zero policy gradient, but including their returns
+            # shifts/scales every actual choice's normalized advantage. They also
+            # must not trigger Adam steps using stale moments from an earlier episode.
+            choices = (mask.sum(dim=-1) > 1).nonzero(as_tuple=True)[0]
+            actor_count = len(choices)
+            metrics.update(actor_decision_count=actor_count,
+                           forced_decision_count=len(rows) - actor_count)
+            features, mask = features[choices], mask[choices]
+            actions, old_log_prob = actions[choices], old_log_prob[choices]
+            if actor_count:
+                old_distribution = Categorical(logits=old_distribution.logits[choices])
+                actor_rows = [rows[index] for index in choices.cpu().tolist()]
+                advantages = advantages[choices]
+                normalized = self._actor_advantages(advantages, actor_rows)
+            else:
+                advantages = advantages[:0]
+        if actor_count:
             metrics.update(raw_advantage_mean=float(advantages.mean()),
                 raw_advantage_std=float(advantages.std(unbiased=False)),
                 raw_advantage_min=float(advantages.min()), raw_advantage_max=float(advantages.max()),
@@ -331,37 +511,12 @@ class RoutingPpoMethod:
         critic_started = time.monotonic()
         metrics.update(self._fit_critic(targets, critic_inputs))
         metrics['critic_update_seconds'] = time.monotonic() - critic_started
-        actor_losses, actor_gradients = [], []
         actor_started = time.monotonic()
-        # Skipping a zero objective also avoids movement from stale Adam moments.
-        train_actor = bool(rows) and (self.entropy_coef != 0. or bool(advantages.any()))
-        for epoch in range(1, self.ppo_epochs + 1) if train_actor else ():
-            for indices in torch.randperm(len(rows), device=self.device).split(self.minibatch_size):
-                distribution = Categorical(logits=self.actor.forward_logits(features[indices], mask[indices]))
-                loss = clipped_policy_loss(distribution.log_prob(actions[indices]), old_log_prob[indices],
-                                           advantages[indices], clip=self.clip)
-                loss = loss - self.entropy_coef * distribution.entropy().mean()
-                self.actor_optimizer.zero_grad(set_to_none=True)
-                loss.backward()
-                gradient = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.grad_clip)
-                if not bool(torch.isfinite(gradient)):
-                    raise RuntimeError('non-finite PPO actor gradient')
-                self.actor_optimizer.step()
-                metrics['actor_optimizer_steps'] += 1
-                actor_losses.append(float(loss.detach()))
-                actor_gradients.append(float(gradient))
-            metrics['actor_epochs_completed'] = epoch
-            metrics.update(self._policy_statistics(old_distribution, features, mask, actions, old_log_prob))
-            # Full-distribution KL is averaged over the whole on-policy event set;
-            # a rare sampled action with a huge ratio does not trigger this guard.
-            if self.target_kl > 0 and metrics['policy_kl'] > self.target_kl:
-                metrics['kl_early_stopped'] = epoch < self.ppo_epochs
-                break
-        if rows and not train_actor:
-            metrics.update(self._policy_statistics(old_distribution, features, mask, actions, old_log_prob))
+        if actor_count:
+            metrics.update(self._fit_actor(features, mask, actions, old_log_prob,
+                                          old_distribution, advantages))
         metrics['actor_update_seconds'] = time.monotonic() - actor_started
-        metrics.update(actor_loss=float(np.mean(actor_losses)) if actor_losses else 0.,
-            actor_gradient_norm=max(actor_gradients, default=0.), learning_seconds=time.monotonic() - started)
+        metrics['learning_seconds'] = time.monotonic() - started
         if self.centralized:
             metrics['global_critic_loss'] = metrics['critic_loss']
         return metrics

@@ -46,6 +46,8 @@ def test_user_stopped_batch_cannot_auto_resume(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('incident_start', [1e6, 5000])
 def test_prepare_disables_prior_and_checks_actual_deadline(tmp_path, monkeypatch, incident_start):
+    # Bind the exporter to the real loader before this test substitutes a stub.
+    from tools import run_complete_pretrain
     from tools import run_city_baseline_dataset as dataset
     from urban_dreamer.workflow import config as configuration
     from urban_dreamer.traffic import routing
@@ -260,3 +262,24 @@ def test_default_methods_exclude_dta_and_random():
     assert queue.METHODS == queue.LEARNED
     assert len(queue.METHODS) == 8
 
+def test_disk_guard_checks_both_checkpoint_and_archive_volumes(monkeypatch):
+    from types import SimpleNamespace
+    from tools import queued_city_baselines as queue
+    sizes = {'local': 60., 'archive': 19.}
+    monkeypatch.setattr(queue.shutil, 'disk_usage', lambda path:
+                        SimpleNamespace(free=sizes[str(path)] * 1024**3))
+    assert queue.disk_status('local', {})['free_disk_gb'] == 60.
+    result = queue.disk_status('local', {'archive_storage_root': 'archive'})
+    assert result['free_disk_gb'] == 19.
+    assert result['disk_free_gb_by_volume'] == sizes
+    assert not result['disk_query_errors']
+
+
+def test_missing_archive_volume_fails_closed(monkeypatch):
+    from tools import queued_city_baselines as queue
+    def unavailable(path):
+        raise OSError('archive mount unavailable')
+    monkeypatch.setattr(queue.shutil, 'disk_usage', unavailable)
+    result = queue.disk_status('local', {'archive_storage_root': 'archive'})
+    assert result['free_disk_gb'] == 0.
+    assert set(result['disk_query_errors']) == {'local', 'archive'}

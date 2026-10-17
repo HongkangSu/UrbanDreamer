@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from urban_dreamer.learning.entropy_schedule import entropy_schedule_profile
+from urban_dreamer.learning.entropy_schedule import entropy_schedule_profile, entropy_schedule_episodes
 from urban_dreamer.workflow.config import ConfigError, MethodConfig, load_config
 from test_urban_dreamer_config import _write_config
 
@@ -36,6 +36,22 @@ def test_restored_episode_count_keeps_decay_progress():
     restored_count = 2250
     assert profile(restored_count)['coefficient'] == pytest.approx(.00105)
     assert profile(restored_count + 1)['coefficient'] < profile(restored_count)['coefficient']
+
+
+def test_extended_stop_budget_preserves_original_entropy_clock():
+    from argparse import Namespace
+    old = {'episodes': 1000}
+    extended = Namespace(episodes=2000, entropy_schedule_episodes=1000)
+    assert entropy_schedule_episodes(old) == entropy_schedule_episodes(extended) == 1000
+    assert entropy_schedule_episodes(Namespace(episodes=2000)) == 2000
+    for episode in (100, 500, 1000, 1500, 2000):
+        assert profile(episode, entropy_schedule_episodes(old)) == profile(episode, entropy_schedule_episodes(extended))
+
+
+@pytest.mark.parametrize('override', [0, -1, True, 1.5])
+def test_invalid_entropy_horizon_override_rejected(override):
+    with pytest.raises(ValueError, match='positive integer'):
+        entropy_schedule_episodes({'episodes': 2000, 'entropy_schedule_episodes': override})
 
 
 @pytest.mark.parametrize('mode,coefficient', [('legacy', .002), ('population', .002), ('off', 0.)])

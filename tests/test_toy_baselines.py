@@ -351,7 +351,10 @@ def test_runner_realized_poisson_demand_and_zero_terminal_window(tmp_path, monke
 
         def state(self, time):
             return dict(time=time, flow=flow, active_vehicle_count=population if time == 0 else 0,
-                        vehicles=[dict(vehicle_id=v.vehicle_id, departed=True, arrived=time > 0) for v in vehicles])
+                        vehicles=[dict(vehicle_id=v.vehicle_id, departed=True, arrived=time > 0,
+                               destination_edge=runner.network.edge_to_index[runner.topology.destinations[v.destination_index]],
+                               actual_departure_time=0., departure_time=0.,
+                               arrival_time=30. if time > 0 else None) for v in vehicles])
 
         def reset(self):
             return self.state(0.)
@@ -359,7 +362,7 @@ def test_runner_realized_poisson_demand_and_zero_terminal_window(tmp_path, monke
         def advance_window(self, callback):
             self.done = True
             self.travel_times = {v.vehicle_id: 30. for v in vehicles}
-            return SimpleNamespace(next_state=self.state(30.), active_vehicle_seconds=population * 30.,
+            return SimpleNamespace(decisions=(), next_state=self.state(30.), active_vehicle_seconds=population * 30.,
                 action_counts=np.zeros(runner.network.edge_count), departure_counts=np.zeros(runner.network.edge_count))
 
     monkeypatch.setattr(common, 'SumoSession', Session)

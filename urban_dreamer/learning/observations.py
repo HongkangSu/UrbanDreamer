@@ -24,6 +24,7 @@ class CandidateObservations:
     mask: np.ndarray
     edge_indices: np.ndarray
     prior_costs_seconds: np.ndarray | None = None
+    routes: tuple[tuple[tuple[int, ...], ...], ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,22 @@ class PreparedActorWindow:
     edge_features: np.ndarray
     global_features: np.ndarray
     _dynamic_prior_cache: dict = field(default_factory=dict, compare=False, repr=False)
+
+
+def selected_decisions(states, observations, choices, timestamp):
+    """Translate policy slots to physical first turns and optional full routes."""
+    from ..traffic.environment import NextHopDecision, RouteDecision
+
+    decisions = []
+    for row, (state, choice) in enumerate(zip(states, choices, strict=True)):
+        values = (str(state['vehicle_id']), int(state['current_edge']),
+                  int(observations.edge_indices[row, choice]), float(timestamp))
+        routes = getattr(observations, 'routes', None)
+        if routes is None:
+            decisions.append(NextHopDecision(*values))
+        else:
+            decisions.append(RouteDecision(*values, route=routes[row][choice]))
+    return decisions
 
 
 def prepare_actor_window(policy_edge_features: np.ndarray, edge_count: int) -> PreparedActorWindow:
@@ -151,6 +168,13 @@ def build_actor_observations(*, policy_edge_features: np.ndarray | PreparedActor
                              prior_speed_floor_mps: float = .5,
                              prior_speed_cap_mps: float | None = None) -> CandidateObservations:
     """Score candidate traffic, static cost and destination distance without path materialization."""
+    if getattr(candidates, 'routing_mode', 'next_hop') == 'current_to_dest':
+        from ..traffic.route_candidates import build_route_observations
+        return build_route_observations(policy_edge_features=policy_edge_features,
+            vehicle_states=vehicle_states, candidates=candidates,
+            episode_progress=episode_progress, active_vehicle_fraction=active_vehicle_fraction,
+            prior_cost_mode=prior_cost_mode, prior_speed_floor_mps=prior_speed_floor_mps,
+            prior_speed_cap_mps=prior_speed_cap_mps)
     network = candidates.network
     if prior_cost_mode not in {"free_flow", "dynamic"}:
         raise ValueError("prior_cost_mode must be free_flow or dynamic")

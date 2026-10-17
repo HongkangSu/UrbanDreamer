@@ -95,6 +95,7 @@ def main():
         prior_filter_strength=getattr(config.method, 'prior_filter_strength', 10.0),
         prior_action_conditioned=getattr(config.method, 'prior_action_conditioned', True),
         prior_filter_input=getattr(config.method, 'prior_filter_input', False), prior_noise_scale=config.method.prior_noise_scale,
+        prior_usage=getattr(config.method, 'prior_usage', 'source_reference'),
         codec_speed_positive=config.codec.speed_positive).to(device).eval().requires_grad_(False)
     trainer = SimpleNamespace(world_model=model, network=topology.network, topology=topology,
         config=replace(config, run=replace(config.run, device=args.device),

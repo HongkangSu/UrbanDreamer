@@ -7,7 +7,7 @@ import pytest
 from urban_dreamer.workflow.config import CodecConfig, ConfigError, load_config
 
 
-def _write_config(path: Path, *, extra: str = "") -> Path:
+def _write_config(path: Path, *, extra: str = "", routing_mode: str | None = None) -> Path:
     path.write_text(
         """
 [inputs]
@@ -47,6 +47,10 @@ online_world_model_batch_size = 4
         + extra,
         encoding="utf-8",
     )
+    if routing_mode is not None:
+        path.write_text(path.read_text(encoding='utf-8').replace(
+            '[simulation]', f'[simulation]\nrouting_mode = "{routing_mode}"'),
+            encoding='utf-8')
     return path
 
 

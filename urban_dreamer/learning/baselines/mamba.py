@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections import deque
 import copy
 from dataclasses import replace
+import math
 import time
 
 import numpy as np
@@ -23,12 +24,12 @@ from torch.nn import functional as F
 
 from ...models.policy import (apply_shortest_path_prior, individual_actor_advantage,
     set_shortest_path_prior)
-from ...traffic.environment import NextHopDecision, safe_microstep_seconds
+from ...traffic.environment import safe_microstep_seconds
 from ...workflow.config import NONARRIVAL_PENALTY
 from ..global_reward import causal_context
 from .common import reward_objective, reward_context_dim, window_accounting
 from ..imagination import advance_imagined_window, clip_road_speed_fractions
-from ..observations import build_actor_observations, prepare_actor_window
+from ..observations import build_actor_observations, prepare_actor_window, selected_decisions
 from . import METHODS
 from .mamba_core.config import MambaConfig
 from .mamba_core.networks import MambaActor, MambaCritic, MambaWorldModel, RSSMState
@@ -40,12 +41,17 @@ WORLD_UPDATES = 4
 SEQUENCE_LENGTH = 8
 IMAGINATION_HORIZON = 8
 PPO_EPOCHS = 4
+TARGET_POLICY_KL = .01
 
 
 def clipped_policy_loss(log_prob, old_log_prob, advantage):
-    ratio = (log_prob - old_log_prob.detach()).exp()
-    return -torch.minimum(ratio * advantage,
-        ratio.clamp(.925, 1.075) * advantage).mean()
+    # Clip the selected surrogate branch before exp: computing both branches
+    # first can create inf * 0 or NaN gradients even when PPO clips the result.
+    advantage = advantage.detach()
+    log_ratio = log_prob - old_log_prob.detach()
+    log_ratio = torch.where(advantage >= 0., log_ratio.clamp_max(math.log1p(.075)),
+        log_ratio.clamp_min(math.log1p(-.075)))
+    return -(log_ratio.exp() * advantage).mean()
 
 
 def _kl(prior, posterior):
@@ -87,6 +93,10 @@ class MambaMethod:
 
     def __init__(self, args, runner):
         self.args, self.runner, self.device = args, runner, runner.device
+        target_kl = float(getattr(args, 'mamba_target_kl', TARGET_POLICY_KL))
+        if not np.isfinite(target_kl) or target_kl < 0.:
+            raise ValueError('mamba_target_kl must be finite and nonnegative')
+        self.route_mode = getattr(runner.candidates, 'routing_mode', 'next_hop') == 'current_to_dest'
         self.width = int(runner.candidates.max_candidates)
         self.local_dim = self.width * 11
         self.cfg = MambaConfig(obs_dim=self.local_dim, action_dim=self.width,
@@ -209,6 +219,16 @@ class MambaMethod:
         action[-1] = duration / 30.
         return action
 
+    def _cohort_turn_action(self, events, population, duration, cohort):
+        """Keep route policy slots distinct from the observed physical turns."""
+        action = np.zeros(2 * self.edge_count + 1, dtype=np.float32)
+        for event in events:
+            if str(event.vehicle_id) in cohort:
+                action[int(event.current_edge)] += 1. / max(population, 1)
+                action[self.edge_count + int(event.next_edge)] += 1. / max(population, 1)
+        action[-1] = duration / 30.
+        return action
+
     def _pack_episode(self, rows, windows, episode):
         population = int(windows[0].get('total_vehicle_count', self.population))
         if population != self.population:
@@ -257,7 +277,8 @@ class MambaMethod:
         for t in range(begin, stop):
             window = data['windows'][t]
             duration = float(window.get('end_time', window['time'] + 30.)) - window['time']
-            action = self._tensor(self._cohort_action(
+            action = self._tensor(self._cohort_turn_action(window['action_events'],
+                data['population'], duration, cohort) if self.route_mode else self._cohort_action(
                 [r for r in data['decisions'][t] if r['vehicle_id'] in cohort],
                 data['population'], duration))[None, None]
             # The selected start cohort remains identical in burn-in and loss
@@ -403,7 +424,7 @@ class MambaMethod:
         maximum_speed = float(simulation.vehicle_max_speed_mps)
         network = self.runner.network
         lengths = tuple(network.external_lane_lengths_m.values()) or network.lengths_m[network.passenger_allowed]
-        observation_step = (float(self.args.step_seconds) if traffic_model == 'meso'
+        observation_step = (1. if self.route_mode else float(self.args.step_seconds) if traffic_model == 'meso'
             else safe_microstep_seconds(lengths, maximum_speed))
         presence = torch.ones(1, 1, dtype=torch.bool, device=self.device)
         records, rewards, features, continuation = [], [], [], []
@@ -419,9 +440,10 @@ class MambaMethod:
                 def decide(pending, frozen, now):
                     obs = build_actor_observations(policy_edge_features=actor_window,
                         vehicle_states=pending, candidates=self.runner.candidates,
-                        episode_progress=timestamp / self.runner.deadline,
+                        episode_progress=min((now if reward_objective(self.args) != 'legacy_exposure'
+                            else timestamp) / self.runner.deadline, 1.),
                         active_vehicle_fraction=sum(not v.get('arrived', False) for v in vehicles) / max(started_count, 1))
-                    decisions = []
+                    selected = []
                     raw_obs = self._observation(obs.features, obs.mask)
                     for begin in range(0, len(pending), CHUNK):
                         chunk = pending[begin:begin + CHUNK]
@@ -436,6 +458,8 @@ class MambaMethod:
                         records.append(dict(latent=post.features[0].detach(), candidates=candidates,
                             mask=mask, action=action, old_log_prob=distribution.log_prob(action), step=step,
                             time=float(now), vehicle_ids=tuple(str(v['vehicle_id']) for v in chunk)))
+                        if obs.routes is not None:
+                            records[-1]['candidate_routes'] = obs.routes[begin:begin + CHUNK]
                         _replace_state(local_state, chosen, post)
                         previous[:, chosen] = F.one_hot(action, self.width).float()[None]
                         for offset, (vehicle, index) in enumerate(zip(chunk, action.cpu().tolist())):
@@ -443,10 +467,10 @@ class MambaMethod:
                             row = dict(vehicle_id=str(vehicle['vehicle_id']), current_edge=int(vehicle['current_edge']),
                                 action=index, edge_indices=obs.edge_indices[row_index].copy())
                             rows.append(row)
-                            decisions.append(NextHopDecision(row['vehicle_id'], row['current_edge'],
-                                int(row['edge_indices'][index]), float(now)))
-                    return decisions
+                            selected.append(index)
+                    return selected_decisions(pending, obs, selected, now)
 
+                physical_result = None
                 if vehicles and any(not v.get('arrived', False) for v in vehicles):
                     speeds = clip_road_speed_fractions(flow[:, 1], traffic_model) * network.speed_limits_mps
                     physical_result = advance_imagined_window(vehicles, candidates=self.runner.candidates,
@@ -454,18 +478,22 @@ class MambaMethod:
                         start_time=timestamp, total_vehicle_count=population, decide=decide,
                         interval_seconds=duration, observation_step_seconds=observation_step,
                         vehicle_max_speed_mps=maximum_speed, traffic_model=traffic_model,
-                        session_protocol='event' if traffic_model == 'meso' else 'legacy')
+                        session_protocol='event' if traffic_model == 'meso' or self.route_mode else 'legacy')
                     cumulative_seconds += float(getattr(physical_result, 'active_vehicle_seconds', 0.) if reward_objective(self.args) == 'legacy_exposure'
                                                 else physical_result.active_vehicle_seconds)
-                action = self._tensor(self._cohort_action(rows, population, duration))[None, None]
+                action = self._tensor(self._cohort_turn_action(
+                    physical_result.action_events if physical_result is not None else (),
+                    population, duration, cohort) if self.route_mode else
+                    self._cohort_action(rows, population, duration))[None, None]
                 next_global = self.global_model.transition(action, global_state, presence)
                 consequence = torch.cat((global_state.stoch, next_global.deter), -1)
                 # Duration is an explicit model input in both real and imagined
                 # windows. Reward already predicts that whole interval: no double scaling.
                 rewards.append(self.global_model.reward_model(consequence).reshape(()))
                 timestamp += duration
-                continuation.append(torch.zeros((), device=self.device) if timestamp >= self.runner.deadline else
-                    self.global_model.continuation_model(consequence).sigmoid().reshape(()))
+                # The real simulation deadline is known. Learned survival must
+                # not discount whole-network rewards before that boundary.
+                continuation.append(torch.as_tensor(float(timestamp < self.runner.deadline), device=self.device))
                 global_state = next_global
             running = (torch.zeros((), device=self.device) if timestamp >= self.runner.deadline else
                 self.critic(global_state.features).reshape(()))
@@ -523,19 +551,41 @@ class MambaMethod:
             count = len(record['action'])
             record['actor_advantage'] = actor_advantages[offset:offset + count].detach()
             offset += count
+        choices = []
+        for record in records:
+            choice = (record['mask'].sum(-1) > 1 if record['mask'] is not None else
+                torch.ones_like(record['action'], dtype=torch.bool))
+            count = int(choice.sum())
+            if count:
+                choices.append((record, choice, count))
+        has_signal = choices and (self.entropy_coef != 0. or any(
+            bool(record['actor_advantage'][choice].ne(0.).any()) for record, choice, _ in choices))
+        if not has_signal:
+            # Zero gradients still move Adam parameters through stored momentum.
+            self.actor_optimizer.zero_grad(set_to_none=True)
+            return next(self.actor.parameters()).new_zeros(())
+        choice_count = sum(count for _, _, count in choices)
+        target_kl = float(getattr(self.args, 'mamba_target_kl', TARGET_POLICY_KL))
         frozen_prior = float(self.actor.prior_weight)
         for _ in range(PPO_EPOCHS):
-            losses, ratios = [], []
-            for record in records:
+            losses, log_ratios = [], []
+            for record, choice, count in choices:
                 distribution = self.actor.routing_distribution(record['latent'], record['candidates'],
                     record['mask'], weight=frozen_prior)
-                log_prob = distribution.log_prob(record['action'])
-                advantage = record['actor_advantage']
-                losses.append(clipped_policy_loss(log_prob, record['old_log_prob'], advantage)
-                    - self.entropy_coef * distribution.entropy().mean())
-                ratios.append((log_prob.detach() - record['old_log_prob']).exp())
-            actor_loss = torch.stack(losses).mean()
-            self._last_ppo_ratios = torch.cat(ratios).detach().cpu()
+                log_prob = distribution.log_prob(record['action'])[choice]
+                old_log_prob = record['old_log_prob'][choice]
+                advantage = record['actor_advantage'][choice]
+                losses.append((clipped_policy_loss(log_prob, old_log_prob, advantage)
+                    - self.entropy_coef * distribution.entropy()[choice].mean()) * count)
+                log_ratios.append(log_prob.detach() - old_log_prob.detach())
+            # Chunks are a memory bound, not equal-weight training samples.
+            actor_loss = torch.stack(losses).sum() / choice_count
+            log_ratio = torch.cat(log_ratios)
+            ratio = log_ratio.exp()
+            self._last_ppo_ratios = ratio.cpu()
+            self._last_ppo_kl = float((ratio - 1. - log_ratio).mean())
+            if target_kl > 0. and self._last_ppo_kl > 1.5 * target_kl:
+                break
             self._step(self.actor_optimizer, actor_loss, list(self.actor.parameters()))
         return actor_loss
 
@@ -591,8 +641,17 @@ class MambaMethod:
             imagination_horizon=IMAGINATION_HORIZON, ppo_epochs=PPO_EPOCHS,
             # Keep the historical base in the state schema; the outer config
             # and restored episode counter determine self.entropy_coef.
-            ppo_clip=.075, entropy_coef=.002, gradient_clip=10., advantage_clip=2.5,
+            ppo_clip=.075, ppo_target_kl=float(getattr(self.args, 'mamba_target_kl', TARGET_POLICY_KL)),
+            ppo_kl_stop_multiplier=1.5, ppo_reduction='nonforced_individual_decisions',
+            actor_zero_signal='skip_adam_without_choice_advantage_or_entropy',
+            imagined_actor_context=('macro_window_time' if reward_objective(self.args) == 'legacy_exposure'
+                else 'physical_decision_event_time'),
+            imagination_continuation='known_physical_deadline',
+            entropy_coef=.002, gradient_clip=10., advantage_clip=2.5,
             chunk_size=CHUNK, global_obs_dim=self.global_dim, global_action_dim=2 * self.edge_count + 1)
+        if self.route_mode:
+            protocol.update(routing_mode='current_to_dest', local_clock='route_decision_30_seconds',
+                global_action='fixed_cohort_observed_branch_turn_counts_over_actual_N_and_duration')
         if not getattr(self.args, 'global_reward_only', True):
             protocol.update(reward_mode='global_with_individual_timeout',
                 actor_timeout='physical_nonarrival_at_real_deadline_only',

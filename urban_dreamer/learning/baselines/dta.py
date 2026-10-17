@@ -31,7 +31,13 @@ MIN_MEAN_SPEED_MPS = 0.5
 
 
 class DtaMethod:
-    """Approximate system-optimum DTA via MSA on simulation-estimated marginal costs."""
+    """Approximate system-optimum DTA via MSA on simulation-estimated marginal costs.
+
+    In current-to-destination mode, assignment is constrained to the same four
+    static routes as the actor. At later decision boundaries an unavailable
+    assigned suffix falls back to the cheapest current candidate, so executed
+    path fractions can differ from the original OD assignment fractions.
+    """
 
     needs_window_records = True
     needs_rows = False
@@ -42,6 +48,7 @@ class DtaMethod:
             # test_toy_baselines.py freezes this placeholder registry contract.
             raise NotImplementedError('method not implemented yet')
         self.args, self.runner = args, runner
+        self.route_mode = getattr(runner.candidates, 'routing_mode', None) == 'current_to_dest'
         network = runner.network
         topology = runner.topology
         self.predecessors = [[] for _ in network.edge_ids]
@@ -61,13 +68,18 @@ class DtaMethod:
         for (origin, destination), group in self.od_groups.items():
             group['vehicles'] = tuple(sorted(group['vehicles'],
                                              key=lambda v: (v.departure_second, v.vehicle_id)))
-            path, dist = self._shortest_path(origin, destination, self.edge_cost)
+            if self.route_mode:
+                path = self._best_candidate_path(origin, destination)
+            else:
+                path, dist = self._shortest_path(origin, destination, self.edge_cost)
+                self._cost_to_go[destination] = dist
             group['path_fractions'] = {path: 1.0}
-            self._cost_to_go[destination] = dist
         self.assignment: dict[str, tuple[int, ...]] = {}
         self.poisson_mode = False
         self.episode_seed = None
         self.episode_groups = {}
+        self.route_assignment_follow_count = 0
+        self.route_assignment_fallback_count = 0
         self._rebuild_assignments()
         self.iteration = 0
         self.stable_count = 0
@@ -114,6 +126,11 @@ class DtaMethod:
         return float(sum(float(edge_cost[target]) + self._junction_seconds(source, target)
                          for source, target in zip(path, path[1:])))
 
+    def _best_candidate_path(self, origin, destination):
+        """Constrain assignment to the actor's static four-route action pool."""
+        return min(self.runner.candidates.generate_paths(origin, destination),
+                   key=lambda path: self._path_cost(path, self.edge_cost))
+
     def begin_episode(self, episode_topology, *, seed):
         """Assign fresh vehicles without changing learned fractions, costs or RNG.
 
@@ -139,6 +156,8 @@ class DtaMethod:
         self.stable_count = 0
         self.converged = False
         self.assignment = {}
+        self.route_assignment_follow_count = 0
+        self.route_assignment_fallback_count = 0
         self._rebuild_assignments()
 
     def _rebuild_assignments(self):
@@ -172,11 +191,30 @@ class DtaMethod:
     def select(self, vehicles, actor_obs, frozen_flow, now, *, explore=True):
         """Follow the assigned path; fall back to marginal-cost greedy when off path."""
         indices = []
+        routes = getattr(actor_obs, 'routes', None)
         for row, vehicle in enumerate(vehicles):
             legal = np.flatnonzero(actor_obs.mask[row])
             edge_indices = actor_obs.edge_indices[row]
             path = self.assignment.get(vehicle['vehicle_id'])
             chosen = None
+            if routes is not None:
+                if path is not None:
+                    try:
+                        suffix = path[path.index(int(vehicle['current_edge'])):]
+                    except ValueError:
+                        suffix = None
+                    for column in legal:
+                        if tuple(routes[row][column]) == suffix:
+                            chosen = int(column)
+                            break
+                if chosen is None:
+                    chosen = int(min(legal, key=lambda column:
+                        self._path_cost(routes[row][column], self.edge_cost)))
+                    self.route_assignment_fallback_count += 1
+                else:
+                    self.route_assignment_follow_count += 1
+                indices.append(chosen)
+                continue
             if path is not None:
                 try:
                     position = path.index(int(vehicle['current_edge']))
@@ -225,6 +263,9 @@ class DtaMethod:
         cost_to_go = {}
         aon_paths = {}
         for origin, destination in self.od_groups:
+            if self.route_mode:
+                aon_paths[(origin, destination)] = self._best_candidate_path(origin, destination)
+                continue
             if destination not in cost_to_go:
                 cost_to_go[destination] = self._dijkstra(destination, self.edge_cost)
             dist, best_next = cost_to_go[destination]

@@ -79,6 +79,8 @@ class SumoEpisodeSampler:
                 raise ValueError('collection session and candidate observations must use the same network')
             if session.forbid_revisit != candidates.forbid_revisit:
                 raise ValueError('collection session and candidate observations must use the same forbid_revisit setting')
+            if getattr(session, 'routing_mode', 'next_hop') != getattr(candidates, 'routing_mode', 'next_hop'):
+                raise ValueError('collection session and candidate observations must use the same routing_mode')
             # The runner owns this immutable topology across episodes. Reuse
             # its destination tables instead of repeating reverse Dijkstra
             # in every fresh physical session.

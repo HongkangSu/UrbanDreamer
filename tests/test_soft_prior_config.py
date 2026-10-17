@@ -18,6 +18,7 @@ def fingerprint(config, method):
 
 def test_archived_omitted_fields_keep_hard_action_conditioning(tmp_path):
     config = load_config(_write_config(tmp_path/'old.toml'))
+    assert config.method.prior_usage == 'source_reference'
     assert config.method.prior_filter == 'hard'
     assert config.method.prior_action_conditioned is True
     assert config.method.prior_filter_input is False
@@ -35,7 +36,25 @@ def test_explicit_soft_profile_defaults_to_state_only_output_filter(tmp_path):
     assert config.method.prior_filter_input is False
     assert fingerprint(config, replace(config.method, prior_filter_strength=20.)) != config.semantic_fingerprint
     assert MethodConfig().prior_filter == 'soft'
-    assert MethodConfig().prior_filter_strength == 10.
+    assert MethodConfig().prior_filter_strength == .1
+    assert MethodConfig().prior_usage == 'condition_only'
+
+
+def test_condition_only_profile_selects_weak_soft_background_and_distinct_checkpoint(tmp_path):
+    config = load_config(_write_config(tmp_path/'new.toml', extra='\n[method]\nprior_usage="condition_only"\n'))
+    assert config.method.prior_usage == 'condition_only'
+    assert config.method.prior_filter == 'soft'
+    assert config.method.prior_filter_strength == .1
+    assert config.method.prior_action_conditioned is False
+    assert config.method.prior_filter_input is False
+    assert fingerprint(config, replace(config.method, prior_usage='source_reference')) != config.semantic_fingerprint
+
+
+@pytest.mark.parametrize('entry', ['prior_usage="invalid"',
+    'prior_usage="condition_only"\nprior_action_conditioned=true'])
+def test_invalid_prior_usage_fails_before_model_creation(tmp_path, entry):
+    with pytest.raises(ConfigError):
+        load_config(_write_config(tmp_path/'bad_usage.toml', extra='\n[method]\n'+entry+'\n'))
 
 
 @pytest.mark.parametrize('entry', ['prior_filter="invalid"', 'prior_filter_strength=-1',
@@ -52,6 +71,8 @@ def test_repository_profiles_explicitly_select_output_only_soft_background():
     assert profiles
     for config in profiles:
         assert config.method.prior_filter == 'soft'
+        assert config.method.prior_filter_strength == .1
+        assert config.method.prior_usage == 'condition_only'
         assert config.method.prior_filter_input is False
         assert config.method.prior_action_conditioned is False
 
@@ -72,6 +93,6 @@ def test_config_driven_world_model_tools_forward_prior_contract():
             if not ast.unparse(rank.value.value).endswith('.method'):
                 continue
             keys = {k.arg for k in node.keywords}
-            assert {'prior_filter', 'prior_filter_strength', 'prior_action_conditioned', 'prior_filter_input'} <= keys, path
+            assert {'prior_filter', 'prior_filter_strength', 'prior_action_conditioned', 'prior_filter_input', 'prior_usage'} <= keys, path
             checked += 1
     assert checked >= 14

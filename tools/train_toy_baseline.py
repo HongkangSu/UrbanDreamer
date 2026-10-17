@@ -20,7 +20,7 @@ if str(ROOT) not in sys.path:
 from urban_dreamer.learning.baselines import METHODS, build_method
 from urban_dreamer.learning.baselines import common
 from urban_dreamer.learning.baselines.collection_policy import CollectionPolicy
-from urban_dreamer.learning.entropy_schedule import entropy_schedule_profile, SCHEDULE_FIELDS
+from urban_dreamer.learning.entropy_schedule import entropy_schedule_profile, entropy_schedule_episodes, SCHEDULE_FIELDS
 from urban_dreamer.traffic.event_session import SumoEventSession
 from urban_dreamer.models.policy import NextHopActor, shortest_path_prior_weight, set_shortest_path_prior
 from urban_dreamer.workflow.config import load_config
@@ -167,6 +167,8 @@ def main(argv=None):
     parser.add_argument('--config', type=Path, default=ROOT / 'configs/toy_cross_bottleneck.toml')
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--episodes', type=int, default=150)
+    parser.add_argument('--entropy-schedule-episodes', type=int, default=None,
+                        help='Preserve the original annealing horizon when extending training')
     parser.add_argument('--eval-every', type=int, default=10)
     parser.add_argument('--eval-seeds', type=int, default=3)
     parser.add_argument('--evaluation-temperature', type=float, default=.2)
@@ -186,9 +188,13 @@ def main(argv=None):
     parser.add_argument('--ppo-minibatch-size', type=int, default=512)
     parser.add_argument('--score-gauge', default='legacy',
                         choices=['legacy', 'pre_head_legal_reference_v1'],
-                        help='Explicit MAPPO/IPPO score stabilization; changing this requires checkpoint protocol migration')
+                        help='MAPPO/IPPO score stabilization; MBPO/Dreamer always use the stable gauge')
     parser.add_argument('--ppo-target-kl', type=float, default=.01,
-                        help='Stop PPO actor epochs when whole-batch categorical KL exceeds this (0 disables)')
+                        help='Maximum accepted mean PPO KL; unsafe epochs roll back (0 disables this limit)')
+    parser.add_argument('--ppo-max-policy-kl', type=float, default=None,
+                        help='Maximum accepted per-decision KL (default: 10 times target KL; 0 disables)')
+    parser.add_argument('--ppo-max-backtracks', type=int, default=3,
+                        help='Maximum half-learning-rate retries after a rejected PPO epoch')
     parser.add_argument('--ppo-advantage-std-floor', type=float, default=1e-6)
     parser.add_argument('--ppo-critic-epochs', type=int, default=None,
                         help='Defaults to 8 for MAPPO and 4 for IPPO')
@@ -203,6 +209,15 @@ def main(argv=None):
     parser.add_argument('--mamba-model-warmup-updates', type=int, default=100)
     parser.add_argument('--mamba-min-model-frames', type=int, default=100)
     parser.add_argument('--mamba-burn-in-windows', type=int, default=5)
+    parser.add_argument('--mamba-target-kl', type=float, default=.01,
+                        help='MAMBA PPO KL stopping threshold (0 disables)')
+    parser.add_argument('--mbpo-model-train-rounds', type=int, default=2)
+    parser.add_argument('--mbpo-rollout-seeds', type=int, default=4)
+    parser.add_argument('--mbpo-rollout-length', type=int, default=1)
+    parser.add_argument('--dreamer-world-model-updates', type=int, default=4)
+    parser.add_argument('--dreamer-imagination-passes', type=int, default=1)
+    parser.add_argument('--dreamer-imagination-rollouts', type=int, default=2)
+    parser.add_argument('--dreamer-imagined-horizon', type=int, default=3)
     parser.add_argument('--dreamer-imagination-device', default='auto',
                         help='Dreamer imagined actor device: auto (CPU), learner, cpu, or an explicit torch device')
     parser.add_argument('--dreamer-allow-legacy-imagination-migration', action='store_true',
@@ -232,7 +247,22 @@ def main(argv=None):
     parser.add_argument('--global-reward-only', action=argparse.BooleanOptionalAction, default=True,
                         help='Use only the shared global reward; --no-global-reward-only explicitly selects legacy timeout shaping')
     args = parser.parse_args(argv)
-    if args.score_gauge != 'legacy' and args.method not in {'mappo', 'ippo'}:
+    for name in ('mbpo_model_train_rounds', 'mbpo_rollout_seeds', 'mbpo_rollout_length',
+                 'dreamer_world_model_updates', 'dreamer_imagination_passes',
+                 'dreamer_imagination_rollouts', 'dreamer_imagined_horizon'):
+        if getattr(args, name) < 1:
+            parser.error(name.replace('_', '-') + ' must be positive')
+    if not np.isfinite(args.mamba_target_kl) or args.mamba_target_kl < 0:
+        parser.error('mamba-target-kl must be finite and nonnegative')
+    for name in ('ppo_target_kl', 'ppo_max_policy_kl'):
+        value = getattr(args, name)
+        if value is not None and (not np.isfinite(value) or value < 0):
+            parser.error(name.replace('_', '-') + ' must be finite and nonnegative')
+    if args.ppo_max_backtracks < 0:
+        parser.error('ppo-max-backtracks must be nonnegative')
+    if args.method in {'mbpo', 'dreamer'}:
+        args.score_gauge = 'pre_head_legal_reference_v1'
+    if args.score_gauge != 'legacy' and args.method not in {'mappo', 'ippo', 'mbpo', 'dreamer'}:
         parser.error('nonlegacy score-gauge requires mappo or ippo')
     try:
         actor_evaluation_label = common.evaluation_policy_label(args.evaluation_temperature, deterministic=args.evaluation_argmax)
@@ -248,6 +278,10 @@ def main(argv=None):
         parser.error('forbid-revisit requires event session and zero shortest-path prior')
     if args.episodes < 0 or min(args.eval_every, args.eval_seeds, args.threads, args.checkpoint_every) < 1:
         parser.error('invalid nonpositive experiment budget')
+    try:
+        entropy_horizon = entropy_schedule_episodes(args)
+    except ValueError as error:
+        parser.error(str(error))
     shortest_path_prior_weight(0, initial_weight=args.sp_prior_weight,
         hold_episodes=args.sp_prior_hold_episodes, off_episode=args.sp_prior_off_episode)
     if not np.isfinite(args.sp_prior_temperature) or args.sp_prior_temperature <= 0:
@@ -274,12 +308,15 @@ def main(argv=None):
         evaluation_policies += (actor_evaluation_label + '_no_prior',)
     apply_episode_prior(method, args, 0)
     entropy_metrics = apply_episode_entropy(method, runner.config.method,
-        completed_episodes=0, total_episodes=args.episodes)
+        completed_episodes=0, total_episodes=entropy_horizon)
     start, best = 1, float('inf')
     if args.resume:
         state = common.load_checkpoint(output / 'latest.pt', method_name=args.method,
             prepared=runner.prepared, config=runner.config, device=runner.device)
         validate_prior_resume(state['args'], args)
+        if (runner.config.method.actor_entropy_mode == 'annealed'
+                and entropy_schedule_episodes(state['args']) != entropy_horizon):
+            raise ValueError('resume changed entropy schedule episode budget')
         for key in ('seed', 'vehicle_limit', 'actor_lr', 'critic_lr'):
             if state['args'][key] != getattr(args, key):
                 raise ValueError(f'resume changed {key}')
@@ -313,7 +350,7 @@ def main(argv=None):
             best = float('inf')
         apply_episode_prior(method, args, state['episode'])
         entropy_metrics = apply_episode_entropy(method, runner.config.method,
-            completed_episodes=state['episode'], total_episodes=args.episodes)
+            completed_episodes=state['episode'], total_episodes=entropy_horizon)
         del state
     else:
         protocol = dict(world_model=args.method in {'dreamer', 'mbpo', 'mamba'},
@@ -331,7 +368,7 @@ def main(argv=None):
                     if simulation_settings['traffic_model'] == 'meso' else
                     'junction + candidate free-flow travel + remaining free-flow cost'),
                 best_selection=actor_evaluation_label + '_no_prior' if prior_enabled else actor_evaluation_label,
-                mbpo_synthetic_cache='clear on prior weight change; same-weight historical policy reuse remains heuristic'),
+                mbpo_synthetic_cache='fresh current-policy synthetic rows; one actor update per episode'),
             skip_initial_evaluation=args.skip_initial_evaluation,
             reward=(('shared -delta(C/max(B,1))/60' if args.reward_objective == 'observed_mean' else 'shared -active_vehicle_seconds/(N*60)') if args.global_reward_only else
                     'shared -active_vehicle_seconds/(N*60); individual -5000 only on each unfinished vehicle trajectory'),
@@ -409,7 +446,7 @@ def main(argv=None):
         episode_started = time.monotonic()
         prior_weight = apply_episode_prior(method, args, episode)
         entropy_metrics = apply_episode_entropy(method, runner.config.method,
-            completed_episodes=episode - 1, total_episodes=args.episodes)
+            completed_episodes=episode - 1, total_episodes=entropy_horizon)
         rows, windows, metrics = runner.run_episode(functools.partial(collector.select, explore=True),
             seed=args.seed + episode, collect=getattr(method, 'needs_rows', True), label='stochastic',
             record_windows=getattr(method, 'needs_window_records', False),
@@ -456,7 +493,7 @@ def main(argv=None):
         method.load_state_dict(state['method_state'])
         apply_episode_prior(method, args, state['episode'])
         apply_episode_entropy(method, runner.config.method,
-            completed_episodes=state['episode'], total_episodes=args.episodes)
+            completed_episodes=state['episode'], total_episodes=entropy_horizon)
         evaluate(runner, method, output, episode=state['episode'], seeds=holdout, phase='holdout_best',
                  policies=learned_policies, temperature=args.evaluation_temperature, deterministic=args.evaluation_argmax)
     print(json.dumps({'status': 'completed', 'output': str(output), 'episodes': completed_episodes,

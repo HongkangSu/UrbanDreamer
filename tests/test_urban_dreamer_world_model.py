@@ -518,7 +518,10 @@ def test_world_model_removes_global_condition_parameters_and_token_slot():
     assert not hasattr(dynamics.action_encoder, "context_mlp")
     assert not hasattr(dynamics.action_encoder, "action_token")
     assert not hasattr(dynamics, "action_slice")
-    assert set(wm.ConditionEncoding.__dataclass_fields__) == {"edge_tokens", "reference_tokens"}
+    assert set(wm.ConditionEncoding.__dataclass_fields__) == {
+        "edge_tokens", "reference_tokens", "current_state", "background"}
+    legacy = wm.ConditionEncoding(torch.zeros(1, 1, 3, 256))
+    assert legacy.current_state is None and legacy.background is None
     assert all("context" not in name and "action_token" not in name
                for name, _ in dynamics.named_parameters())
     assert dynamics.flow_time_slice == slice(0, 1)

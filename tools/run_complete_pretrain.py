@@ -39,7 +39,11 @@ VOLUME_SCOPE = 'previous_state_excluding_current_births'
 def export_run_config(config, path):
     """Write the exact flat mainline sections without adding a TOML dependency."""
     lines = []
-    for section, values in config.resolved_snapshot().items():
+    snapshot = config.resolved_snapshot()
+    # Snapshot identities omit legacy next_hop, but new exports must retain
+    # their mode when loaded under any filename (including the temporary file).
+    snapshot['simulation']['routing_mode'] = config.simulation.routing_mode
+    for section, values in snapshot.items():
         lines.append(f'[{section}]')
         for name, value in values.items():
             if value is not None:

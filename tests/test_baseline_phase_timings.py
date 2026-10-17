@@ -80,4 +80,8 @@ def test_unused_flow_removal_preserves_exact_actor_update(tmp_path, method_class
     assert torch.equal(before_rng, torch.get_rng_state())
     for old_parameter, new_parameter in zip(original.actor.parameters(), optimized.actor.parameters()):
         assert torch.equal(old_parameter, new_parameter)
-        assert torch.equal(old_parameter.grad, new_parameter.grad)
+        if old_parameter.grad is None:
+            # The stable score gauge omits the unidentifiable common head bias.
+            assert new_parameter.grad is None
+        else:
+            assert torch.equal(old_parameter.grad, new_parameter.grad)

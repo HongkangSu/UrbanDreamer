@@ -84,3 +84,110 @@ def test_author_failed_search_keeps_first_legal_fallback():
     assert router.stats['failed_searches'] == 1
     assert router.stats['fallback_events'] == 2
     assert router.stats['cache_hits'] == 1
+
+
+@pytest.mark.skipif(not AUTHOR.exists(), reason='Downloaded author source not present')
+def test_author_complete_route_keeps_optimized_suffix(monkeypatch):
+    network = graph()
+    network.adjacency_list = ((1, 2, 4), (2, 3), (3,), (), (3,))
+    router = policies.AuthorGeneticRouter(network, AUTHOR, population_size=6, generations=2)
+    monkeypatch.setattr(router.author, '_optimize_route', lambda origin, destination: ['o', 'a', 'b', 'd'])
+    candidates = SimpleNamespace(candidates=lambda current, destination: (1, 2),
+        full_route=lambda *args: pytest.fail('Successful GA route must retain its optimized suffix'))
+    router.update_costs(np.ones(5), 0)
+    # A shortest completion through a would skip b; the GA suffix must survive.
+    assert router.complete_route(0, 3, candidates) == (0, 1, 2, 3)
+    assert router.stats['decision_count'] == 1
+    assert router.stats['fallback_events'] == 0
+    assert router.stats['full_route_fallbacks'] == 0
+
+
+@pytest.mark.skipif(not AUTHOR.exists(), reason='Downloaded author source not present')
+def test_author_complete_route_preserves_cache_ttl():
+    random.seed(42)
+    router = policies.AuthorGeneticRouter(graph(), AUTHOR, population_size=6, generations=2)
+    candidates = SimpleNamespace(candidates=lambda current, destination: (1, 2))
+    router.update_costs([1, 1, 100, 1, 1], 10)
+    assert router.complete_route(0, 3, candidates) == (0, 1, 3)
+    router.update_costs([1, 100, 1, 1, 1], 309)
+    assert router.complete_route(0, 3, candidates) == (0, 1, 3)
+    assert router.stats['cache_hits'] == 1
+    router.update_costs([1, 100, 1, 1, 1], 310)
+    assert router.complete_route(0, 3, candidates) == (0, 2, 3)
+    assert router.stats['optimize_calls'] == 2
+
+
+@pytest.mark.skipif(not AUTHOR.exists(), reason='Downloaded author source not present')
+def test_author_complete_route_failed_search_completes_first_legal_suffix(monkeypatch):
+    router = policies.AuthorGeneticRouter(graph(), AUTHOR, population_size=6, generations=2)
+    # Returning no population exercises the original optimizer's [origin] failure.
+    monkeypatch.setattr(router.author, '_initialize_population', lambda *args: [])
+    suffix_calls = []
+    def suffix(current, selected, destination):
+        suffix_calls.append((current, selected, destination))
+        return (current, selected, destination)
+    candidates = SimpleNamespace(candidates=lambda current, destination: (2, 1), full_route=suffix)
+    router.update_costs(np.ones(5), 10)
+    assert router.complete_route(0, 3, candidates) == (0, 2, 3)
+    assert router.complete_route(0, 3, candidates) == (0, 2, 3)
+    assert suffix_calls == [(0, 2, 3), (0, 2, 3)]
+    assert router.stats['failed_searches'] == 1
+    assert router.stats['fallback_events'] == 2
+    assert router.stats['full_route_fallbacks'] == 2
+    assert router.stats['cache_hits'] == 1
+
+
+@pytest.mark.skipif(not AUTHOR.exists(), reason='Downloaded author source not present')
+@pytest.mark.parametrize('route', [
+    ['o', 'a'], ['a', 'd'], ['o', 'unknown', 'd'],
+    ['o', 'a', 'b', 'd'], ['o', 'forbidden', 'd'], [],
+])
+def test_author_complete_route_rejects_invalid_cached_paths(route):
+    router = policies.AuthorGeneticRouter(graph(), AUTHOR, population_size=6, generations=2)
+    router.update_costs(np.ones(5), 10)
+    router.author._route_cache[('o', 'd')] = route
+    router.author._cache_timestamps[('o', 'd')] = 10
+    candidates = SimpleNamespace(candidates=lambda current, destination: (1, 2),
+        full_route=lambda *args: pytest.fail('Invalid routes must not be hidden by fallback'))
+    with pytest.raises(ValueError, match='invalid route'):
+        router.complete_route(0, 3, candidates)
+
+
+@pytest.mark.skipif(not AUTHOR.exists(), reason='Downloaded author source not present')
+@pytest.mark.parametrize(('raw_route', 'expected'), [
+    (['o', 'a', 'o', 'b', 'd'], (0, 2, 3)),
+    (['o', 'a', 'b', 'a', 'd'], (0, 1, 3)),
+])
+def test_author_complete_route_erases_loops_without_mutating_ga_cache(raw_route, expected):
+    network = graph()
+    network.adjacency_list = ((1, 2, 4), (0, 2, 3), (1, 3), (), (3,))
+    router = policies.AuthorGeneticRouter(network, AUTHOR, population_size=6, generations=2)
+    router.update_costs(np.ones(5), 10)
+    router.author._route_cache[('o', 'd')] = raw_route.copy()
+    router.author._cache_timestamps[('o', 'd')] = 10
+    candidates = SimpleNamespace(candidates=lambda current, destination: (1, 2))
+    assert router.complete_route(0, 3, candidates) == expected
+    assert router.author._route_cache[('o', 'd')] == raw_route
+    assert router.stats['loop_erased_routes'] == 1
+    assert router.stats['loop_edges_removed'] == 2
+    assert router.stats['fallback_loop_erased_routes'] == 0
+    assert router.stats['fallback_events'] == 0
+
+
+@pytest.mark.skipif(not AUTHOR.exists(), reason='Downloaded author source not present')
+def test_author_complete_route_reports_loop_erased_failure_fallback(monkeypatch):
+    network = graph()
+    network.adjacency_list = ((1, 2, 4), (0, 3), (3,), (), (3,))
+    router = policies.AuthorGeneticRouter(network, AUTHOR, population_size=6, generations=2)
+    monkeypatch.setattr(router.author, '_initialize_population', lambda *args: [])
+    candidates = SimpleNamespace(candidates=lambda current, destination: (1, 2),
+        full_route=lambda *args: (0, 1, 0, 2, 3))
+    router.update_costs(np.ones(5), 10)
+    assert router.complete_route(0, 3, candidates) == (0, 2, 3)
+    assert router.author._route_cache[('o', 'd')] == ['o']
+    assert router.stats['failed_searches'] == 1
+    assert router.stats['fallback_events'] == 1
+    assert router.stats['full_route_fallbacks'] == 1
+    assert router.stats['fallback_loop_erased_routes'] == 1
+    assert router.stats['loop_erased_routes'] == 1
+    assert router.stats['loop_edges_removed'] == 2

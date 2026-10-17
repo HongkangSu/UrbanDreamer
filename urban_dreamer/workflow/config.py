@@ -58,6 +58,7 @@ class SimulationConfig:
     meso_multi_queue: bool = False
     meso_edge_length_m: float = 98.0
     meso_interpolate_positions: bool = True
+    routing_mode: str = 'current_to_dest'
     # Deprecated standalone collector settings, retained in frozen snapshots.
     warmup_horizon_seconds: int = 1800
     warmup_completion_drain_seconds: int = 3000
@@ -128,9 +129,10 @@ class MethodConfig:
     prior_noise_scale: float = 0.1
     prior_loss_weight: float = 0.1
     prior_filter: str = 'soft'
-    prior_filter_strength: float = 10.0
+    prior_filter_strength: float = 0.1
     prior_action_conditioned: bool = False
     prior_filter_input: bool = False
+    prior_usage: str = 'condition_only'
     fm_steps: int = 2
     fm_solver: str = 'euler'
     picard_iterations: int = 2
@@ -176,6 +178,8 @@ class MainlineConfig:
         payload = asdict(self)
         payload.pop("semantic_fingerprint")
         payload.pop("source_path")
+        if self.simulation.routing_mode == 'next_hop':
+            payload['simulation'].pop('routing_mode')
         return _json_compatible(payload)
 
 
@@ -202,7 +206,13 @@ def load_config(path: str | Path) -> MainlineConfig:
     base_dir = source_path.parent
     inputs = _parse_inputs(raw["inputs"], base_dir)
     run = _parse_run(raw["run"], base_dir)
-    simulation = _parse_simulation(raw["simulation"])
+    simulation_values = raw["simulation"]
+    # Historical frozen exports omitted next_hop. Preserve the established
+    # snapshot filenames used by resume/transfer tools; ordinary fresh configs
+    # inherit the current default, and explicit settings always take precedence.
+    if source_path.name in {'run_config.toml', 'source_config.toml'}:
+        simulation_values = {'routing_mode': 'next_hop', **simulation_values}
+    simulation = _parse_simulation(simulation_values)
     resources = _parse_resources(raw["resources"])
     method = _parse_method(raw.get('method', {}))
     validate_fm_training_profile(method, resources)
@@ -257,6 +267,7 @@ def _validate_exact_schema(raw: Mapping[str, Any]) -> None:
             missing_fields.discard('warmup_episodes')
             missing_fields.discard('codec_pretraining_epochs')
         if section_name == 'simulation':
+            missing_fields.discard('routing_mode')
             missing_fields.discard('demand_duration_seconds')
             missing_fields.difference_update({'session_protocol', 'observation_step_seconds', 'backend'})
             missing_fields.difference_update({'traffic_model', 'meso_junction_control',
@@ -314,6 +325,9 @@ def _parse_simulation(raw: Mapping[str, Any]) -> SimulationConfig:
     protocol = raw.get('session_protocol', 'event')
     step = raw.get('observation_step_seconds', 1.0)
     backend = raw.get('backend', 'traci')
+    routing_mode = raw.get('routing_mode', 'current_to_dest')
+    if not isinstance(routing_mode, str) or routing_mode not in {'next_hop', 'current_to_dest'}:
+        raise ConfigError('[simulation].routing_mode must be next_hop or current_to_dest')
     traffic_model = raw.get('traffic_model', 'micro')
     if not isinstance(traffic_model, str) or traffic_model not in {'micro', 'meso'}:
         raise ConfigError('[simulation].traffic_model must be micro or meso')
@@ -409,6 +423,7 @@ def _parse_simulation(raw: Mapping[str, Any]) -> SimulationConfig:
             "demand_duration_seconds", "simulation"),
         session_protocol=protocol, observation_step_seconds=float(step), backend=backend,
         traffic_model=traffic_model, **meso,
+        routing_mode=routing_mode,
     )
 
 
@@ -496,6 +511,9 @@ def _semantic_fingerprint(
     run_values.pop("device")
     run_values.pop('warmup_episodes')
     simulation_values = asdict(simulation)
+    if simulation.routing_mode == 'next_hop':
+        # Existing runs and their pretrained checkpoint identities stay exact.
+        simulation_values.pop('routing_mode')
     if simulation.traffic_model == 'micro':
         # Keep historical micro checkpoint hashes byte-for-byte compatible.
         for name in tuple(simulation_values):
@@ -505,6 +523,9 @@ def _semantic_fingerprint(
                  'warmup_completion_patience_seconds'):
         simulation_values.pop(name)
     method_values = asdict(method)
+    if method.prior_usage == 'source_reference':
+        # Omitted usage in archived configs preserves the original checkpoint identity.
+        method_values.pop('prior_usage', None)
     if method.prior_filter == 'hard' and method.prior_action_conditioned and not method.prior_filter_input:
         # Archived configs without these fields keep their original contract.
         for name in ('prior_filter', 'prior_filter_strength', 'prior_action_conditioned', 'prior_filter_input'):
@@ -635,8 +656,12 @@ def validate_fm_training_profile(method: MethodConfig, resources: ResourceConfig
 
 def _parse_method(raw: Mapping[str, Any]) -> MethodConfig:
     values = {**asdict(MethodConfig()), **raw}
+    if 'prior_usage' not in raw:
+        values['prior_usage'] = 'source_reference'
+        if 'prior_filter_strength' not in raw:
+            values['prior_filter_strength'] = 10.0
     if not any(name in raw for name in ('prior_filter', 'prior_filter_strength', 'prior_action_conditioned',
-                                     'prior_filter_input')):
+                                     'prior_filter_input', 'prior_usage')):
         # Absence means historical hard/action-conditioned behavior, not a migration.
         values.update(prior_filter='hard', prior_action_conditioned=True)
     integer_fields = ('low_frequency_rank', 'fm_steps', 'picard_iterations',
@@ -653,6 +678,11 @@ def _parse_method(raw: Mapping[str, Any]) -> MethodConfig:
     if not isinstance(values['prior_filter_input'], bool):
         raise ConfigError('[method].prior_filter_input must be boolean')
     parsed['prior_filter_input'] = values['prior_filter_input']
+    parsed['prior_usage'] = _nonempty_string(values, 'prior_usage', 'method')
+    if parsed['prior_usage'] not in {'source_reference', 'condition_only'}:
+        raise ConfigError('[method].prior_usage must be source_reference or condition_only')
+    if parsed['prior_usage'] == 'condition_only' and parsed['prior_action_conditioned']:
+        raise ConfigError('condition_only requires [method].prior_action_conditioned=false')
     if parsed['disagreement_samples'] < 2:
         raise ConfigError('[method].disagreement_samples must be at least two')
     for name in ('prior_noise_scale', 'prior_loss_weight', 'disagreement_weight',

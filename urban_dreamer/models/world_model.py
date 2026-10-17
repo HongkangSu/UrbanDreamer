@@ -47,6 +47,8 @@ class ConditionEncoding:
 
     edge_tokens: torch.Tensor
     reference_tokens: torch.Tensor | None = None
+    current_state: torch.Tensor | None = None
+    background: torch.Tensor | None = None
 
 
 class LowFrequencyGraphPrior(nn.Module):
@@ -698,6 +700,20 @@ class EventActionEncoder(nn.Module):
         return self.readout(self.aggregate(events))
 
 
+class BackgroundConditionResidual(nn.Module):
+    """Direct conditional correction matching the evaluated B architecture."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.hidden = nn.Linear(WORLD_MODEL_DIM + 3 * FLOW_LATENT_DIM + 1, 128)
+        self.output = nn.Linear(128, FLOW_LATENT_DIM)
+        nn.init.zeros_(self.output.weight)
+        nn.init.zeros_(self.output.bias)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        return self.output(F.silu(self.hidden(inputs)))
+
+
 class Dynamics(nn.Module):
     def __init__(
         self,
@@ -711,8 +727,14 @@ class Dynamics(nn.Module):
         prior_action_conditioned: bool = True,
         prior_filter_input: bool = False,
         event_protocol: bool = False,
+        prior_usage: str = "source_reference",
     ) -> None:
         super().__init__()
+        if prior_usage not in {"source_reference", "condition_only"}:
+            raise ValueError("prior_usage must be 'source_reference' or 'condition_only'")
+        if prior_usage == "condition_only" and prior_action_conditioned:
+            raise ValueError("condition_only requires a state-only prior (prior_action_conditioned=False)")
+        self.prior_usage = prior_usage
         self.n_edges = int(adjacency.shape[0])
         self.action_encoder = ActionGNNEncoder(adjacency=adjacency, static_features=static_features)
         self.event_protocol = bool(event_protocol)
@@ -739,6 +761,12 @@ class Dynamics(nn.Module):
         self.flow_head = nn.Linear(WORLD_MODEL_DIM, FLOW_LATENT_DIM)
         nn.init.zeros_(self.flow_head.weight)
         nn.init.zeros_(self.flow_head.bias)
+
+        if prior_usage == "condition_only":
+            self.condition_residual = BackgroundConditionResidual()
+            self.register_buffer("condition_rms_z", torch.ones(()))
+            self.register_buffer("condition_rms_background", torch.ones(()))
+            self.register_buffer("condition_rms_relative", torch.ones(()))
 
         self.set_initial_chunk_profile()
 
@@ -828,9 +856,20 @@ class Dynamics(nn.Module):
         tokens = torch.cat([time_token, spatial_tokens, register_tokens], dim=2)
         hidden = self.transformer(add_sinusoidal_positions(tokens))
         spatial_hidden = hidden[:, :, self.spatial_slice, :]
-        return DynamicsOutput(
-            latent_velocity=self.flow_head(spatial_hidden),
-        )
+        velocity = self.flow_head(spatial_hidden)
+        if self.prior_usage == "condition_only":
+            if condition.current_state is None or condition.background is None:
+                raise ValueError("condition_only requires current-state context from prior_start")
+            current, background = condition.current_state, condition.background
+            if current.shape != packed_latents.shape or background.shape != current.shape:
+                raise ValueError("current-state and background context must match packed_latents")
+            time_feature = flow_time[..., None, None].expand(*spatial_hidden.shape[:-1], 1)
+            inputs = torch.cat((spatial_hidden, current / self.condition_rms_z,
+                background / self.condition_rms_background,
+                (packed_latents - current) / self.condition_rms_relative,
+                time_feature.to(spatial_hidden.dtype)), dim=-1)
+            velocity = velocity + self.condition_residual(inputs)
+        return DynamicsOutput(latent_velocity=velocity)
 
     def encode_condition(self, action: torch.Tensor, *, action_events: SparseActionEvents | None = None) -> ConditionEncoding:
         if self.event_protocol:
@@ -851,21 +890,31 @@ class Dynamics(nn.Module):
         self, z: torch.Tensor, condition: ConditionEncoding, noise: torch.Tensor | None = None,
         *, detach_prior_increment: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor, ConditionEncoding]:
-        """Isolate state-only prior increments on FM source/reference paths.
+        """Build a noisy source and solve-local current-state context.
 
-        Action-conditioned legacy priors detach only when explicitly requested.
-        The original increment remains live for prior supervision. This does
-        not freeze the shared condition encoder, reference projection, or the
-        direct current-state derivative through ``z``.
+        Condition-only priors supply detached background features without moving
+        the source mean or reference. Legacy state-only priors detach increments
+        on source/reference paths; action-conditioned priors detach on request.
+        The returned original increment remains live for prior supervision.
+        Current-state, condition encoder and reference gradients remain live.
         """
         if not isinstance(detach_prior_increment, bool):
             raise ValueError('detach_prior_increment must be a boolean')
-        detach_prior_increment = (detach_prior_increment
-                                  or not getattr(self.graph_prior, "prior_action_conditioned", True))
+        mean, increment, cached = self._prior_condition(z, condition, detach_prior_increment)
+        return mean + self.graph_prior.sample_noise(z, noise), increment, cached
+
+    def _prior_condition(
+        self, z: torch.Tensor, condition: ConditionEncoding, detach_prior_increment: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor, ConditionEncoding]:
+        """Build context without drawing noise; disagreement reuses it across samples."""
         increment = self.graph_prior(z, condition)
-        coarse = z + (increment.detach() if detach_prior_increment else increment)
-        cached = ConditionEncoding(condition.edge_tokens, self.reference_proj(coarse))
-        return coarse + self.graph_prior.sample_noise(z, noise), increment, cached
+        if self.prior_usage == "condition_only":
+            return z, increment, ConditionEncoding(
+                condition.edge_tokens, self.reference_proj(z), z, increment.detach())
+        detach_increment = (detach_prior_increment
+                            or not getattr(self.graph_prior, "prior_action_conditioned", True))
+        coarse = z + (increment.detach() if detach_increment else increment)
+        return coarse, increment, ConditionEncoding(condition.edge_tokens, self.reference_proj(coarse))
 
     def solve(
         self, start: torch.Tensor, action: torch.Tensor, condition: ConditionEncoding,
@@ -914,7 +963,9 @@ class Dynamics(nn.Module):
             velocities = []
             for nodes, samples, time in chunks:
                 chunk_condition = ConditionEncoding(condition.edge_tokens[samples],
-                    None if condition.reference_tokens is None else condition.reference_tokens[samples])
+                    None if condition.reference_tokens is None else condition.reference_tokens[samples],
+                    None if condition.current_state is None else condition.current_state[samples],
+                    None if condition.background is None else condition.background[samples])
                 velocity = self(action[samples], packed_latents=trajectory[nodes, samples],
                                 flow_time=time, condition=chunk_condition).latent_velocity
                 velocities.append(velocity)
@@ -960,9 +1011,7 @@ class Dynamics(nn.Module):
             raise ValueError("z must have shape (B, E, 64) or (B, T, E, 64)")
         _validate_transition_tensor(action, name="action", expected_shape=tuple(z.shape[:-1]))
         condition = self.encode_condition(action, action_events=action_events)
-        increment = self.graph_prior(z, condition)
-        coarse = z + (increment if getattr(self.graph_prior, "prior_action_conditioned", True)
-                      else increment.detach())
+        coarse, _, condition = self._prior_condition(z, condition)
 
         def repeat_samples(value: torch.Tensor) -> torch.Tensor:
             return value.unsqueeze(0).expand(n_samples, *value.shape).reshape(n_samples * z.shape[0], *value.shape[1:])
@@ -975,7 +1024,9 @@ class Dynamics(nn.Module):
             noise = noise.reshape(n_samples * z.shape[0], *noise.shape[2:])
         starts = repeat_samples(coarse) + self.graph_prior.sample_noise(repeated_z, noise)
         repeated_condition = ConditionEncoding(
-            repeat_samples(condition.edge_tokens), repeat_samples(self.reference_proj(coarse)))
+            repeat_samples(condition.edge_tokens), repeat_samples(condition.reference_tokens),
+            None if condition.current_state is None else repeat_samples(condition.current_state),
+            None if condition.background is None else repeat_samples(condition.background))
         samples = self.solve(starts, repeat_samples(action), repeated_condition,
                              steps=steps, solver=solver, picard_iterations=picard_iterations,
                              picard_batch_chunk_size=picard_batch_chunk_size)
@@ -1076,7 +1127,8 @@ class UrbanDreamerWorldModel(nn.Module):
                  prior_filter: str = "hard", prior_filter_strength: float = 10.0,
                  prior_action_conditioned: bool = True,
                  prior_filter_input: bool = False,
-                 event_protocol: bool = False, codec_speed_positive: bool = False) -> None:
+                 event_protocol: bool = False, codec_speed_positive: bool = False,
+                 prior_usage: str = "source_reference") -> None:
         super().__init__()
         self.flow_projector = FlowProjector(adjacency=adjacency, positive_speed=codec_speed_positive)
         self.dynamics = Dynamics(adjacency=adjacency, static_features=static_features,
@@ -1084,7 +1136,7 @@ class UrbanDreamerWorldModel(nn.Module):
                                  prior_filter=prior_filter, prior_filter_strength=prior_filter_strength,
                                  prior_action_conditioned=prior_action_conditioned,
                                  prior_filter_input=prior_filter_input,
-                                 event_protocol=event_protocol)
+                                 event_protocol=event_protocol, prior_usage=prior_usage)
         self.active_vehicle_fraction_readout = ActiveVehicleFractionReadout()
 
     def encode(self, flow_features: torch.Tensor) -> torch.Tensor:

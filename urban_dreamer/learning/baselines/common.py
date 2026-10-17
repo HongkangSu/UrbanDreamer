@@ -20,10 +20,12 @@ from torch.distributions import Categorical
 import torch.nn.functional as F
 
 from ..global_reward import (REWARD_CONTRACT, causal_context, observed_mean_seconds, started_count_from_state)
-from ..observations import build_actor_observations
+from ..routing_evaluation_metrics import (DiversionCost, all_demand_censored_metrics,
+    DIVERSION_COST_DEFINITION, ALL_DEMAND_CENSORED_DEFINITION)
+from ..observations import build_actor_observations, selected_decisions
 from ..sumo_sampling import SumoEpisodeSampler, resolve_session_factory
 from ...models.policy import lambda_return, attach_timeout_penalties, individual_actor_advantage
-from ...traffic.environment import NextHopDecision, SumoSession, WindowResult
+from ...traffic.environment import SumoSession, WindowResult
 from ...traffic.demand import PoissonDemand
 from ...traffic.routing import validate_prepared_inputs
 from ...traffic.topology import NextHopCandidates, load_traffic_topology
@@ -108,14 +110,29 @@ def resolve_collection_settings(config, args):
     resolved = {key: configured[key] if value is None else value for key, value in requested.items()}
     if resolved['session'] not in {'event', 'microstep'}:
         raise ValueError('session must be event or microstep')
+    routing_mode = getattr(simulation, 'routing_mode', 'next_hop')
+    if routing_mode == 'current_to_dest' and resolved['session'] != 'event':
+        raise ValueError('current_to_dest routing requires event session')
     if resolved['backend'] not in {'traci', 'libsumo'}:
         raise ValueError('backend must be traci or libsumo')
     if not math.isfinite(resolved['step_seconds']) or resolved['step_seconds'] <= 0:
         raise ValueError('step_seconds must be finite and positive')
     for key, value in resolved.items():
         setattr(args, key, value)
-    return dict(physics_identity(simulation), session_protocol=resolved['session'],
+    settings = dict(physics_identity(simulation), session_protocol=resolved['session'],
         observation_step_seconds=float(resolved['step_seconds']), backend=resolved['backend'])
+    if routing_mode == 'current_to_dest':
+        settings.update(routing_mode=routing_mode, policy_decision_interval_seconds=30.)
+    return settings
+
+
+def build_collection_candidates(network, simulation, *, forbid_revisit=False):
+    candidate_type = NextHopCandidates
+    if getattr(simulation, 'routing_mode', 'next_hop') == 'current_to_dest':
+        from ...traffic.route_candidates import RouteCandidates
+        candidate_type = RouteCandidates
+    return candidate_type(network, traffic_model=simulation.traffic_model,
+                          forbid_revisit=forbid_revisit)
 
 
 class EpisodeRunner:
@@ -155,9 +172,8 @@ class EpisodeRunner:
             duration_seconds=self.config.simulation.demand_duration_seconds)
         self.episode_topology = self.topology
         self.n = len(self.topology.vehicles)
-        self.candidates = NextHopCandidates(self.network,
-            traffic_model=self.config.simulation.traffic_model, **(
-            {'forbid_revisit': True} if getattr(args, 'forbid_revisit', False) else {}))
+        self.candidates = build_collection_candidates(self.network, self.config.simulation,
+            forbid_revisit=bool(getattr(args, 'forbid_revisit', False)))
         simulation = self.config.simulation
         self.deadline = 30 * math.ceil((simulation.world_model_intervals_per_episode * 30
                                        + simulation.training_completion_buffer_seconds) / 30)
@@ -183,8 +199,21 @@ class EpisodeRunner:
         """Free-flow policy using the configured model's junction, edge and remaining costs."""
         def select(vehicles, actor_obs, frozen_flow, now):
             indices = []
-            for vehicle, mask, edge_indices in zip(vehicles, actor_obs.mask, actor_obs.edge_indices):
+            routes = getattr(actor_obs, 'routes', None)
+            for row, (vehicle, mask, edge_indices) in enumerate(zip(vehicles, actor_obs.mask, actor_obs.edge_indices)):
                 source, destination = vehicle['current_edge'], vehicle['destination_edge']
+                if routes is not None:
+                    paths = routes[row]
+                    def route_cost(index):
+                        route = paths[index]
+                        length = max(float(self.network.lengths_m[source]), .1)
+                        fraction = min(max(float(vehicle.get('remaining_distance', length)), 0.) / length, 1.)
+                        return (self.network.free_flow_travel_seconds[source] * fraction
+                            + self.network.free_flow_travel_seconds[list(route[1:])].sum()
+                            + sum(self.candidates.junction(a, b)[0] / self.candidates.junction(a, b)[1]
+                                  for a, b in zip(route, route[1:])))
+                    indices.append(min(np.flatnonzero(mask), key=route_cost))
+                    continue
                 costs = self.candidates.costs(destination)
                 def cost(index):
                     edge = int(edge_indices[index])
@@ -192,6 +221,19 @@ class EpisodeRunner:
                     return length / speed + self.network.free_flow_travel_seconds[edge] + costs[edge]
                 indices.append(min(np.flatnonzero(mask), key=cost))
             return indices, [dict(entropy=0.)] * len(vehicles)
+        return select
+
+    def make_dynamic_shortest_select(self):
+        """Use observed speeds to compare complete legal candidates each boundary."""
+        def select(vehicles, actor_obs, frozen_flow, now):
+            observations = build_actor_observations(
+                policy_edge_features=frozen_flow[:, [2, 1]], vehicle_states=vehicles,
+                candidates=self.candidates, episode_progress=min(now / self.deadline, 1.),
+                active_vehicle_fraction=len(vehicles) / max(self.n, 1), prior_cost_mode='dynamic',
+                prior_speed_floor_mps=self.config.method.sp_prior_dynamic_speed_floor_mps,
+                prior_speed_cap_mps=self.config.simulation.vehicle_max_speed_mps)
+            costs = np.where(observations.mask, observations.prior_costs_seconds, np.inf)
+            return costs.argmin(axis=1).tolist(), [dict(entropy=0.)] * len(vehicles)
         return select
 
     def run_episode(self, select, *, seed, collect=False, record_windows=False, row_flow=True, label=None,
@@ -239,9 +281,14 @@ class EpisodeRunner:
                 select = EpisodeRunner.make_random_select(self, rng)
             elif select == 'shortest':
                 select = EpisodeRunner.make_shortest_select(self)
+            elif select == 'dynamic_shortest':
+                select = EpisodeRunner.make_dynamic_shortest_select(self)
             else:
                 raise ValueError(select)
         label = label or getattr(select, 'label', 'method')
+        evaluation_metrics = (not collect and label != 'stochastic'
+                              and (archive_metadata or {}).get('phase') != 'train')
+        diversion_cost = DiversionCost(self.candidates) if evaluation_metrics else None
         rows = []
         choices, branch_choices = Counter(), Counter()
         branch_entropies = []
@@ -257,6 +304,7 @@ class EpisodeRunner:
                 reward_objective=reward_objective(self.args)) as sampler:
             session = sampler.session
             state = sampler.state
+            destinations = {str(v['vehicle_id']): int(v['destination_edge']) for v in state['vehicles']} if diversion_cost is not None else {}
             archive = None
             if archive_path is not None:
                 from ..episode_archive import EpisodeArchive
@@ -327,7 +375,6 @@ class EpisodeRunner:
                 indices = [int(index) for index in indices]
                 if len(indices) != len(vehicles) or len(aux) != len(vehicles):
                     raise ValueError('select must return one candidate index per pending vehicle')
-                decisions = []
                 for i, vehicle in enumerate(vehicles):
                     vehicle_id = vehicle['vehicle_id']
                     if not 0 <= indices[i] < actor_obs.mask.shape[1] or not actor_obs.mask[i, indices[i]]:
@@ -343,6 +390,8 @@ class EpisodeRunner:
                             features=actor_obs.features[i].copy(), mask=actor_obs.mask[i].copy(), action=indices[i],
                             window=window_index, current_edge=int(vehicle['current_edge']),
                             edge_indices=actor_obs.edge_indices[i].copy())
+                        if getattr(actor_obs, 'routes', None) is not None:
+                            row['candidate_routes'] = actor_obs.routes[i]
                         if row_flow:
                             row['flow'] = row_window_flow
                         for key, value in aux[i].items():
@@ -350,12 +399,15 @@ class EpisodeRunner:
                                 raise ValueError(f'aux field {key!r} collides with a reserved row field')
                             row[key] = value
                         rows.append(row)
-                    decisions.append(NextHopDecision(vehicle_id, int(vehicle['current_edge']), edge, float(now)))
+                decisions = selected_decisions(vehicles, actor_obs, indices, now)
                 event_count += len(decisions)
                 return decisions
 
             for sample in sampler.windows(decide, before_window=before_window):
                 result = sample.result
+                if diversion_cost is not None:
+                    realized = getattr(result, 'conditioning_decisions', None)
+                    diversion_cost.add(result.decisions if realized is None else realized, destinations)
                 if archive is not None:
                     archive.append(result)
                 exposure += result.active_vehicle_seconds
@@ -381,6 +433,8 @@ class EpisodeRunner:
                         cumulative_vehicle_seconds=float(sample.start_state.get('cumulative_vehicle_seconds', 0.)),
                         next_started_vehicle_count=int(state['started_vehicle_count']),
                         next_cumulative_vehicle_seconds=float(state['cumulative_vehicle_seconds']))
+                    if getattr(result, 'conditioning_decisions', None) is not None:
+                        window['action_events'] = result.conditioning_decisions
                 windows.append(window)
             durations = np.asarray(list(session.travel_times.values()), dtype=np.float64)
             unfinished = self.n - len(durations)
@@ -410,6 +464,15 @@ class EpisodeRunner:
                 window_count=len(windows), global_reward_sum=global_reward,
                 vehicle_timeout_penalty_sum=timeout_penalty, selection_score=global_reward + timeout_penalty)
             metrics.update(collection_seconds=metrics['wall_seconds'], archive_seconds=0.)
+            if getattr(self.config.simulation, 'routing_mode', 'next_hop') == 'current_to_dest':
+                metrics.update(routing_mode='current_to_dest', policy_decision_interval_seconds=30.,
+                    p95_travel_seconds=float(np.percentile(durations, 95)) if durations.size else None)
+            if diversion_cost is not None:
+                metrics.update(diversion_cost.metrics(int(state['started_vehicle_count'])))
+                metrics.update(all_demand_censored_metrics(vehicles, state['vehicles'],
+                    min(float(state['time']), self.deadline)))
+                metrics.update(diversion_cost_definition=DIVERSION_COST_DEFINITION,
+                    all_demand_censored_definition=ALL_DEMAND_CENSORED_DEFINITION)
             if metrics_transform is not None:
                 metrics = metrics_transform(metrics)
             if archive is not None:
@@ -423,11 +486,25 @@ class EpisodeRunner:
 
 class GlobalTrafficCritic(torch.nn.Module):
     """Value of the real full-network traffic state for the shared window reward."""
-    def __init__(self, edge_count, context_dim=4):
+    def __init__(self, edge_count, context_dim=4, *, normalize_hidden=False, center_free_flow=False):
         super().__init__()
-        self.network = torch.nn.Sequential(
-            torch.nn.Linear(edge_count * 4 + context_dim, 256), torch.nn.Tanh(),
-            torch.nn.Linear(256, 256), torch.nn.Tanh(), torch.nn.Linear(256, 1))
+        if center_free_flow:
+            # Speed / speed_limit is one on free-flow edges. Subtracting its
+            # fixed baseline preserves congestion information while preventing
+            # thousands of static ones from amplifying coherent Adam updates.
+            offset = torch.zeros(edge_count * 4 + context_dim)
+            offset[1:edge_count * 4:4] = 1.
+            self.register_buffer('input_offset', offset)
+        layers = []
+        for input_dim in (edge_count * 4 + context_dim, 256):
+            layers.append(torch.nn.Linear(input_dim, 256))
+            if normalize_hidden:
+                # Wide, almost constant free-flow inputs can move all hidden
+                # preactivations far into Tanh saturation after an Adam step.
+                layers.append(torch.nn.LayerNorm(256))
+            layers.append(torch.nn.Tanh())
+        layers.append(torch.nn.Linear(256, 1))
+        self.network = torch.nn.Sequential(*layers)
         for layer in self.network:
             if isinstance(layer, torch.nn.Linear):
                 torch.nn.init.orthogonal_(layer.weight, gain=math.sqrt(2.))
@@ -435,6 +512,8 @@ class GlobalTrafficCritic(torch.nn.Module):
         torch.nn.init.orthogonal_(self.network[-1].weight, gain=1.)
 
     def forward(self, obs):
+        if hasattr(self, 'input_offset'):
+            obs = obs - self.input_offset
         return self.network(obs)
 
 
@@ -526,14 +605,21 @@ def global_critic_update(*, global_critic, global_optimizer=None, windows, grad_
 
 
 def policy_gradient_step(*, compute_logits, actor_parameters, actor_optimizer, rows, advantages,
-                         entropy_coef=0.002, grad_clip=10.0, include_individual_timeout=True):
+                         entropy_coef=0.002, grad_clip=10.0, include_individual_timeout=True,
+                         normalize_global_advantages=False, minibatch_size=None):
     """Actor-only update with externally supplied per-row advantages.
 
-    Scale shared advantages without centering, then add each decision vehicle's
-    own timeout return before clipping. Timeout costs never affect shared scaling.
+    The explicit pure-global mode centers/scales meaningful choices before
+    optimization. Legacy timeout shaping keeps its own scaling contract.
+    Chunked backward passes accumulate one sample-weighted full-batch update.
     """
     if not rows:
         return dict(actor_loss=0., actor_gradient_norm=0., advantage_std=0.)
+    if normalize_global_advantages and include_individual_timeout:
+        raise ValueError('global advantage normalization cannot include individual timeout penalties')
+    if minibatch_size is not None and (isinstance(minibatch_size, bool)
+            or not isinstance(minibatch_size, (int, np.integer)) or minibatch_size < 1):
+        raise ValueError('actor minibatch_size must be a positive integer')
     actor_parameters = list(actor_parameters)
     device = actor_parameters[0].device
     if isinstance(advantages, torch.Tensor):
@@ -543,21 +629,53 @@ def policy_gradient_step(*, compute_logits, actor_parameters, actor_optimizer, r
         advantage = torch.as_tensor(np.asarray([float(a) for a in advantages], dtype=np.float32), device=device)
     if advantage.shape != (len(rows),) or not bool(torch.isfinite(advantage).all()):
         raise ValueError('advantages must be finite with one value per row')
+    # Forced moves provide critic data but have no policy choice. Including them
+    # dilutes decision gradients; a zero-gradient Adam step can still move its
+    # parameters through momentum retained from the previous episode.
+    choices = [index for index, row in enumerate(rows)
+               if 'mask' not in row or np.count_nonzero(row['mask']) > 1]
+    if not choices:
+        actor_optimizer.zero_grad(set_to_none=True)
+        return dict(actor_loss=0., actor_gradient_norm=0., advantage_std=0.)
+    if len(choices) != len(rows):
+        rows = [rows[index] for index in choices]
+        advantage = advantage[choices]
     timeout_returns = (torch.tensor([row.get('timeout_return', 0.) for row in rows],
                                    dtype=advantage.dtype, device=device)
                        if include_individual_timeout else torch.zeros_like(advantage))
-    advantage = individual_actor_advantage(advantage, timeout_returns)
-    actions = torch.tensor([r['action'] for r in rows], device=device)
-    distribution = Categorical(logits=compute_logits(rows))
-    actor_loss = -(distribution.log_prob(actions) * advantage + entropy_coef * distribution.entropy()).mean()
+    raw_mean, raw_std = float(advantage.mean()), float(advantage.std(unbiased=False))
+    if normalize_global_advantages:
+        if advantage.numel() > 1:
+            advantage = (advantage - advantage.mean()) / advantage.std(unbiased=False).clamp_min(1e-6)
+        else:
+            # A singleton cannot estimate a batch baseline. Retain its critic
+            # signal, scaling magnitude without the legacy saturation clip.
+            advantage = advantage / advantage.abs().clamp_min(1.)
+    else:
+        advantage = individual_actor_advantage(advantage, timeout_returns)
+    if entropy_coef == 0. and not bool(advantage.any()):
+        actor_optimizer.zero_grad(set_to_none=True)
+        return dict(actor_loss=0., actor_gradient_norm=0., advantage_std=0.)
     actor_optimizer.zero_grad(set_to_none=True)
-    actor_loss.backward()
+    count = len(rows)
+    chunk_size = count if minibatch_size is None else int(minibatch_size)
+    actor_loss = 0.
+    for start in range(0, count, chunk_size):
+        batch = rows[start:start + chunk_size]
+        actions = torch.tensor([row['action'] for row in batch], device=device)
+        distribution = Categorical(logits=compute_logits(batch))
+        loss = -(distribution.log_prob(actions) * advantage[start:start + len(batch)]
+                 + entropy_coef * distribution.entropy()).sum() / count
+        loss.backward()
+        actor_loss += float(loss.detach())
     actor_gradient = torch.nn.utils.clip_grad_norm_(actor_parameters, grad_clip)
     if not torch.isfinite(actor_gradient):
         raise RuntimeError('non-finite actor gradient')
     actor_optimizer.step()
-    return dict(actor_loss=float(actor_loss.detach()), actor_gradient_norm=float(actor_gradient),
-                advantage_std=float(advantage.std(unbiased=False)))
+    return dict(actor_loss=actor_loss, actor_gradient_norm=float(actor_gradient),
+                advantage_std=float(advantage.std(unbiased=False)),
+                raw_global_advantage_mean=raw_mean, raw_global_advantage_std=raw_std,
+                actor_decision_count=count)
 
 
 def save_checkpoint(path, *, method_name, episode, best, method_state, args, prepared, config):

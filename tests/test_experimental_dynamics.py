@@ -392,3 +392,24 @@ def test_prior_detachment_flag_requires_explicit_boolean(case, invalid):
     with pytest.raises(ValueError, match='detach_prior_increment must be a boolean'):
         independent_transition_fm_loss(model.dynamics, z_inputs=inputs, z_targets=targets,
             action=action, action_events=events, detach_prior_increment=invalid)
+
+
+@pytest.mark.parametrize('variant', ['regression', 'graph_regression', 'gaussian'])
+def test_point_predictors_adapt_new_condition_only_mainline_without_flow_head_conflict(variant):
+    model = UrbanDreamerWorldModel(adjacency=torch.eye(3), static_features=torch.ones(3, 5),
+        low_frequency_rank=2, prior_filter='soft', prior_filter_strength=.1,
+        prior_action_conditioned=False, prior_usage='condition_only').eval()
+    apply_variant(model, variant)
+    dynamics = model.dynamics
+    assert dynamics.prior_usage == 'source_reference'
+    assert not hasattr(dynamics.backbone, 'condition_residual')
+    assert not any('condition_rms_' in key for key in dynamics.state_dict())
+    assert variant_metadata(model)['condition_adapter'] == 'non_fm_regressor_without_flow_condition_residual'
+    z = torch.randn(1, 3, 64)
+    action = torch.zeros(1, 3)
+    output = model.transition(z, action)
+    assert output.shape == z.shape and torch.isfinite(output).all()
+    output.square().mean().backward()
+    assert dynamics.flow_head.weight.grad is not None
+    samples, _, variance = model.latent_disagreement(z, action, n_samples=2)
+    assert samples.shape == (2, 1, 3, 64) and torch.isfinite(variance).all()

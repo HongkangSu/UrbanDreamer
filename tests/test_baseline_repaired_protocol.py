@@ -27,16 +27,12 @@ def test_reward_defaults_and_explicit_legacy_mode(monkeypatch, tmp_path, tool, m
     if method:
         argv += ['--method', method]
     if legacy:
-        argv += ['--no-global-reward-only']
+        argv += ['--no-global-reward-only', '--reward-objective', 'legacy_exposure']
     monkeypatch.setattr(tool, 'load_config', lambda path: object())
-    if legacy and method in launcher.EXTRA_METHODS:
-        with pytest.raises(SystemExit):
-            tool.main(argv)
-        assert not seen
-        return
     with pytest.raises(CapturedArgs):
         tool.main(argv)
     assert seen[0].global_reward_only is not legacy
+    assert seen[0].reward_objective == ('legacy_exposure' if legacy else 'observed_mean')
 
 
 def test_launcher_defaults_align_all_methods_and_legacy_is_explicit(monkeypatch, tmp_path):
@@ -46,7 +42,7 @@ def test_launcher_defaults_align_all_methods_and_legacy_is_explicit(monkeypatch,
         methods = list(launcher.METHODS) + ([] if legacy else list(launcher.EXTRA_METHODS))
         argv = ['launch', '--output-root', str(tmp_path / 'run'), '--methods', *methods]
         if legacy:
-            argv += ['--no-global-reward-only']
+            argv += ['--no-global-reward-only', '--reward-objective', 'legacy_exposure']
         launcher.main(argv)
         args = seen[-1]
         assert args.global_reward_only is not legacy
@@ -54,8 +50,19 @@ def test_launcher_defaults_align_all_methods_and_legacy_is_explicit(monkeypatch,
         flag = '--no-global-reward-only' if legacy else '--global-reward-only'
         assert all(flag in run['command'] for run in runs)
     args.methods = list(launcher.EXTRA_METHODS)
-    with pytest.raises(ValueError, match='pure global'):
-        launcher.build_runs(tmp_path / 'run', tmp_path / 'source', args, 'invalid')
+    runs = launcher.build_runs(tmp_path / 'run', tmp_path / 'source', args, 'explicit_legacy')
+    assert all(run['command'][run['command'].index('--reward-objective') + 1] ==
+               'legacy_exposure' for run in runs)
+
+
+@pytest.mark.parametrize('tool,method', [(ac, None), (baseline, 'dreamer'), (baseline, 'ippo')])
+def test_observed_mean_rejects_implicit_timeout_shaping(tool, method, tmp_path):
+    argv = ['--output-dir', str(tmp_path / 'run'), '--no-global-reward-only']
+    if method:
+        argv.extend(['--method', method])
+    with pytest.raises(SystemExit) as error:
+        tool.main(argv)
+    assert error.value.code == 2
 
 
 def test_learning_options_reach_cli_without_changing_sampling_defaults(monkeypatch, tmp_path):

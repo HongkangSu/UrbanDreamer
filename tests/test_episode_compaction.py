@@ -102,3 +102,57 @@ def test_intervening_source_write_is_preserved(tmp_path, monkeypatch):
     with np.load(path, allow_pickle=False) as data:
         assert data["new"].tolist() == [123]
     assert not list(tmp_path.glob("*.tmp"))
+
+
+@pytest.mark.parametrize('configured', [True, False])
+def test_watch_handles_offloaded_symlinks_without_repacking_remote(tmp_path, monkeypatch, configured):
+    output = tmp_path/'random'
+    local = output/'episodes/train'
+    local.mkdir(parents=True)
+    storage = tmp_path/'storage'
+    storage.mkdir()
+    remote = storage/'episode_000001.npz'
+    fixture_archive(remote)
+    compactor.repack_npz(remote, committed_episode=1)
+    original = remote.read_bytes()
+    link = local/remote.name
+    link.symlink_to(remote)
+    (output/'progress.json').write_text('{"last_episode":1}')
+    state = tmp_path/'process.json'
+    state.write_text('{"status":"completed"}')
+    manifest = {'runs': [{'id':'random','method':'random','output_dir':str(output),'state':str(state)}]}
+    if configured:
+        manifest['archive_storage_root'] = str(storage)
+    (tmp_path/'manifest.json').write_text(json.dumps(manifest))
+    monkeypatch.setattr(compactor, 'repack_npz', lambda *a, **k:
+                        pytest.fail('offloaded archive must not be repacked'))
+    compactor.watch(tmp_path, workers=1, interval=.01)
+    result = json.loads((tmp_path/'compaction_status.json').read_text())
+    assert bool(result['errors']) is not configured
+    assert remote.read_bytes() == original and link.is_symlink()
+
+
+def test_watch_accepts_offload_completed_after_pending_scan(tmp_path, monkeypatch):
+    output = tmp_path/'random'
+    local = output/'episodes/train'
+    local.mkdir(parents=True)
+    source = local/'episode_000001.npz'
+    fixture_archive(source)
+    compactor.repack_npz(source, committed_episode=1)
+    storage = tmp_path/'storage'
+    storage.mkdir()
+    target = storage/source.name
+    target.write_bytes(source.read_bytes())
+    (output/'progress.json').write_text('{"last_episode":1}')
+    state = tmp_path/'process.json'
+    state.write_text('{"status":"completed"}')
+    (tmp_path/'manifest.json').write_text(json.dumps(dict(archive_storage_root=str(storage), runs=[
+        dict(id='random', method='random', output_dir=str(output), state=str(state))])))
+    def concurrent_offload(path, **kwargs):
+        path.unlink()
+        path.symlink_to(target)
+        raise ValueError('expected a regular episode_N.npz archive')
+    monkeypatch.setattr(compactor, 'repack_npz', concurrent_offload)
+    compactor.watch(tmp_path, workers=1, interval=.01)
+    result = json.loads((tmp_path/'compaction_status.json').read_text())
+    assert result['counts']['already_offloaded'] == 1 and not result['errors']

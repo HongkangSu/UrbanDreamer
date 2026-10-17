@@ -149,6 +149,7 @@ def run_arm(args,plan):
     prior_filter_strength=getattr(config.method, 'prior_filter_strength', 10.0),
     prior_action_conditioned=getattr(config.method, 'prior_action_conditioned', True),
     prior_filter_input=getattr(config.method, 'prior_filter_input', False),
+    prior_usage=getattr(config.method, 'prior_usage', 'source_reference'),
                        prior_noise_scale=sigma,event_protocol=True).to(device)
     # The fixed spectral coordinates are shared, never a learned dynamics warm start.
     dynamics.graph_prior.basis.copy_(world['dynamics.graph_prior.basis'].to(device))

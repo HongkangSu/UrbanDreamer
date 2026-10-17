@@ -10,6 +10,8 @@ so an edge crossed inside a single step — or never observed at all — is simp
 followed from the existing route instead of invalidating the episode.
 With ``forbid_revisit=True``, full routes and policy candidates exclude every
 previously entered external edge; route indices also audit unobserved crossings.
+``current_to_dest`` instead selects complete routes at 30-second boundaries.
+Observed forks along those routes retain the same world-model turn conditions.
 """
 from __future__ import annotations
 
@@ -43,7 +45,7 @@ _EDGE_STATE_VARS = _edge_state_vars()
 
 
 class SumoEventSession:
-    """Fixed-step TraCI control where only multi-candidate edge entries decide."""
+    """Fixed-step SUMO control with fork or periodic complete-route decisions."""
 
     def __init__(self, config: Any, prepared_inputs: Any, topology: Any, episode_index: int = 0,
                  *, step_seconds: float = 1.0, backend: str | None = None, forbid_revisit: bool = False):
@@ -52,7 +54,14 @@ class SumoEventSession:
         self.traffic_model = self.physics["traffic_model"]
         self._model_args = sumo_model_args(config.simulation)
         self.forbid_revisit = bool(forbid_revisit)
-        self.network, self.candidates = topology.network, NextHopCandidates(
+        self.routing_mode = getattr(config.simulation, "routing_mode", "next_hop")
+        if self.routing_mode not in ("next_hop", "current_to_dest"):
+            raise EnvironmentContractError(f"unknown routing mode {self.routing_mode!r}")
+        candidate_type = NextHopCandidates
+        if self.routing_mode == "current_to_dest":
+            from .route_candidates import RouteCandidates
+            candidate_type = RouteCandidates
+        self.network, self.candidates = topology.network, candidate_type(
             topology.network, forbid_revisit=self.forbid_revisit, traffic_model=self.traffic_model)
         self._commanded_routes: dict[str, tuple[int, ...]] = {}
         self._route_cursors: dict[str, int] = {}
@@ -135,6 +144,11 @@ class SumoEventSession:
         return self.candidates.candidates(edge, destination)
 
     def _needs_decision(self, edge: int, destination: int, visited_edges=()) -> bool:
+        if getattr(self, "routing_mode", "next_hop") == "current_to_dest":
+            return False
+        return self._needs_turn(edge, destination, visited_edges)
+
+    def _needs_turn(self, edge: int, destination: int, visited_edges=()) -> bool:
         return edge != destination and len(self._legal_candidates(edge, destination, visited_edges)) > 1
 
     def reset(self) -> dict[str, Any]:
@@ -201,6 +215,8 @@ class SumoEventSession:
                     self._vehicles[demand.vehicle_id]["visited_edges"] = ()
                     self._commanded_routes[demand.vehicle_id] = tuple(route)
                     self._route_cursors[demand.vehicle_id] = -1
+                if self.routing_mode == "current_to_dest":
+                    self._vehicles[demand.vehicle_id].update(committed_route=tuple(route), pending_turn=False)
             for edge in str(self.config.simulation.incident_edge).split(","):
                 if not edge.strip():
                     continue
@@ -280,8 +296,12 @@ class SumoEventSession:
                 raise EnvironmentContractError("decision uses stale edge or time")
             if decision.next_edge not in self._legal_candidates(decision.current_edge, vehicle["destination_edge"], vehicle.get("visited_edges", ())):
                 raise EnvironmentContractError(f"illegal next edge {decision.next_edge} from {decision.current_edge}")
-            route = self.candidates.full_route(decision.current_edge, decision.next_edge, vehicle["destination_edge"],
-                                               visited_edges=vehicle.get("visited_edges", ()))
+            if getattr(self, "routing_mode", "next_hop") == "current_to_dest":
+                route = self.candidates.decision_route(decision, vehicle["destination_edge"],
+                    visited_edges=vehicle.get("visited_edges", ()))
+            else:
+                route = self.candidates.full_route(decision.current_edge, decision.next_edge, vehicle["destination_edge"],
+                                                   visited_edges=vehicle.get("visited_edges", ()))
             try:
                 self._connection.vehicle.setRoute(decision.vehicle_id, [self.network.edge_ids[edge] for edge in route])
             except Exception as exc:
@@ -290,6 +310,13 @@ class SumoEventSession:
             if hasattr(self, "_actual_routes"):
                 actual_route_ids = tuple(self._connection.vehicle.getRoute(decision.vehicle_id))
                 self._actual_routes[decision.vehicle_id] = actual_route_ids
+            if getattr(self, "routing_mode", "next_hop") == "current_to_dest":
+                if actual_route_ids is None:
+                    actual_route_ids = tuple(self._connection.vehicle.getRoute(decision.vehicle_id))
+                actual_index = int(self._connection.vehicle.getRouteIndex(decision.vehicle_id))
+                actual_route = tuple(self.network.edge_to_index[edge] for edge in actual_route_ids)
+                if not 0 <= actual_index < len(actual_route) or actual_route[actual_index:] != tuple(route):
+                    raise EnvironmentContractError(f"vehicle {decision.vehicle_id} did not accept its selected route")
             if getattr(self, "forbid_revisit", False):
                 # SUMO may retain the already traversed route prefix after
                 # setRoute. Cache its actual index rather than assuming zero.
@@ -303,6 +330,10 @@ class SumoEventSession:
                 self._commanded_routes[decision.vehicle_id] = actual_route
                 self._route_cursors[decision.vehicle_id] = actual_index
             vehicle["committed_next_edge"] = decision.next_edge
+            if getattr(self, "routing_mode", "next_hop") == "current_to_dest":
+                vehicle["committed_route"] = tuple(route)
+                vehicle["pending_turn"] = self._needs_turn(decision.current_edge, vehicle["destination_edge"],
+                                                          vehicle.get("visited_edges", ()))
             vehicle["pending_decision"] = False
             self._pending.discard(decision.vehicle_id)
             successful.append(decision)
@@ -336,6 +367,8 @@ class SumoEventSession:
             row["departure_time"] = row["actual_departure_time"]
             row["observed_departure_time"] = now
             row["pending_decision"] = self._needs_decision(row["current_edge"], row["destination_edge"], row.get("visited_edges", ()))
+            if getattr(self, "routing_mode", "next_hop") == "current_to_dest":
+                row["pending_turn"] = self._needs_turn(row["current_edge"], row["destination_edge"], row.get("visited_edges", ()))
             if row["pending_decision"]:
                 self._pending.add(vehicle_id)
             departure_counts[row["current_edge"]] += 1
@@ -362,6 +395,8 @@ class SumoEventSession:
                     row["current_edge"] = row["destination_edge"]
                 row["arrived"], row["pending_decision"], row["remaining_distance"] = True, False, 0.
                 row["committed_next_edge"] = None
+                if getattr(self, "routing_mode", "next_hop") == "current_to_dest":
+                    row["committed_route"], row["pending_turn"] = (row["destination_edge"],), False
                 row["in_junction"] = False
                 row["junction_remaining_distance"] = 0.
                 row["junction_connection"] = None
@@ -396,6 +431,8 @@ class SumoEventSession:
                     raise EnvironmentContractError(f"vehicle {vehicle_id} entered a junction without a route successor")
                 row["current_edge"], row["committed_next_edge"] = source, successor
                 row["pending_decision"] = False
+                if getattr(self, "routing_mode", "next_hop") == "current_to_dest":
+                    row["pending_turn"] = False
                 self._pending.discard(vehicle_id)
                 lane = state[tc.VAR_LANE_ID]
                 row["in_junction"] = True
@@ -412,7 +449,7 @@ class SumoEventSession:
                 raise EnvironmentContractError(f"unknown physical road {edge_id!r} for {vehicle_id}")
             edge = edge_indices[edge_id]
             commitment = None
-            if forbid_revisit or meso:
+            if forbid_revisit or meso or getattr(self, "routing_mode", "next_hop") == "current_to_dest":
                 commitment = self._route_commitment(vehicle_id, route_index=route_index)
                 source, _ = commitment
                 if source != edge:
@@ -422,6 +459,8 @@ class SumoEventSession:
                 # edges skipped inside one step stay route-followed.
                 row["current_edge"], row["committed_next_edge"] = edge, None
                 row["pending_decision"] = self._needs_decision(edge, row["destination_edge"], row.get("visited_edges", ()))
+                if getattr(self, "routing_mode", "next_hop") == "current_to_dest":
+                    row["pending_turn"] = self._needs_turn(edge, row["destination_edge"], row.get("visited_edges", ()))
                 if row["pending_decision"]:
                     self._pending.add(vehicle_id)
                 else:
@@ -495,7 +534,25 @@ class SumoEventSession:
             raise EnvironmentContractError(f"vehicle {vehicle_id} route ends before its destination")
         if successor is not None and successor not in self.network.adjacency_list[source]:
             raise EnvironmentContractError(f"vehicle {vehicle_id} route has an illegal successor")
+        if getattr(self, "routing_mode", "next_hop") == "current_to_dest":
+            self._vehicles[vehicle_id]["committed_route"] = tuple(self.network.edge_to_index[edge] for edge in route[index:])
         return source, successor
+
+    def _conditioning_turns(self) -> list[NextHopDecision]:
+        """Expose only observed forks, using the route accepted before this step."""
+        turns = []
+        for vehicle_id in sorted(self._active):
+            row = self._vehicles[vehicle_id]
+            if not row.get("pending_turn", False):
+                continue
+            row["pending_turn"] = False
+            if row["in_junction"] or row["current_edge"] == row["destination_edge"]:
+                continue
+            successor = row["committed_next_edge"]
+            if successor is None:
+                raise EnvironmentContractError(f"observed fork {vehicle_id} lacks an accepted route successor")
+            turns.append(NextHopDecision(vehicle_id, row["current_edge"], successor, self._time_ms / 1000.))
+        return turns
 
     def _apply_incident(self) -> None:
         config = self.config.simulation
@@ -516,15 +573,25 @@ class SumoEventSession:
         end = min(start + 30000, round(getattr(self, 'reward_horizon_seconds', (start + 30000) / 1000.) * 1000))
         frozen_flow = self._flow()
         decisions, departures = [], np.zeros(self.network.edge_count, dtype=np.float32)
+        route_mode = getattr(self, "routing_mode", "next_hop") == "current_to_dest"
+        conditioning = [] if route_mode else None
         active_seconds = 0.
         try:
+            if route_mode:
+                self._pending = {key for key in self._active if not self._vehicles[key]["in_junction"]
+                                 and self._vehicles[key]["current_edge"] != self._vehicles[key]["destination_edge"]}
+                for key in self._pending:
+                    self._vehicles[key]["pending_decision"] = True
             while self._time_ms < end:
                 if time.monotonic() - self._started_at > self.config.simulation.episode_wall_timeout_seconds:
                     raise EnvironmentContractError("episode exceeded wall timeout")
                 if self.done:
                     self._time_ms = end
                     break
-                decisions.extend(self._apply_decisions(callback, frozen_flow))
+                if not route_mode or self._time_ms == start:
+                    decisions.extend(self._apply_decisions(callback, frozen_flow))
+                if route_mode:
+                    conditioning.extend(self._conditioning_turns())
                 self._apply_incident()
                 previous_time = self._time_ms / 1000.
                 active_before = len(self._active)
@@ -541,11 +608,13 @@ class SumoEventSession:
                 if accounting is not None:
                     accounting.update(step_seconds, accounting.started_count)
             counts = np.zeros(self.network.edge_count, dtype=np.float32)
-            for decision in decisions:
+            for decision in conditioning if route_mode else decisions:
                 counts[decision.next_edge] += 1
             self.metrics["active_vehicle_seconds"] += active_seconds
             self.metrics["wall_seconds"] = time.monotonic() - self._started_at
-            return WindowResult(tuple(decisions), counts, departures, active_seconds, self._state(), start / 1000., end / 1000.)
+            return WindowResult(tuple(decisions), counts, departures, active_seconds, self._state(),
+                                start / 1000., end / 1000.,
+                                conditioning_decisions=tuple(conditioning) if route_mode else None)
         except BaseException:
             self._invalid = True
             raise

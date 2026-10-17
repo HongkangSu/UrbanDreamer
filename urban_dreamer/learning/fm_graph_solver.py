@@ -6,13 +6,16 @@ or optimizers. Conditions and prior noise are prepared by Dynamics before solve.
 from __future__ import annotations
 
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 import copy
 import time
 
 import torch
 
 from ..models.world_model import ConditionEncoding
+
+
+_CONDITION_FIELDS = tuple(field.name for field in fields(ConditionEncoding))
 
 
 @dataclass
@@ -87,9 +90,11 @@ class EulerGraphSolver:
                 and start.ndim == 4 and start.shape[0] in self.allowed_batches and start.shape[1] == 1
                 and action.device == start.device and action.dtype == torch.float32
                 and tuple(action.shape) == tuple(start.shape[:-1])
-                and condition.edge_tokens.device == start.device and condition.edge_tokens.dtype == torch.float32
-                and (condition.reference_tokens is None or
-                     (condition.reference_tokens.device == start.device and condition.reference_tokens.dtype == torch.float32)))
+                and condition.edge_tokens is not None
+                and all(value is None or (value.device == start.device and value.dtype == torch.float32)
+                        for value in (getattr(condition, name) for name in _CONDITION_FIELDS))
+                and all(value is None or value.shape == start.shape
+                        for value in (condition.current_state, condition.background)))
 
     def _capture(self, start, action, condition, steps):
         free, _ = torch.cuda.mem_get_info(start.device)
@@ -97,8 +102,9 @@ class EulerGraphSolver:
             raise RuntimeError('insufficient GPU headroom for Euler graph capture')
         static_start = start.clone()
         static_action = action.clone()
-        static_condition = ConditionEncoding(condition.edge_tokens.clone(),
-            None if condition.reference_tokens is None else condition.reference_tokens.clone())
+        static_condition = ConditionEncoding(**{
+            name: None if (value := getattr(condition, name)) is None else value.clone()
+            for name in _CONDITION_FIELDS})
         # Bypass the compile dispatcher inside a manually captured CUDA graph.
         wrapper = getattr(self.dynamics, '_imagination_velocity_inference', None)
         forward = wrapper.eager if wrapper is not None else self.dynamics.forward
@@ -138,8 +144,9 @@ class EulerGraphSolver:
         if signature != self.signature:
             self.clear()
             self.signature = signature
-        key = (tuple(start.shape), start.dtype, start.device, tuple(condition.edge_tokens.shape),
-               None if condition.reference_tokens is None else tuple(condition.reference_tokens.shape), steps)
+        key = (tuple(start.shape), start.dtype, start.device,
+               tuple(None if (value := getattr(condition, name)) is None else tuple(value.shape)
+                     for name in _CONDITION_FIELDS), steps)
         if key in self.failed:
             self.stats['fallbacks'] += 1
             return self.eager(start, action, condition, **options)
@@ -160,9 +167,10 @@ class EulerGraphSolver:
         self.cache.move_to_end(key)
         cached.start.copy_(start)
         cached.action.copy_(action)
-        cached.condition.edge_tokens.copy_(condition.edge_tokens)
-        if condition.reference_tokens is not None:
-            cached.condition.reference_tokens.copy_(condition.reference_tokens)
+        for name in _CONDITION_FIELDS:
+            value = getattr(condition, name)
+            if value is not None:
+                getattr(cached.condition, name).copy_(value)
         cached.graph.replay()
         self.stats['replays'] += 1
         # Each caller owns its result: later replay may overwrite graph outputs.

@@ -26,7 +26,7 @@ class AnalyticDynamics:
         self.conditions.append(condition)
         return condition
 
-    def prior_start(self, z, condition, noise=None):
+    def prior_start(self, z, condition, noise=None, *, detach_prior_increment=False):
         self.prior_calls += 1
         perturbation = torch.zeros_like(z) if noise is None else noise.expand_as(z)
         return z + perturbation, torch.zeros_like(z), condition

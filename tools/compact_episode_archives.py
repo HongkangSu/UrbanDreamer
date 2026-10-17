@@ -145,7 +145,7 @@ def watch(root: Path, *, workers: int, interval: float) -> None:
     root = root.resolve()
     manifest = json.loads((root / 'manifest.json').read_text())
     seen, failures = {}, {}
-    counts = {'compacted': 0, 'already_lzma': 0, 'not_smaller': 0, 'error': 0}
+    counts = {'compacted': 0, 'already_lzma': 0, 'already_offloaded': 0, 'not_smaller': 0, 'error': 0}
     saved = 0
     status_path = root / 'compaction_status.json'
 
@@ -155,11 +155,24 @@ def watch(root: Path, *, workers: int, interval: float) -> None:
             last_check_unix=time.time(), errors=failures), indent=2) + '\n')
         os.replace(temporary, status_path)
 
+    def offloaded(path):
+        storage = manifest.get('archive_storage_root')
+        if not storage or not path.is_symlink():
+            return False
+        target = Path(os.path.abspath(path.parent / os.readlink(path)))
+        return target.is_relative_to(Path(os.path.abspath(storage)))
+
     def compact(item):
         path, boundary = item
+        skipped = dict(path=str(path), episode=int(path.stem.removeprefix('episode_')),
+                       status='already_offloaded', before_bytes=0, after_bytes=0, seconds=0.)
         try:
+            if offloaded(path):
+                return skipped
             return repack_npz(path, committed_episode=boundary)
         except Exception as error:
+            if offloaded(path):
+                return skipped  # The uploader may finish after the initial scan.
             return {'path': str(path), 'status': 'error', 'error': repr(error)}
 
     while True:
@@ -176,6 +189,12 @@ def watch(root: Path, *, workers: int, interval: float) -> None:
                 continue
             for path in sorted((Path(run['output_dir']) / 'episodes' / 'train').glob('episode_*.npz')):
                 if int(path.stem.removeprefix('episode_')) > boundary:
+                    continue
+                if path.is_symlink():
+                    if offloaded(path):
+                        failures.pop(str(path), None)
+                        continue  # Immutable verified LZMA files already offloaded.
+                    failures[str(path)] = 'archive symlink outside configured storage'
                     continue
                 identity = _identity(path.stat())
                 if seen.get(str(path)) != identity:

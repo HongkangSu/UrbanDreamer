@@ -127,6 +127,16 @@ class ExperimentalDynamics(Dynamics):
         self.backbone = backbone
         self.variant = variant
         self.seed = int(seed)
+        self.removed_fm_condition_head = (
+            not variant.endswith('fm') and backbone.prior_usage == 'condition_only')
+        if self.removed_fm_condition_head:
+            # Point/distribution regressors retain their original prediction
+            # definition; the 64-D flow correction is not a Gaussian scale head.
+            # apply_variant is required to run before optimizer construction.
+            backbone.prior_usage = 'source_reference'
+            for name in ('condition_residual', 'condition_rms_z',
+                         'condition_rms_background', 'condition_rms_relative'):
+                delattr(backbone, name)
         if variant in {"no_prior_fm", "regression", "gaussian", "random_prior_fm"}:
             backbone.graph_prior = ExperimentalPrior(
                 backbone.graph_prior, random_projection=variant == "random_prior_fm", seed=seed)
@@ -266,6 +276,8 @@ def variant_metadata(model):
             "expected_energy_unit": "sum of squared source perturbations over roads and all latent channels per state",
             "gaussian_noise_space": "full_latent" if getattr(dynamics, "variant", None) == "gaussian" else None}
     prediction = getattr(prior, 'prediction', prior)
+    if getattr(dynamics, 'removed_fm_condition_head', False):
+        metadata['condition_adapter'] = 'non_fm_regressor_without_flow_condition_residual'
     if prediction is not None and (getattr(prediction, 'prior_filter', 'hard') != 'hard'
             or not getattr(prediction, 'prior_action_conditioned', True)
             or getattr(prediction, 'filter_input', False)):

@@ -169,3 +169,47 @@ class AuthorGeneticRouter(RealTimeShortestRouter):
             self.stats['fallback_events'] += 1
         self.env.agents.clear()
         return legal[action]
+
+    def complete_route(self, current, destination, candidates):
+        """Return the GA's full path for installation until the next decision.
+
+        The author's [origin] failure keeps its first-legal-action fallback;
+        only that fallback uses the candidates' free-flow completion suffix.
+        Submission removes closed loops so SUMO cannot select a later occurrence
+        of the current edge. The original GA route and its cache stay untouched.
+        """
+        for name in ('full_route_fallbacks', 'loop_erased_routes', 'loop_edges_removed',
+                     'fallback_loop_erased_routes'):
+            self.stats.setdefault(name, 0)
+        selected = self.next_edge(current, destination, candidates.candidates(current, destination))
+        key = (self.network.edge_ids[current], self.network.edge_ids[destination])
+        cached = self.author._route_cache.get(key, [])
+        fallback = list(cached) == [key[0]]
+        if fallback:
+            route = tuple(candidates.full_route(current, selected, destination))
+            self.stats['full_route_fallbacks'] += 1
+        else:
+            try:
+                route = tuple(self.network.edge_to_index[edge] for edge in cached)
+            except KeyError as exc:
+                raise ValueError('Author GA produced invalid route') from exc
+        if (len(route) < 2 or route[0] != current or route[-1] != destination
+                or route[1] != selected
+                or any(edge < 0 or edge >= len(self.successors) for edge in route)
+                or any(b not in self.successors[a] for a, b in zip(route, route[1:]))):
+            raise ValueError('Author GA produced invalid route')
+        simple = []
+        positions = {}
+        for edge in route:
+            if edge in positions:
+                while len(simple) > positions[edge] + 1:
+                    del positions[simple.pop()]
+            else:
+                positions[edge] = len(simple)
+                simple.append(edge)
+        removed = len(route) - len(simple)
+        if removed:
+            self.stats['loop_erased_routes'] += 1
+            self.stats['loop_edges_removed'] += removed
+            self.stats['fallback_loop_erased_routes'] += int(fallback)
+        return tuple(simple)
